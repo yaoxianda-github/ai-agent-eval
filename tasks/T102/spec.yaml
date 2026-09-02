@@ -1,0 +1,31 @@
+id: T102
+title: 销售数据汇总
+level: L2
+description: |
+  读取 input/sales.csv（列：date, category, amount），按 category 汇总销售额，
+  输出 output/summary.csv（列：category, total），按 total 降序排列，
+  并输出 output/top3.md 列出销售额前三的类别与金额。
+tags: [data, csv, summary]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/summary.csv
+      desc: 已生成汇总文件
+    - id: c2
+      type: file_exists
+      path: output/top3.md
+      desc: 已生成 top3 说明
+    - id: c3
+      type: cmd_exit_zero
+      cmd: "python @scripts/verify_t102.py ."
+      desc: 汇总结果与原始数据重算一致
+
+verifier: deterministic
+weight: 1.2
+cost_budget_usd: 0.1
+timeout_s: 300

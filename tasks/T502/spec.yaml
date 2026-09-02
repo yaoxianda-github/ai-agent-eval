@@ -1,0 +1,42 @@
+id: T502
+title: 一周工作周报总结
+level: L5
+description: |
+  基于 input/chat_logs.md 中的一周聊天记录，输出 output/weekly_report.md，
+  结构需包含四个章节：本周完成事项、进行中事项、风险与阻塞、下周计划。
+tags: [report, summarize]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/weekly_report.md
+      desc: 已生成周报
+    - id: c2
+      type: content_contains
+      path: output/weekly_report.md
+      pattern: "本周完成|完成事项"
+      desc: 包含"本周完成"章节
+    - id: c3
+      type: content_contains
+      path: output/weekly_report.md
+      pattern: "进行中|进行事项"
+      desc: 包含"进行中"章节
+    - id: c4
+      type: content_contains
+      path: output/weekly_report.md
+      pattern: "风险|阻塞|问题"
+      desc: 包含"风险/阻塞"章节
+    - id: c5
+      type: content_contains
+      path: output/weekly_report.md
+      pattern: "下周|计划"
+      desc: 包含"下周计划"章节
+
+verifier: llm_judge
+weight: 2.0
+cost_budget_usd: 0.3
+timeout_s: 600

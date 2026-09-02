@@ -1,0 +1,37 @@
+id: T001
+title: 批量日期格式规范化
+level: L1
+description: |
+  将工作目录 input/ 下所有 .md 文件中的日期格式从 "2026/9/2"（斜杠分隔）
+  统一转换为 "2026-09-02"（ISO 格式），并生成 output/report.md 记录变更明细。
+tags: [file, text, format]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/report.md
+      desc: 已生成变更报告
+    - id: c2
+      type: content_not_contains
+      path: input/*.md
+      pattern: "2026/\\d{1,2}/\\d{1,2}"
+      desc: 所有 md 文件不再残留斜杠日期
+    - id: c3
+      type: content_contains
+      path: input/*.md
+      pattern: "2026-\\d{2}-\\d{2}"
+      desc: 所有 md 文件已使用 ISO 日期
+    - id: c4
+      type: content_contains
+      path: output/report.md
+      pattern: "2026-"
+      desc: 报告中包含转换记录
+
+verifier: deterministic
+weight: 1.0
+cost_budget_usd: 0.1
+timeout_s: 300

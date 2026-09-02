@@ -1,0 +1,28 @@
+id: T205
+title: 图片按 EXIF 时间归档
+level: L3
+description: |
+  读取 input/ 下 20 张 JPG 图片的 EXIF 拍摄时间（DateTimeOriginal），
+  按 YYYY/MM 归档到 output/archive/YYYY/MM/ 目录，并生成 output/index.csv
+  （列：file, taken_at, dest_path）。
+  注意：input/ 的图片由 scripts/gen_fixtures.py 生成（需先运行该脚本）。
+tags: [media, exif, archive]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/index.csv
+      desc: 已生成索引表
+    - id: c2
+      type: cmd_exit_zero
+      cmd: "python @scripts/verify_t205.py ."
+      desc: 归档路径与 EXIF 时间一致
+
+verifier: deterministic
+weight: 1.5
+cost_budget_usd: 0.1
+timeout_s: 600

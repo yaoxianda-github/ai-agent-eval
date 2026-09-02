@@ -1,0 +1,31 @@
+id: T401
+title: 缺陷脚本修复与运行
+level: L4
+description: |
+  input/script.py 存在故意注入的缺陷（路径错误、取错列），无法直接运行。
+  请定位问题、修复脚本，并成功运行使其生成 output/result.txt，
+  内容为 input/data.csv 中金额最高的记录（一行：date,category,amount）。
+tags: [debug, python, fault]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/result.txt
+      desc: 已生成结果文件
+    - id: c2
+      type: cmd_exit_zero
+      cmd: "python input/script.py"
+      desc: 修复后的脚本可成功运行
+    - id: c3
+      type: cmd_exit_zero
+      cmd: "python @scripts/verify_t401.py ."
+      desc: 结果内容与原始数据一致
+
+verifier: deterministic
+weight: 1.5
+cost_budget_usd: 0.1
+timeout_s: 600
