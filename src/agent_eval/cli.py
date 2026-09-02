@@ -1,6 +1,6 @@
-"""agent-eval 命令行入口（MVP 占位实现）。
+"""agent-eval 命令行入口。
 
-当前只提供命令骨架：list-tasks / run。后续在 Day 1-2 计划中落地真实逻辑。
+命令：list-tasks（已实现）/ run（MVP 执行，判定 Day 3 接入）。
 """
 
 from __future__ import annotations
@@ -35,11 +35,40 @@ def list_tasks() -> None:
 @app.command("run")
 def run(
     task: str = typer.Option(..., "--task", help="任务 ID，如 T001"),
-    agent: str = typer.Option("minimal-agent", "--agent", help="后端 Agent 名称"),
+    agent: str = typer.Option("minimal-react", "--agent", help="后端 Agent 名称"),
+    model: str = typer.Option("deepseek-chat", "--model", help="LLM 模型名（minimal-react 用）"),
 ) -> None:
     """对单个任务执行一次评测（MVP）。"""
-    # TODO(Day 2-3): 加载任务 spec -> 干净工作目录 -> 调用后端 -> 判定 -> 评分 -> 落盘
-    typer.echo(f"TODO: 执行评测尚未实现（Day 2-3）— task={task}, agent={agent}")
+    from agent_eval.runner import run_one
+    from agent_eval.spec import find_tasks_dir, load_task_pack
+
+    tasks = {t.id: t for t in load_task_pack(find_tasks_dir())}
+    if task not in tasks:
+        typer.echo(f"错误：找不到任务 {task}，可用: {sorted(tasks)}")
+        raise typer.Exit(code=1)
+
+    config = {"agent": {"model": model}}
+    record = run_one(tasks[task], agent, config=config)
+
+    typer.echo(f"run_id: {record.run_id}")
+    typer.echo(f"task:   {record.task_id} ({record.task_level})")
+    typer.echo(f"agent:  {record.agent_id} @ {record.agent_ver}")
+    typer.echo(
+        f"status: {record.status}   duration: {record.duration_s}s   steps: {len(record.steps)}"
+    )
+    if record.error:
+        typer.echo(f"error:  {record.error}")
+    if record.verdicts:
+        passed = sum(1 for v in record.verdicts if v.get("passed"))
+        total = len(record.verdicts)
+        typer.echo(f"verdict: {passed}/{total} 通过")
+        for v in record.verdicts:
+            mark = "PASS" if v.get("passed") else "FAIL"
+            typer.echo(f"  [{mark}] {v.get('id')}  {v.get('detail')}")
+        score = record.metrics.get("score", 0)
+        weight = record.metrics.get("weight", 0)
+        typer.echo(f"score:  {score} / {weight}")
+    typer.echo(f"detail: {record.workspace}" if record.workspace else "detail: （工作目录已清理）")
 
 
 if __name__ == "__main__":

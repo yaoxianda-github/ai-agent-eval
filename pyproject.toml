@@ -7,12 +7,13 @@ name = "agent-eval"
 version = "0.1.0"
 description = "通用 AI Agent 评测框架：任务包 + 统一后端接口 + 确定性判定 + 可视化报告"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "yaoxianda" }]
 dependencies = [
     "typer>=0.12",
     "pyyaml>=6.0",
+    "openai>=1.0",
 ]
 
 [project.optional-dependencies]

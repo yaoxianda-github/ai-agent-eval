@@ -5,7 +5,7 @@ description: |
   读取 input/ 下 20 张 JPG 图片的 EXIF 拍摄时间（DateTimeOriginal），
   按 YYYY/MM 归档到 output/archive/YYYY/MM/ 目录，并生成 output/index.csv
   （列：file, taken_at, dest_path）。
-  注意：input/ 的图片由 scripts/gen_fixtures.py 生成（需先运行该脚本）。
+  注意：input/ 的 20 张图片已随仓库提交；如需重新生成，运行 python scripts/gen_fixtures.py。
 tags: [media, exif, archive]
 
 fixtures:
