@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from agent_eval.backends import get_backend
+from agent_eval.judge import judge_llm
 from agent_eval.scoring import score_task
 from agent_eval.spec import TaskSpec
 from agent_eval.verifiers import run_checkpoints
@@ -74,10 +75,13 @@ def run_one(
     duration = round(time.time() - start, 3)
 
     # Day 3：执行判定与评分（仅当后端未发生 error 时）
+    # V2.2：verifier=llm_judge 的任务在确定性校验点之外，追加一次 LLM 语义判分
     verdicts: list[dict] = []
     metrics: dict = {}
     if result.status != "error":
         verdicts = run_checkpoints(task, workspace)
+        if task.verifier == "llm_judge":
+            verdicts.append(judge_llm(task, workspace))
         metrics = score_task(task, verdicts)
 
     record = RunRecord(

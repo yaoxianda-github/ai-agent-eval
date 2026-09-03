@@ -18,6 +18,7 @@ import os
 import time
 
 from agent_eval.backends.base import Backend, BackendResult
+from agent_eval.observability import trace_llm_call
 from agent_eval.tools import run_tool
 
 SYSTEM_PROMPT = """你是一个在沙箱工作目录里执行任务的自主 Agent。
@@ -106,6 +107,14 @@ class MinimalReactBackend(Backend):
                     max_tokens=600,
                 )
                 raw = resp.choices[0].message.content or ""
+                trace_llm_call(
+                    "agent_step",
+                    model=self.model,
+                    messages=messages,
+                    response=raw,
+                    usage=getattr(resp, "usage", None),
+                    tags=["minimal-react"],
+                )
                 action = _extract_json(raw)
                 return action, raw
             except Exception as e:  # noqa: BLE001 - 需区分可恢复/不可恢复

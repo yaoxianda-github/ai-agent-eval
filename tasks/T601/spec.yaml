@@ -1,0 +1,31 @@
+id: T601
+title: 日志错误统计
+level: L2
+description: |
+  读取 input/app.log，统计其中 ERROR 级别的日志行数（行格式：YYYY-MM-DD HH:MM:SS 级别 消息），
+  输出 output/errors_report.md，内容第一行必须为 ERROR_COUNT=<数量>。
+tags: [data, logging]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/errors_report.md
+      desc: 已生成错误统计报告
+    - id: c2
+      type: content_contains
+      path: output/errors_report.md
+      pattern: "ERROR_COUNT=3"
+      desc: 报告标注的 ERROR 计数正确（fixtures 中 3 条）
+    - id: c3
+      type: cmd_exit_zero
+      cmd: "python @scripts/verify_t601.py ."
+      desc: 独立复核：报告计数与实际日志行数一致
+
+verifier: deterministic
+weight: 1.0
+cost_budget_usd: 0.1
+timeout_s: 120

@@ -4,4 +4,4 @@ schema: task-spec@v1
 defaults:
   timeout_s: 300
   cost_budget_usd: 0.5
-tasks: [T001, T102, T205, T401, T502]
+tasks: [T001, T102, T205, T401, T502, T601]

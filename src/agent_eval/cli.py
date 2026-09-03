@@ -105,5 +105,19 @@ def report(
     typer.echo(f"报告已生成: {path}")
 
 
+@app.command("workbench")
+def workbench(
+    host: str = typer.Option("127.0.0.1", "--host", help="监听地址"),
+    port: int = typer.Option(8000, "--port", help="监听端口"),
+) -> None:
+    """启动本地 Web 评测工作台（V2.1+），浏览器访问 http://<host>:<port>。"""
+    import uvicorn
+
+    from agent_eval.web.app import create_app
+
+    typer.echo(f"Web 评测工作台启动中: http://{host}:{port} （Ctrl+C 停止）")
+    uvicorn.run(create_app(), host=host, port=port, log_level="info")
+
+
 if __name__ == "__main__":
     app()

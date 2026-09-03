@@ -221,7 +221,7 @@ def render_html(summary: dict, generated_at: str) -> str:
   <div class="hero">
     <h1>AI Agent 评测报告</h1>
     <p>生成时间：{e(generated_at)} · 后端 {len(agents)} 个 · 任务 {len(tasks)} 个 · run {summary['total_runs']} 次</p>
-    <p>框架：ai-agent-eval · task-spec@v1 · 判定=确定性校验点，得分=权重×通过率</p>
+    <p>框架：ai-agent-eval · task-spec@v1 · 判定=确定性校验点 + LLM 语义判分（llm_judge）</p>
   </div>
 
   <div class="kpis">

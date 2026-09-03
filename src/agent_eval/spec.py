@@ -49,6 +49,7 @@ class TaskSpec:
     cost_budget_usd: float = 0.5
     timeout_s: int = 300
     tags: list[str] = field(default_factory=list)
+    rubric: str = ""  # V2.2：verifier=llm_judge 时的评分标准（任务作者自定义）
     spec_path: Optional[Path] = None
 
     @classmethod
@@ -77,6 +78,7 @@ class TaskSpec:
             cost_budget_usd=float(data.get("cost_budget_usd", 0.5)),
             timeout_s=int(data.get("timeout_s", 300)),
             tags=list(data.get("tags", [])),
+            rubric=str(data.get("rubric", "")),
             spec_path=path,
         )
         errors = spec.validate()

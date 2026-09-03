@@ -38,6 +38,7 @@ tasks: [T001, T102, T205, T401, T502]
 | `fixtures.source` | ✅ | str | 初始文件目录（相对 `tasks/<id>/`） |
 | `ground_truth.checkpoints` | ✅ | list | 校验点（见下） |
 | `verifier` | 否 | `deterministic` / `llm_judge` | 判定方式，默认 `deterministic` |
+| `rubric` | 否 | str | 仅 `verifier: llm_judge` 使用：评分标准（缺省用框架内置默认标准） |
 | `weight` | 否 | float | 任务权重，默认 1.0 |
 | `cost_budget_usd` | 否 | float | 预估成本上限 |
 | `timeout_s` | 否 | int | 超时秒数 |
@@ -59,3 +60,26 @@ tasks: [T001, T102, T205, T401, T502]
 
 - 任务通过 ⇔ 所有校验点通过（MVP 采用全过制，后续可加 `required`/`optional` 区分）；
 - 维度分 / 综合分由 scorer 基于任务 `weight` 聚合（MVP 先做"成功率 + 效率"两个维度）。
+
+## LLM-as-a-Judge（V2.2，`verifier: llm_judge`）
+
+开放任务（如 T502 周报总结）无法用纯确定性校验点衡量"质量好坏"。设置 `verifier: llm_judge` 后，
+框架在确定性校验点之外追加一次 LLM 语义判分：
+
+- 输入：任务 `description` + `rubric`（评分标准）+ Agent 产物（`output/` 目录全部文本文件）；
+- 输出：verdict `{id:"judge", type:"llm_judge", passed, score(0-1), detail, reasoning}`，与确定性校验点同构，
+  计入 pass_rate 与任务得分（权重 × 通过率）；
+- `rubric` 缺省使用内置默认标准（完整性 / 准确性 / 结构 / 语言）；
+- 无 API Key（`DEEPSEEK_API_KEY` / `LLM_API_KEY`）、判分调用失败、产物缺失 → 该 verdict 记为不通过，
+  **不中断评测**（诚实降级）。
+
+示例：
+
+```yaml
+verifier: llm_judge
+rubric: |
+  1. 内容完整性（30 分）：四章节齐全；
+  2. 信息准确性（25 分）：关键信息正确归类；
+  3. 组织清晰度（25 分）：无重复冗余；
+  4. 语言表达（20 分）：通顺专业。
+```
