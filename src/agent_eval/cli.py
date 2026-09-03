@@ -40,10 +40,12 @@ def run(
     agent: str = typer.Option("minimal-react", "--agent", help="后端 Agent 名称"),
     model: str = typer.Option("deepseek-chat", "--model", help="LLM 模型名"),
     timeout: Optional[int] = typer.Option(None, "--timeout", help="覆盖任务默认超时（秒）"),
+    runs: int = typer.Option(1, "--runs", min=1, max=20, help="运行次数（采样，对抗非确定性）"),
 ) -> None:
-    """对单个任务执行一次评测（MVP）。"""
+    """对单个任务执行评测；--runs N 时输出采样统计（best/mean/std/pass_rate）。"""
     from agent_eval.runner import run_one
     from agent_eval.spec import find_tasks_dir, load_task_pack
+    from agent_eval.stats import summarize_scores
 
     tasks = {t.id: t for t in load_task_pack(find_tasks_dir())}
     if task not in tasks:
@@ -53,8 +55,24 @@ def run(
     config: dict = {"agent": {"model": model}}
     if timeout is not None:
         config["agent"]["timeout_s"] = timeout
-    record = run_one(tasks[task], agent, config=config)
 
+    if runs <= 1:
+        _print_record(run_one(tasks[task], agent, config=config))
+        return
+
+    records = []
+    for i in range(1, runs + 1):
+        rec = run_one(tasks[task], agent, config=config)
+        records.append(rec)
+        score = rec.metrics.get("score", 0.0)
+        typer.echo(f"run {i}/{runs}: {rec.run_id}  {rec.status}  {rec.duration_s}s  score={score}")
+    stats = summarize_scores([r.metrics.get("score", 0.0) for r in records])
+    typer.echo(
+        f"统计 (N={stats['n']}): best={stats['best']} mean={stats['mean']} std={stats['std']} pass_rate={stats['pass_rate']}"
+    )
+
+
+def _print_record(record) -> None:
     typer.echo(f"run_id: {record.run_id}")
     typer.echo(f"task:   {record.task_id} ({record.task_level})")
     typer.echo(f"agent:  {record.agent_id} @ {record.agent_ver}")

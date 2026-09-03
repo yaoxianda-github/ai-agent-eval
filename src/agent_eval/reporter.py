@@ -18,6 +18,8 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
+from agent_eval.stats import summarize_scores
+
 RESULTS_DIR = Path("results") / "runs"
 
 
@@ -45,6 +47,8 @@ def summarize(runs: list[dict]) -> dict:
     )
     # task -> 通过率（取所有 run 平均）
     task_pass: dict[str, list[float]] = defaultdict(list)
+    # (agent, task) -> 该组合全部得分（用于多 run 采样统计）
+    sample_scores: dict[tuple[str, str], list[float]] = defaultdict(list)
 
     for r in runs:
         agent = r.get("agent_id", "?")
@@ -59,6 +63,7 @@ def summarize(runs: list[dict]) -> dict:
             best[key]["pass_rate"] = pr
             best[key]["status"] = r.get("status", "")
             best[key]["duration"] = dur
+        sample_scores[key].append(score)
 
         agg = agent_agg[agent]
         agg["runs"] += 1
@@ -95,6 +100,7 @@ def summarize(runs: list[dict]) -> dict:
         "agent_rows": agent_rows,
         "agent_agg": {a: dict(agent_agg[a]) for a in agents},
         "task_pass": {t: (sum(v) / len(v)) for t, v in task_pass.items()},
+        "sample_stats": {f"{a}|{t}": summarize_scores(s) for (a, t), s in sample_scores.items()},
         "total_runs": len(runs),
     }
 
@@ -162,6 +168,22 @@ def render_html(summary: dict, generated_at: str) -> str:
           <div class="bar-val">{round(rate*100,0):g}%</div>
         </div>"""
 
+    # 采样统计（多 run）
+    sample_rows = ""
+    for a in agents:
+        cells = ""
+        for t in tasks:
+            s = summary["sample_stats"].get(f"{a}|{t}")
+            if s:
+                cells += (
+                    f"<td><b>{s['n']}</b> runs"
+                    f"<br><span class='sub'>mean {s['mean']} · best {s['best']} · σ {s['std']}</span></td>"
+                )
+            else:
+                cells += "<td class='sub'>—</td>"
+        sample_rows += f"<tr><td class='ag'>{e(a)}</td>{cells}</tr>"
+    sample_header = "".join(f"<th>{e(t)}</th>" for t in tasks)
+
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -213,6 +235,12 @@ def render_html(summary: dict, generated_at: str) -> str:
   <table>
     <tr><th>后端</th>{header_cells}</tr>
     {table_rows}
+  </table>
+
+  <h2>采样统计（多 run · 对抗非确定性）</h2>
+  <table>
+    <tr><th>后端</th>{sample_header}</tr>
+    {sample_rows}
   </table>
 
   <h2>后端汇总</h2>
