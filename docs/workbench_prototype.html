@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ai-agent-eval · V2 Web 评测工作台 · 高保真原型</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --card:#ffffff; --line:#e5e7eb; --txt:#111827; --sub:#6b7280;
+    --acc:#2563eb; --acc2:#0ea5e9; --ok:#16a34a; --bad:#dc2626; --warn:#d97706; --side:#0f172a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:'Segoe UI','PingFang SC','Microsoft YaHei',Arial,sans-serif;line-height:1.55;font-size:13.5px}
+  .app{display:flex;min-height:100vh}
+
+  /* 侧边栏 */
+  .side{width:232px;background:var(--side);color:#cbd5e1;flex-shrink:0;display:flex;flex-direction:column;padding:18px 12px}
+  .side .logo{display:flex;align-items:center;gap:9px;padding:2px 8px 16px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:12px}
+  .side .logo .dot{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#2563eb,#0ea5e9);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px}
+  .side .logo b{font-size:14px;color:#fff}
+  .side .logo span{font-size:10.5px;color:#64748b;display:block}
+  .nav{display:flex;flex-direction:column;gap:2px}
+  .nav .item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px;color:#94a3b8;transition:.12s}
+  .nav .item:hover{background:rgba(255,255,255,.06);color:#e2e8f0}
+  .nav .item.on{background:rgba(37,99,235,.22);color:#fff;font-weight:600}
+  .nav .item .ic{width:16px;text-align:center;font-size:14px}
+  .side .foot{margin-top:auto;padding:12px 10px;border-top:1px solid rgba(255,255,255,.08);font-size:11.5px;color:#64748b}
+  .side .foot b{color:#94a3b8}
+
+  /* 主区 */
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .top{background:var(--card);border-bottom:1px solid var(--line);padding:12px 22px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .top h1{font-size:16px;margin:0}
+  .top .crumb{font-size:12px;color:var(--sub)}
+  .btn{background:var(--acc);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;cursor:pointer;font-weight:600}
+  .btn.ghost{background:#fff;color:var(--txt);border:1px solid var(--line)}
+  .btn.sm{padding:5px 10px;font-size:12px;font-weight:500}
+
+  .content{padding:20px 22px;max-width:1080px;width:100%}
+  .view{display:none}
+  .view.on{display:block}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:16px}
+  .card h3{font-size:14px;margin:0 0 12px;font-weight:600}
+  .grid{display:flex;gap:14px;flex-wrap:wrap}
+  .grid>div{flex:1 1 220px}
+  .lbl{font-size:12px;color:var(--sub);margin-bottom:5px}
+  .fld{display:flex;gap:12px;flex-wrap:wrap}
+  .fld .f{flex:1 1 190px}
+  select,input{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13px;color:var(--txt)}
+  .hint{font-size:11.5px;color:var(--sub);margin-top:5px}
+  .cprow{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center}
+
+  /* 徽标 */
+  .pill{display:inline-block;font-size:11px;padding:1px 9px;border-radius:20px;border:1px solid var(--line);color:var(--sub);background:#fff}
+  .pill.ok{color:var(--ok);border-color:rgba(22,163,74,.35);background:rgba(22,163,74,.07)}
+  .pill.bad{color:var(--bad);border-color:rgba(220,38,38,.35);background:rgba(220,38,38,.07)}
+  .pill.warn{color:var(--warn);border-color:rgba(217,119,6,.35);background:rgba(217,119,6,.07)}
+  .pill.blue{color:var(--acc);border-color:rgba(37,99,235,.35);background:rgba(37,99,235,.07)}
+  .kpi{display:flex;gap:12px;flex-wrap:wrap}
+  .kpi .k{flex:1 1 150px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .kpi .k b{display:block;font-size:22px}
+  .kpi .k span{font-size:12px;color:var(--sub)}
+
+  /* 表格 */
+  table{width:100%;border-collapse:collapse;background:var(--card);border-radius:10px;overflow:hidden;font-size:12.8px}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line)}
+  th{background:#f9fafb;color:var(--sub);font-weight:600;font-size:12px}
+  tr:last-child td{border-bottom:none}
+  .mcell{width:64px;height:54px;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;border:1px solid var(--line);font-weight:700}
+  .mcell b{font-size:16px}
+  .mcell span{font-size:10.5px;font-weight:400}
+  .mcell.g{background:rgba(22,163,74,.09);color:var(--ok);border-color:rgba(22,163,74,.3)}
+  .mcell.r{background:rgba(220,38,38,.09);color:var(--bad);border-color:rgba(220,38,38,.3)}
+  .mcell.n{background:#f9fafb;color:#9ca3af}
+
+  /* 轨迹时间线 */
+  .tl{position:relative;padding-left:20px}
+  .tl:before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:2px;background:var(--line)}
+  .tl .ev{position:relative;padding:6px 0 6px 8px}
+  .tl .ev:before{content:"";position:absolute;left:-20px;top:13px;width:8px;height:8px;border-radius:50%;background:var(--acc2);border:2px solid #fff}
+  .tl .ev.tool:before{background:var(--acc)}
+  .tl .ev.finish:before{background:var(--ok)}
+  .tl .ev .h{font-size:12.8px;font-weight:600}
+  .tl .ev .h code{background:#f3f4f6;border-radius:4px;padding:0 5px;font-size:11.5px;color:#374151}
+  .tl .ev .o{font-size:11.5px;color:var(--sub);margin-top:2px}
+
+  .proto{font-size:11px;color:#94a3b8;position:fixed;right:14px;bottom:12px;background:rgba(15,23,42,.85);color:#cbd5e1;padding:4px 10px;border-radius:16px}
+
+  @media (max-width:700px){
+    .app{flex-direction:column}
+    .side{width:100%;flex-direction:row;align-items:center;padding:10px;overflow-x:auto}
+    .side .logo{border:none;margin:0;padding:0 8px 0 0}
+    .nav{flex-direction:row;flex-wrap:nowrap}
+    .nav .item{white-space:nowrap}
+    .side .foot{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- 侧边栏 -->
+  <aside class="side">
+    <div class="logo"><div class="dot">E</div><div><b>agent-eval</b><span>评测工作台</span></div></div>
+    <nav class="nav" id="nav">
+      <div class="item on" data-v="dashboard"><span class="ic">▦</span>工作台</div>
+      <div class="item" data-v="tasks"><span class="ic">✚</span>任务管理</div>
+      <div class="item" data-v="detail"><span class="ic">◉</span>运行详情</div>
+      <div class="item" data-v="compare"><span class="ic">⧉</span>对比</div>
+      <div class="item" data-v="history"><span class="ic">≡</span>运行历史</div>
+      <div class="item" data-v="report"><span class="ic">▤</span>报告</div>
+      <div class="item" data-v="settings"><span class="ic">⚙</span>设置</div>
+    </nav>
+    <div class="foot"><b>本地优先</b><br>localhost · 单机运行</div>
+  </aside>
+
+  <!-- 主区 -->
+  <div class="main">
+    <div class="top">
+      <div><div class="crumb" id="crumb">工作台 / 运行控制台</div><h1 id="ttl">运行控制台</h1></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn ghost sm">⏻ 停止全部</button>
+        <button class="btn sm">▶ 运行评测</button>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- 视图1 工作台 -->
+      <div class="view on" id="v-dashboard">
+        <div class="card">
+          <h3>运行配置</h3>
+          <div class="fld">
+            <div class="f"><div class="lbl">任务</div>
+              <select><option>T001 · L1 日期规范化</option><option>T102 · L2 销售数据汇总</option><option>T205 · L3 EXIF 图片归档</option><option>T401 · L4 缺陷脚本修复</option><option>T502 · L5 周报总结</option></select></div>
+            <div class="f"><div class="lbl">Agent 后端</div>
+              <select><option>minimal-react · 自研白盒基线</option><option>aider · 第三方黑盒</option><option>+ 注册新后端…</option></select></div>
+            <div class="f"><div class="lbl">模型</div><select><option>deepseek-chat</option><option>deepseek-reasoner</option></select></div>
+            <div class="f"><div class="lbl">运行次数（采样）</div><input type="number" value="3"><div class="hint">对抗非确定性：取均值/最好/方差</div></div>
+            <div class="f"><div class="lbl">超时（秒）</div><input type="number" value="300"><div class="hint">来自任务 spec，可覆盖</div></div>
+          </div>
+        </div>
+
+        <div class="kpi">
+          <div class="k"><b style="color:var(--ok)">4</b><span>累计通过任务</span></div>
+          <div class="k"><b>9</b><span>累计运行次数</span></div>
+          <div class="k"><b style="color:var(--acc)">2</b><span>后端在线</span></div>
+          <div class="k"><b>5</b><span>任务包</span></div>
+        </div>
+
+        <div class="card">
+          <h3>最近运行</h3>
+          <table>
+            <thead><tr><th>时间</th><th>任务</th><th>后端</th><th>状态</th><th>耗时</th><th>得分</th><th></th></tr></thead>
+            <tbody>
+              <tr><td>09-03 14:20</td><td>T001</td><td>minimal-react</td><td><span class="pill ok">completed</span></td><td>12.9s</td><td><b>1.0 / 1.0</b></td><td><button class="btn ghost sm">查看</button></td></tr>
+              <tr><td>09-03 13:58</td><td>T102</td><td>aider</td><td><span class="pill warn">timeout</span></td><td>300s</td><td><b style="color:var(--bad)">0.0 / 1.2</b></td><td><button class="btn ghost sm">查看</button></td></tr>
+              <tr><td>09-03 13:31</td><td>T102</td><td>minimal-react</td><td><span class="pill ok">completed</span></td><td>9.5s</td><td><b style="color:var(--ok)">1.2 / 1.2</b></td><td><button class="btn ghost sm">查看</button></td></tr>
+              <tr><td>09-03 12:05</td><td>T001</td><td>aider</td><td><span class="pill ok">completed</span></td><td>54.6s</td><td><b>1.0 / 1.0</b></td><td><button class="btn ghost sm">查看</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 视图-任务管理 -->
+      <div class="view" id="v-tasks">
+        <div class="card">
+          <h3>任务包（task-spec@v1 契约）</h3>
+          <table>
+            <thead><tr><th>ID</th><th>级别</th><th>权重</th><th>标题</th><th>校验点</th><th>fixtures</th><th>最近运行</th><th>状态</th><th></th></tr></thead>
+            <tbody>
+              <tr><td><b>T001</b></td><td>L1</td><td>1.0</td><td>批量日期规范化</td><td>4</td><td>3 × md</td><td>09-03 14:20</td><td><span class="pill ok">就绪</span></td><td><button class="btn ghost sm">编辑</button></td></tr>
+              <tr><td><b>T102</b></td><td>L2</td><td>1.2</td><td>销售数据汇总</td><td>3</td><td>1 × csv</td><td>09-03 13:31</td><td><span class="pill ok">就绪</span></td><td><button class="btn ghost sm">编辑</button></td></tr>
+              <tr><td><b>T205</b></td><td>L3</td><td>1.5</td><td>EXIF 图片归档</td><td>4</td><td>20 × jpg</td><td>—</td><td><span class="pill blue">fixtures 就绪</span></td><td><button class="btn ghost sm">编辑</button></td></tr>
+              <tr><td><b>T401</b></td><td>L4</td><td>1.5</td><td>缺陷脚本修复</td><td>3</td><td>py + csv</td><td>—</td><td><span class="pill blue">fixtures 就绪</span></td><td><button class="btn ghost sm">编辑</button></td></tr>
+              <tr><td><b>T502</b></td><td>L5</td><td>2.0</td><td>一周工作周报总结</td><td>3</td><td>md 日志</td><td>—</td><td><span class="pill blue">fixtures 就绪</span></td><td><button class="btn ghost sm">编辑</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h3>新建任务 <span class="pill blue" style="margin-left:6px">纯 YAML · 不碰框架代码</span></h3>
+          <div class="fld">
+            <div class="f" style="flex:0 1 110px"><div class="lbl">任务 ID</div><input value="T503"></div>
+            <div class="f"><div class="lbl">标题</div><input placeholder="如：日志轮转校验"></div>
+            <div class="f" style="flex:0 1 120px"><div class="lbl">级别</div><select><option>L1</option><option>L2</option><option>L3</option><option>L4</option><option>L5</option></select></div>
+            <div class="f" style="flex:0 1 100px"><div class="lbl">权重</div><input value="1.2"></div>
+          </div>
+          <div style="margin-top:12px"><div class="lbl">任务描述（Agent 会读到）</div><textarea rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit">对 input/ 下的日志文件按日期轮转归档，并生成变更记录。</textarea></div>
+          <div style="margin-top:12px"><div class="lbl">fixtures（输入文件，将复制进沙箱）</div><div class="fld"><div class="f"><input placeholder="如：input/app.log / input/config.yaml"></div><button class="btn ghost sm">+ 添加</button></div></div>
+
+          <div style="margin-top:14px">
+            <div class="lbl" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px"><span>校验点（判定标准 · 看产物不看自报）</span><button class="btn ghost sm" id="addCp">+ 添加校验点</button></div>
+            <div id="cpBody" style="margin-top:8px">
+              <div class="cprow">
+                <input class="cp-id" value="c1" style="width:52px;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+                <input class="cp-desc" value="生成轮转后的日志文件" style="flex:1 1 160px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+                <select class="cp-type" style="flex:0 1 170px;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;background:#fff"><option>file_exists</option><option>content_contains</option><option>content_not_contains</option><option>cmd_exit_zero</option></select>
+                <input class="cp-arg" value="output/rotated/2026-09.log" style="flex:1 1 180px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+                <button class="btn ghost sm cpDel">✕</button>
+              </div>
+              <div class="cprow">
+                <input class="cp-id" value="c2" style="width:52px;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+                <input class="cp-desc" value="原文件不再残留 2026 记录" style="flex:1 1 160px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+                <select class="cp-type" style="flex:0 1 170px;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;background:#fff"><option>file_exists</option><option>content_contains</option><option selected>content_not_contains</option><option>cmd_exit_zero</option></select>
+                <input class="cp-arg" value="input/**/*.log:2026-" style="flex:1 1 180px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+                <button class="btn ghost sm cpDel">✕</button>
+              </div>
+              <div class="cprow" id="cpRow" style="display:none">
+                <input class="cp-id" placeholder="c3" style="width:52px;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+                <input class="cp-desc" placeholder="校验点描述" style="flex:1 1 160px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+                <select class="cp-type" style="flex:0 1 170px;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;background:#fff"><option>file_exists</option><option>content_contains</option><option>content_not_contains</option><option>cmd_exit_zero</option></select>
+                <input class="cp-arg" placeholder="目标路径 / 正则" style="flex:1 1 180px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+                <button class="btn ghost sm cpDel">✕</button>
+              </div>
+            </div>
+            <div class="hint" style="margin-top:8px">点击"生成任务包"将产出：tasks/T503/spec.yaml + fixtures 目录骨架 + 判定脚本模板（scripts/verify_t503.py）。</div>
+          </div>
+
+          <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn sm">生成任务包</button>
+            <button class="btn ghost sm">保存草稿</button>
+            <button class="btn ghost sm">取消</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 视图2 运行详情 -->
+      <div class="view" id="v-detail">
+        <div class="kpi">
+          <div class="k"><b>29bc35eb9bb0</b><span>run_id</span></div>
+          <div class="k"><b style="color:var(--ok)">completed</b><span>状态</span></div>
+          <div class="k"><b>12.9s</b><span>耗时</span></div>
+          <div class="k"><b>15</b><span>步骤</span></div>
+          <div class="k"><b style="color:var(--ok)">1.0</b><span>得分 / 1.0</span></div>
+        </div>
+
+        <div class="card">
+          <h3>判定结果（4/4 通过）<span class="pill ok" style="margin-left:6px">全部 PASS</span></h3>
+          <table>
+            <thead><tr><th>校验点</th><th>描述</th><th>结果</th><th>依据</th></tr></thead>
+            <tbody>
+              <tr><td>c1</td><td>已生成变更报告</td><td><span class="pill ok">PASS</span></td><td>output/report.md 存在</td></tr>
+              <tr><td>c2</td><td>md 无斜杠日期残留</td><td><span class="pill ok">PASS</span></td><td>content_not_contains: input/**/*.md</td></tr>
+              <tr><td>c3</td><td>md 已用 ISO 日期</td><td><span class="pill ok">PASS</span></td><td>content_contains: \d{4}-\d{2}-\d{2}</td></tr>
+              <tr><td>c4</td><td>报告含变更记录</td><td><span class="pill ok">PASS</span></td><td>content_contains: output/report.md</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h3>步骤轨迹（白盒 · 步骤级）</h3>
+          <div class="tl">
+            <div class="ev tool"><div class="h"><code>list_dir</code> input</div><div class="o">meeting.md · notes.md · readme.md (3 files)</div></div>
+            <div class="ev tool"><div class="h"><code>read_file</code> input/meeting.md</div><div class="o"># 周会纪要 · 会议时间 2026/1/15 …</div></div>
+            <div class="ev tool"><div class="h"><code>read_file</code> input/notes.md</div><div class="o">记录于 2026/9/2 … 需统一 ISO 格式</div></div>
+            <div class="ev tool"><div class="h"><code>read_file</code> input/readme.md</div><div class="o"># 项目说明 · 日期 2026/02/28 …</div></div>
+            <div class="ev tool"><div class="h"><code>write_file</code> input/*.md ×3</div><div class="o">改写为 ISO 日期格式</div></div>
+            <div class="ev tool"><div class="h"><code>write_file</code> output/report.md</div><div class="o">生成变更报告（4 条转换记录）</div></div>
+            <div class="ev finish"><div class="h"><code>finish</code></div><div class="o">任务完成 · 12.9s</div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>原始产物</h3>
+          <table>
+            <thead><tr><th>路径</th><th>大小</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr><td>output/report.md</td><td>312 B</td><td><button class="btn ghost sm">查看</button></td></tr>
+              <tr><td>input/notes.md（已改写）</td><td>—</td><td><button class="btn ghost sm">查看</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 视图3 对比 -->
+      <div class="view" id="v-compare">
+        <div class="card">
+          <h3>Agent × 任务 得分矩阵 <span class="pill blue" style="margin-left:6px">取各组合最好成绩</span></h3>
+          <table>
+            <thead><tr><th>后端 \ 任务</th><th>T001</th><th>T102</th><th>T205</th><th>T401</th><th>T502</th></tr></thead>
+            <tbody>
+              <tr>
+                <td style="font-weight:600">minimal-react<div style="font-size:11px;color:var(--sub);font-weight:400">自研白盒</div></td>
+                <td><div class="mcell g"><b>4/4</b><span>1.0</span></div></td>
+                <td><div class="mcell g"><b>3/3</b><span>1.2</span></div></td>
+                <td><div class="mcell n"><b>—</b><span>未跑</span></div></td>
+                <td><div class="mcell n"><b>—</b><span>未跑</span></div></td>
+                <td><div class="mcell n"><b>—</b><span>未跑</span></div></td>
+              </tr>
+              <tr>
+                <td style="font-weight:600">aider<div style="font-size:11px;color:var(--sub);font-weight:400">第三方黑盒</div></td>
+                <td><div class="mcell g"><b>4/4</b><span>1.0</span></div></td>
+                <td><div class="mcell r"><b>0/3</b><span>0.0</span></div></td>
+                <td><div class="mcell n"><b>—</b><span>未跑</span></div></td>
+                <td><div class="mcell n"><b>—</b><span>未跑</span></div></td>
+                <td><div class="mcell n"><b>—</b><span>未跑</span></div></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="hint" style="margin-top:10px">💡 aider × T102：黑盒调用陷入"要不要新建文件"循环而超时 —— Agent × 任务类型适配度的真实体现（见报告）。</div>
+        </div>
+        <div class="card">
+          <h3>aider × T102 展开（点击单元格下钻）</h3>
+          <div style="font-size:12.5px;color:var(--sub)">此处展示该组合下全部 run 证据：run_id / 状态 / 耗时 / verdict 明细 / 输出尾部，与本地 results/runs/ 一一对应。</div>
+        </div>
+      </div>
+
+      <!-- 视图4 运行历史 -->
+      <div class="view" id="v-history">
+        <div class="card">
+          <h3>全部运行</h3>
+          <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+            <select style="width:150px"><option>全部任务</option><option>T001</option><option>T102</option></select>
+            <select style="width:150px"><option>全部后端</option><option>minimal-react</option><option>aider</option></select>
+            <select style="width:150px"><option>全部状态</option><option>completed</option><option>timeout</option><option>max_steps</option></select>
+            <button class="btn ghost sm">导出 CSV</button>
+          </div>
+          <table>
+            <thead><tr><th>run_id</th><th>时间</th><th>任务</th><th>后端</th><th>状态</th><th>耗时</th><th>得分</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr><td><code>29bc35eb9bb0</code></td><td>09-03 14:20</td><td>T001</td><td>minimal-react</td><td><span class="pill ok">completed</span></td><td>12.9s</td><td>1.0</td><td><button class="btn ghost sm">详情</button></td></tr>
+              <tr><td><code>d1467bcadc6b</code></td><td>09-03 14:15</td><td>T001</td><td>minimal-react</td><td><span class="pill warn">timeout</span></td><td>5.6s</td><td>0.0</td><td><button class="btn ghost sm">详情</button></td></tr>
+              <tr><td><code>6ba4e5577d9c</code></td><td>09-03 13:58</td><td>T102</td><td>aider</td><td><span class="pill warn">timeout</span></td><td>300s</td><td>0.0</td><td><button class="btn ghost sm">详情</button></td></tr>
+              <tr><td><code>44b4cb7b3122</code></td><td>09-03 13:31</td><td>T102</td><td>minimal-react</td><td><span class="pill ok">completed</span></td><td>9.5s</td><td>1.2</td><td><button class="btn ghost sm">详情</button></td></tr>
+              <tr><td><code>02a2540f6518</code></td><td>09-03 12:05</td><td>T001</td><td>aider</td><td><span class="pill ok">completed</span></td><td>54.6s</td><td>1.0</td><td><button class="btn ghost sm">详情</button></td></tr>
+              <tr><td><code>e9d7df5e82b6</code></td><td>09-02 21:40</td><td>T001</td><td>minimal-react</td><td><span class="pill warn">max_steps</span></td><td>28.0s</td><td>1.0</td><td><button class="btn ghost sm">详情</button></td></tr>
+              <tr><td><code>6e6312491005</code></td><td>09-02 21:15</td><td>T102</td><td>minimal-react</td><td><span class="pill warn">max_steps</span></td><td>20.7s</td><td>0.0</td><td><button class="btn ghost sm">详情</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 视图5 报告 -->
+      <div class="view" id="v-report">
+        <div class="kpi">
+          <div class="k"><b style="color:var(--ok)">7</b><span>通过 run</span></div>
+          <div class="k"><b>2/5</b><span>任务已覆盖</span></div>
+          <div class="k"><b style="color:var(--warn)">1</b><span>适配度限制</span></div>
+          <div class="k"><b>1.0</b><span>平均得分</span></div>
+        </div>
+        <div class="card">
+          <h3>轨迹口径与适配度观察</h3>
+          <div style="font-size:12.8px;color:#374151">
+            <b>轨迹口径：</b>minimal-react（自研 ReAct）为步骤级轨迹；aider（第三方 CLI）为黑盒单次调用。得分基于产物判定（校验点），不受 Agent 自报影响。<br><br>
+            <b>适配度观察：</b>aider 在"需自主创建数据产物"类任务（T102）上黑盒调用陷入循环而超时（记 0 分）；结对编程 Agent 擅长改已有代码，未必适合从零生成产物 —— Agent × 任务类型适配度的真实体现。
+          </div>
+          <div style="margin-top:14px;display:flex;gap:8px"><button class="btn sm">导出 HTML 报告</button><button class="btn ghost sm">导出 JSON</button></div>
+        </div>
+      </div>
+
+      <!-- 视图6 设置 -->
+      <div class="view" id="v-settings">
+        <div class="card">
+          <h3>LLM 配置</h3>
+          <div class="fld">
+            <div class="f"><div class="lbl">API Key</div><input type="password" value="sk-••••••••••925" placeholder="DEEPSEEK_API_KEY"><div class="hint">从环境变量读取，可覆盖</div></div>
+            <div class="f"><div class="lbl">Base URL</div><input value="https://api.deepseek.com"></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>默认参数</h3>
+          <div class="fld">
+            <div class="f"><div class="lbl">默认运行次数</div><input type="number" value="3"></div>
+            <div class="f"><div class="lbl">默认超时（秒）</div><input type="number" value="300"></div>
+            <div class="f"><div class="lbl">沙箱隔离</div><select><option>子进程 + 超时</option><option>Docker（V2.2）</option></select></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>关于</h3>
+          <div style="font-size:12.8px;color:#374151">ai-agent-eval · 本地优先 Web 评测工作台（原型）<br>引擎：agent-eval CLI · 协议：task-spec@v1 · 开源 MIT</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="proto">原型 · 非可运行 · V2 Web 评测工作台</div>
+
+<script>
+(function(){
+  "use strict";
+  try{
+    var TITLES={dashboard:["工作台 / 运行控制台","运行控制台"],tasks:["任务 / 任务管理","任务管理"],detail:["工作台 / 运行详情","运行详情 · 29bc35eb9bb0"],compare:["评测 / 对比","双后端对比"],history:["评测 / 历史","运行历史"],report:["评测 / 报告","评测报告"],settings:["系统 / 设置","设置"]};
+    var nav=document.getElementById("nav");
+    nav.addEventListener("click",function(e){
+      var it=e.target.closest(".item"); if(!it)return;
+      nav.querySelectorAll(".item").forEach(function(x){x.classList.remove("on")});
+      it.classList.add("on");
+      document.querySelectorAll(".view").forEach(function(v){v.classList.remove("on")});
+      var v=document.getElementById("v-"+it.dataset.v); if(v)v.classList.add("on");
+      document.getElementById("crumb").textContent=TITLES[it.dataset.v][0];
+      document.getElementById("ttl").textContent=TITLES[it.dataset.v][1];
+    });
+    /* 校验点编辑器：添加 / 删除行 */
+    var addCp=document.getElementById("addCp");
+    if(addCp){
+      addCp.addEventListener("click",function(){
+        var t=document.getElementById("cpRow").cloneNode(true);
+        t.style.display="";
+        document.getElementById("cpBody").appendChild(t);
+      });
+      document.getElementById("cpBody").addEventListener("click",function(e){
+        var d=e.target.closest(".cpDel");
+        if(d) d.closest(".cprow").remove();
+      });
+    }
+  }catch(err){console.error(err);}
+})();
+</script>
+</body>
+</html>

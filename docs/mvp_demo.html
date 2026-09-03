@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ai-agent-eval · 通用 AI Agent 评测框架 · MVP 演示</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1e2530; --line:rgba(255,255,255,.09);
+    --txt:#e6edf3; --sub:#8b949e; --acc:#8bc8ea; --acc2:#52d2b0; --warn:#e3b341; --bad:#f47067; --ok:#3fb950;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:'Segoe UI','PingFang SC','Microsoft YaHei',Arial,sans-serif;line-height:1.6}
+  .wrap{max-width:1000px;margin:0 auto;padding:26px 18px 70px}
+  a{color:var(--acc)}
+
+  .hero{background:linear-gradient(135deg,#101a2b,#12323a);border:1px solid var(--line);border-radius:18px;padding:24px 26px;margin-bottom:18px}
+  .hero h1{margin:0 0 4px;font-size:26px;letter-spacing:.5px}
+  .hero h1 .tag{font-size:12px;color:var(--acc2);border:1px solid rgba(82,210,176,.4);padding:2px 8px;border-radius:20px;vertical-align:middle;margin-left:8px}
+  .hero p{margin:6px 0;color:#c9d4e0;font-size:14.5px}
+  .hero .sub{color:var(--sub);font-size:13px}
+  .kpis{display:flex;gap:12px;flex-wrap:wrap;margin-top:16px}
+  .kpi{flex:1 1 130px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .kpi b{display:block;font-size:22px;color:var(--acc)}
+  .kpi span{font-size:12px;color:var(--sub)}
+
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 16px}
+  .tab{padding:8px 14px;border-radius:20px;border:1px solid var(--line);background:var(--panel);color:var(--sub);cursor:pointer;font-size:13.5px;transition:.15s}
+  .tab:hover{color:var(--txt);border-color:var(--acc)}
+  .tab.active{background:var(--acc);color:#0d1117;border-color:var(--acc);font-weight:600}
+
+  section{display:none}
+  section.active{display:block}
+  h2{font-size:18px;margin:0 0 12px}
+  h3{font-size:15px;margin:0 0 8px}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:14px}
+  .muted{color:var(--sub);font-size:13px}
+
+  /* 流水线 */
+  .pipe{display:flex;gap:10px;flex-wrap:wrap}
+  .pipe .stage{flex:1 1 150px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;cursor:pointer;transition:.15s;position:relative}
+  .pipe .stage:hover{border-color:var(--acc)}
+  .pipe .stage.on{border-color:var(--acc);background:var(--panel2)}
+  .pipe .stage .no{font-size:11px;color:var(--acc);font-weight:700}
+  .pipe .stage .nm{font-weight:600;font-size:13.5px;margin-top:2px}
+  .pipe .stage .ds{font-size:11.5px;color:var(--sub);margin-top:2px}
+  .pipe .arrow{align-self:center;color:var(--sub);font-size:16px}
+  .detail{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-top:12px;font-size:13px;min-height:44px}
+
+  /* 矩阵 */
+  table{width:100%;border-collapse:collapse;background:var(--panel);border-radius:12px;overflow:hidden;font-size:13.5px}
+  th,td{padding:11px 12px;text-align:center;border-bottom:1px solid var(--line)}
+  th{background:var(--panel2);font-weight:600;color:#c9d4e0}
+  td.ag{text-align:left;font-weight:600;color:var(--acc)}
+  .cell{cursor:pointer;border-radius:8px;transition:.12s;display:inline-block;padding:4px 12px}
+  .cell:hover{outline:1px solid var(--acc)}
+  .cell.ok{color:var(--ok)} .cell.half{color:var(--warn)} .cell.bad{color:var(--bad)}
+  .cell .sc{font-size:16px;font-weight:700}
+  .cell .ps{font-size:10.5px;color:var(--sub)}
+  .runlist{margin-top:14px}
+  .run{border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:8px;background:var(--panel)}
+  .run .h{display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:12.5px}
+  .pill{font-size:11px;padding:1px 8px;border-radius:12px;border:1px solid var(--line);color:var(--sub)}
+  .pill.ok{color:var(--ok);border-color:rgba(63,185,80,.4)}
+  .pill.warn{color:var(--warn);border-color:rgba(227,179,65,.4)}
+  .pill.bad{color:var(--bad);border-color:rgba(244,112,103,.4)}
+  .verdicts{margin-top:8px;font-size:12.5px}
+  .verdicts div{padding:2px 0;border-top:1px dashed rgba(255,255,255,.06)}
+
+  /* 发现卡片 */
+  .disc{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:10px;cursor:pointer;transition:.15s}
+  .disc:hover{border-color:var(--acc)}
+  .disc .t{font-weight:600;font-size:14px}
+  .disc .t .n{color:var(--acc);margin-right:6px}
+  .disc .b{display:none;margin-top:10px;font-size:13px;color:#c9d4e0;border-top:1px dashed var(--line);padding-top:10px}
+  .disc.open .b{display:block}
+
+  /* 代码 */
+  pre{background:#0b0f14;border:1px solid var(--line);border-radius:10px;padding:12px 14px;overflow-x:auto;font-size:12.5px;font-family:Consolas,Menlo,monospace;color:#d7e2ee}
+  code{font-family:Consolas,Menlo,monospace}
+  .cmd{margin:6px 0}
+  .cmd b{color:var(--acc2);font-weight:600}
+
+  /* 路线图 */
+  .road{display:flex;gap:10px;flex-wrap:wrap}
+  .road .p{flex:1 1 240px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .road .p b{display:block;font-size:13px;margin-bottom:4px}
+  .road .p span{font-size:12px;color:var(--sub)}
+  .road .p.p0{border-color:rgba(63,185,80,.45)}
+  .road .p.p1{border-color:rgba(139,200,234,.4)}
+  .road .p.p2{border-color:rgba(139,155,158,.4)}
+
+  @media (max-width:560px){
+    .hero h1{font-size:21px}
+    table{font-size:12.5px}
+    th,td{padding:8px 6px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <h1>ai-agent-eval <span class="tag">MVP 演示</span></h1>
+    <p><b>通用 AI Agent 评测框架</b>：同一套任务包 × 任意 Agent 后端 → 可复现、可追溯、可对比的评测报告。</p>
+    <p class="sub">核心设计：任务即契约 · 后端即插件 · 判定看产物不看自报 · 一周从 0 到 1</p>
+    <div class="kpis">
+      <div class="kpi"><b>5</b><span>任务包 L1-L5</span></div>
+      <div class="kpi"><b>2</b><span>Agent 后端</span></div>
+      <div class="kpi"><b>7 天</b><span>MVP 冲刺</span></div>
+      <div class="kpi"><b>4</b><span>git 里程碑</span></div>
+      <div class="kpi"><b>MIT</b><span>开源仓库</span></div>
+    </div>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-sec="pipeline">评测流水线</div>
+    <div class="tab" data-sec="matrix">双后端对比</div>
+    <div class="tab" data-sec="discoveries">真实发现</div>
+    <div class="tab" data-sec="quickstart">快速上手</div>
+    <div class="tab" data-sec="roadmap">路线图</div>
+  </div>
+
+  <!-- 流水线 -->
+  <section id="pipeline" class="active">
+    <h2>评测流水线：点击每个阶段看说明</h2>
+    <div class="pipe" id="pipe"></div>
+    <div class="detail" id="pipeDetail">点击上方阶段查看说明。</div>
+  </section>
+
+  <!-- 对比矩阵 -->
+  <section id="matrix">
+    <h2>双后端对比：点击单元格下钻到真实 run 证据</h2>
+    <table>
+      <thead><tr id="mtxHead"></tr></thead>
+      <tbody id="mtxBody"></tbody>
+    </table>
+    <div class="runlist" id="mtxDetail"></div>
+  </section>
+
+  <!-- 真实发现 -->
+  <section id="discoveries">
+    <h2>这一周的真实发现（全部有 run 证据）</h2>
+    <div id="discList"></div>
+  </section>
+
+  <!-- 快速上手 -->
+  <section id="quickstart">
+    <h2>快速上手</h2>
+    <div class="card">
+      <div class="cmd"><b># 安装</b> &nbsp;pip install -e ".[dev]"</div>
+      <div class="cmd"><b># 可选</b> &nbsp;pip install -e ".[aider]"  （接入第三方 aider 后端）</div>
+      <div class="cmd"><b># API Key（DeepSeek）</b> &nbsp;setx DEEPSEEK_API_KEY "sk-..."</div>
+      <pre>agent-eval list-tasks                    # 列出任务包
+agent-eval run --task T001 --agent minimal-react   # 跑单任务（自研基线）
+agent-eval run --task T001 --agent aider           # 跑单任务（第三方）
+agent-eval run --task T102 --agent minimal-react --timeout 120
+agent-eval report                                 # 生成对比报告</pre>
+      <div class="muted">三命令：list-tasks / run / report。轨迹、判定、评分全部落盘到 results/runs/&lt;run_id&gt;/run.json，可下钻到原始证据。</div>
+    </div>
+  </section>
+
+  <!-- 路线图 -->
+  <section id="roadmap">
+    <h2>V2 路线图（按优先级）</h2>
+    <div class="road" id="road"></div>
+  </section>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+  try{
+
+  /* ---------- 数据 ---------- */
+  var AGENTS = [
+    {id:"minimal-react", name:"minimal-react", kind:"自研白盒基线", traj:"步骤级轨迹", desc:"200 行 ReAct Agent：LLM + JSON action 协议 + 5 个工具（list/read/write/run/finish），temperature=0。"},
+    {id:"aider", name:"aider", kind:"第三方黑盒", traj:"单次调用输出", desc:"开源 AI 结对编程 CLI（0.70），基于 git 追踪 + 内部推理循环，对本框架是黑盒。"}
+  ];
+  var TASKS = ["T001","T102","T205","T401","T502"];
+
+  var RUNS = {
+    "minimal-react|T001": {best:"4/4", score:"1.0", note:"多次运行稳定 4/4；含一次未调 finish 但产物正确。", runs:[
+      {id:"29bc35eb9bb0", status:"completed", dur:"12.9s", steps:15, v:"4/4", note:"标准成功：探查→改写3个md→生成报告→finish"},
+      {id:"e9d7df5e82b6", status:"max_steps", dur:"28.0s", steps:20, v:"4/4", note:"未调 finish 但产物全对 → 判定看产物"},
+      {id:"c56f29f7e364", status:"max_steps", dur:"7.7s", steps:8, v:"0/4", note:"模型中途输出坏 JSON → 加固解析+重试"}
+    ]},
+    "minimal-react|T102": {best:"3/3", score:"1.2", note:"非确定性显著：有时全过、有时步数耗尽。", runs:[
+      {id:"44b4cb7b3122", status:"completed", dur:"9.5s", steps:9, v:"3/3", note:"读 csv → 跑 python 汇总 → 写 summary/top3"},
+      {id:"6e6312491005", status:"max_steps", dur:"20.7s", steps:20, v:"0/3", note:"20 步耗尽未产出 —— LLM 非确定性"}
+    ]},
+    "aider|T001": {best:"4/4", score:"1.0", note:"黑盒单次调用即完成，54.6s。", runs:[
+      {id:"02a2540f6518", status:"completed", dur:"54.6s", steps:1, v:"4/4", note:"黑盒：只记录一次 aider 调用输出"}
+    ]},
+    "aider|T102": {best:"0/3", score:"0.0", note:"陷入'要不要新建文件'循环 → 超时（适配度限制）。", runs:[
+      {id:"6ba4e5577d9c", status:"timeout", dur:"300s", steps:1, v:"0/3", note:"黑盒循环输出同一段计划，未落盘"}
+    ]}
+  };
+
+  var VERDICTS = {
+    "T001":[["c1","已生成变更报告",1],["c2","md 无斜杠日期残留",1],["c3","md 已用 ISO 日期",1],["c4","报告含变更记录",1]],
+    "T102":[["c1","已生成 summary.csv",1],["c2","已生成 top3.md",1],["c3","重算比对一致",1]]
+  };
+  var ZERO_V = {"T001":[["c1","已生成变更报告",0],["c2","md 无斜杠日期残留",0],["c3","md 已用 ISO 日期",0],["c4","报告含变更记录",0]],
+                "T102":[["c1","已生成 summary.csv",0],["c2","已生成 top3.md",0],["c3","重算比对一致",0]]};
+
+  var PIPELINE = [
+    {no:"01", nm:"任务包", ds:"task-spec@v1：manifest + spec.yaml + fixtures，任务作者只写 YAML"},
+    {no:"02", nm:"沙箱", ds:"干净工作目录，复制 fixtures，隔离每次 run"},
+    {no:"03", nm:"后端", ds:"Backend 注册表：minimal-react / aider，适配层隔离差异"},
+    {no:"04", nm:"轨迹", ds:"白盒记步骤级，黑盒记单次输出；统一落入 run.json"},
+    {no:"05", nm:"判定", ds:"5 种确定性校验点：看产物不看自报"},
+    {no:"06", nm:"评分", ds:"得分 = 权重 × 通过率；报告取最好成绩 + 全部证据"},
+    {no:"07", nm:"报告", ds:"agent-eval report → 自包含 HTML 对比报告"}
+  ];
+
+  var DISCS = [
+    {t:"LLM Agent 非确定性", b:"同一任务、同一 Agent，三次运行三种结果：10 步成功 / 中途坏 JSON / 20 步未收尾但产物正确。框架保留全部 run 证据，报告取最好成绩，并说明非确定性本身。"},
+    {t:"判定看产物、不看自报", b:"有一次 Agent 没调用 finish（status=max_steps），但产物全对——照样 4/4。得分只认校验点，不给 Agent 的自我表达任何权重。"},
+    {t:"谁来验证验证器", b:"判定器自己也出过 bug：cmd 校验的相对路径在 cwd=workspace 下解析错位，Agent 做对了却被误判 FAIL。靠 run.json 证据链定位修复，并保留退出码+stderr。"},
+    {t:"Agent × 任务类型适配度", b:"aider 擅长改已有代码（T001 通过 54.6s），但在'从零生成数据产物'（T102）上黑盒循环超时。评测暴露：没有银弹——不同 Agent 适配不同任务类型。"}
+  ];
+
+  var ROAD = [
+    {p:"P0", t:"验证器 / 框架自身单测", d:"防止再出现'验证器误判'类 bug，为后续扩展兜底"},
+    {p:"P0", t:"Docker / 子进程沙箱", d:"当前 run_command 用 shell=True，接任意 Agent 前需 OS 级隔离"},
+    {p:"P1", t:"多 run 采样（N 次 + 均值/方差）", d:"让分数有统计意义，对抗非确定性"},
+    {p:"P1", t:"Langfuse 可观测接入", d:"轨迹已结构化，补齐'为什么这么表现'的分析"},
+    {p:"P1", t:"更多任务类型 + 后端", d:"加代码编辑类任务，接 Claude Code / OpenHands 等"},
+    {p:"P2", t:"黑盒桌面端采集", d:"豆包工作 / WorkBuddy 等，需 UI 自动化，工程量大"}
+  ];
+
+  /* ---------- 渲染 ---------- */
+  var $ = function(s){return document.querySelector(s)};
+
+  /* 流水线 */
+  var pipe=$("#pipe"), pd=$("#pipeDetail"), pHtml="";
+  for(var i=0;i<PIPELINE.length;i++){
+    pHtml += '<div class="stage" data-i="'+i+'"><div class="no">'+PIPELINE[i].no+'</div><div class="nm">'+PIPELINE[i].nm+'</div><div class="ds">'+PIPELINE[i].ds+'</div></div>';
+  }
+  pipe.innerHTML = pHtml;
+  pipe.addEventListener("click", function(e){
+    var st=e.target.closest(".stage"); if(!st)return;
+    pipe.querySelectorAll(".stage").forEach(function(s){s.classList.remove("on")});
+    st.classList.add("on");
+    pd.innerHTML = '<b>'+PIPELINE[+st.dataset.i].nm+'</b>：'+PIPELINE[+st.dataset.i].ds;
+  });
+
+  /* 矩阵 */
+  var head=$("#mtxHead"), body=$("#mtxBody");
+  var hHtml = '<th style="text-align:left">后端 \\ 任务</th>';
+  for(var t=0;t<TASKS.length;t++) hHtml += '<th>'+TASKS[t]+'</th>';
+  head.innerHTML = hHtml;
+
+  var bHtml="";
+  for(var a=0;a<AGENTS.length;a++){
+    var ag=AGENTS[a];
+    bHtml += '<tr><td class="ag">'+ag.name+'<div class="ps" style="font-size:11px;color:#8b949e;font-weight:400">'+ag.kind+'</div></td>';
+    for(var t2=0;t2<TASKS.length;t2++){
+      var tk=TASKS[t2], key=ag.id+"|"+tk, run=RUNS[key];
+      if(run){
+        var cls = run.score>=1 ? "ok" : (run.score>0 ? "half" : "bad");
+        bHtml += '<td><div class="cell '+cls+'" data-key="'+key+'"><span class="sc">'+run.best+'</span><br><span class="ps">得分 '+run.score+'</span></div></td>';
+      } else {
+        bHtml += '<td><span class="ps">—</span></td>';
+      }
+    }
+    bHtml += '</tr>';
+  }
+  body.innerHTML = bHtml;
+
+  var md=$("#mtxDetail");
+  body.addEventListener("click", function(e){
+    var c=e.target.closest(".cell"); if(!c)return;
+    var key=c.dataset.key, run=RUNS[key], ag=key.split("|")[0], tk=key.split("|")[1];
+    var html = '<div class="card"><h3>'+ag+' × '+tk+'</h3><div class="muted" style="margin-bottom:8px">'+run.note+'</div>';
+    for(var i=0;i<run.runs.length;i++){
+      var r=run.runs[i], stc = r.status==="completed" ? "ok" : (r.status==="timeout" ? "bad" : "warn");
+      html += '<div class="run"><div class="h"><b>'+r.id+'</b><span class="pill '+stc+'">'+r.status+'</span><span class="pill">'+r.dur+'</span><span class="pill">'+r.steps+' 步</span><span class="pill '+ (r.v.split("/")[0]===r.v.split("/")[1] ? "ok":"bad") +'">'+r.v+'</span></div><div class="muted">'+r.note+'</div>';
+      html += '<div class="verdicts">';
+      var vlist = (r.v.split("/")[0]===r.v.split("/")[1]) ? VERDICTS[tk] : ZERO_V[tk];
+      for(var v=0;v<vlist.length;v++){ html += '<div><span style="color:'+(vlist[v][2]?"#3fb950":"#f47067")+'">'+(vlist[v][2]?"[PASS]":"[FAIL]")+'</span> '+vlist[v][0]+' '+vlist[v][1]+'</div>'; }
+      html += '</div></div>';
+    }
+    html += '</div>';
+    md.innerHTML = html;
+  });
+
+  /* 发现卡片 */
+  var dl=$("#discList"), dHtml="";
+  for(var d=0;d<DISCS.length;d++){
+    dHtml += '<div class="disc" data-i="'+d+'"><div class="t"><span class="n">'+(d+1)+'.</span>'+DISCS[d].t+'</div><div class="b">'+DISCS[d].b+'</div></div>';
+  }
+  dl.innerHTML = dHtml;
+  dl.addEventListener("click", function(e){
+    var c=e.target.closest(".disc"); if(!c)return;
+    c.classList.toggle("open");
+  });
+
+  /* 路线图 */
+  var rd=$("#road"), rHtml="";
+  for(var r=0;r<ROAD.length;r++){
+    rHtml += '<div class="p '+ROAD[r].p.toLowerCase()+'"><b>['+ROAD[r].p+'] '+ROAD[r].t+'</b><span>'+ROAD[r].d+'</span></div>';
+  }
+  rd.innerHTML = rHtml;
+
+  /* Tab 切换 */
+  var tabs=$("#tabs");
+  tabs.addEventListener("click", function(e){
+    var t=e.target.closest(".tab"); if(!t)return;
+    tabs.querySelectorAll(".tab").forEach(function(x){x.classList.remove("active")});
+    t.classList.add("active");
+    document.querySelectorAll("section").forEach(function(s){s.classList.remove("active")});
+    var sec=document.getElementById(t.dataset.sec);
+    if(sec) sec.classList.add("active");
+  });
+
+  }catch(err){ document.body.insertAdjacentHTML("beforeend", '<div class="muted">加载出错：'+err.message+'</div>'); }
+})();
+</script>
+</body>
+</html>
