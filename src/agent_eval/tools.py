@@ -1,14 +1,15 @@
-"""Agent 可用最小工具集（Day 2）。
+"""Agent 可用最小工具集（Day 2；V2.0-Day2 接入命令沙箱）。
 
 每个工具函数签名统一为 (workspace, args) -> (ok, observation)。
-安全性：路径用 _safe_path 限制在工作目录内；run_command 依赖沙箱隔离（MVP 用干净目录，
-OS 级隔离在后续阶段用 Docker/VM 补齐）。
+安全性：路径用 _safe_path 限制在工作目录内；run_command 经 sandbox 子进程执行
+（超时强制终止 + 输出截断），OS 级隔离后续用 Docker/VM 补齐。
 """
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
+
+from agent_eval.sandbox import run_command_sandboxed
 
 
 def run_tool(tool: str, args: dict, workspace: Path) -> tuple[bool, str]:
@@ -70,16 +71,10 @@ def _run_command(ws: Path, args: dict) -> tuple[bool, str]:
     if not cmd:
         return False, "缺少 command"
     timeout = int(args.get("timeout", 30))
-    proc = subprocess.run(
-        cmd,
-        shell=True,
-        cwd=ws,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        encoding="utf-8",
-        errors="replace",
-    )
-    out = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
+    max_out = int(args.get("max_output_chars", 65536))
+    r = run_command_sandboxed(cmd, ws, timeout_s=timeout, max_output_chars=max_out)
+    if r.timed_out:
+        return False, r.error
+    out = r.stdout + (("\n" + r.stderr) if r.stderr else "")
     out = out[:4000]
-    return proc.returncode == 0, f"exit={proc.returncode}\n{out}"
+    return r.ok, f"exit={r.exit_code}\n{out}"
