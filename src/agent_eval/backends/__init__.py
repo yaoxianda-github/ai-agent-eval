@@ -7,9 +7,11 @@ from __future__ import annotations
 
 from agent_eval.backends.base import Backend, BackendResult
 from agent_eval.backends.minimal_react import MinimalReactBackend
+from agent_eval.backends.aider import AiderBackend
 
 _BACKENDS: dict[str, type[Backend]] = {
     MinimalReactBackend.name: MinimalReactBackend,
+    AiderBackend.name: AiderBackend,
 }
 
 

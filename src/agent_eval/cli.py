@@ -71,5 +71,16 @@ def run(
     typer.echo(f"detail: {record.workspace}" if record.workspace else "detail: （工作目录已清理）")
 
 
+@app.command("report")
+def report(
+    out: str = typer.Option("reports/report.html", "--out", "-o", help="输出 HTML 报告路径"),
+) -> None:
+    """聚合 results/runs 下全部 run，生成自包含 HTML 评测报告。"""
+    from agent_eval.reporter import generate_report
+
+    path = generate_report(out)
+    typer.echo(f"报告已生成: {path}")
+
+
 if __name__ == "__main__":
     app()

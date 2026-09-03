@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pillow>=10.0"]
+aider = ["aider-chat>=0.60"]
 
 [project.scripts]
 agent-eval = "agent_eval.cli:app"
