@@ -77,6 +77,7 @@ class MinimalReactBackend(Backend):
         max_steps: int = 20,
         max_parse_retries: int = 2,
         temperature: float = 0.0,
+        timeout_s: int = 300,
     ) -> None:
         import openai  # 延迟导入，避免无 key 环境无法 import 本模块
 
@@ -84,6 +85,7 @@ class MinimalReactBackend(Backend):
         self.max_steps = max_steps
         self.max_parse_retries = max_parse_retries
         self.temperature = temperature
+        self.timeout_s = timeout_s
         self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get(
             "LLM_API_KEY"
         )
@@ -144,6 +146,13 @@ class MinimalReactBackend(Backend):
         start = time.time()
 
         for i in range(1, self.max_steps + 1):
+            if time.time() - start > self.timeout_s:
+                return BackendResult(
+                    status="timeout",
+                    steps=steps,
+                    duration_s=round(time.time() - start, 3),
+                    error=f"整体超时（>{self.timeout_s}s）",
+                )
             action, raw = self._ask(messages)
             if action is None:
                 steps.append(

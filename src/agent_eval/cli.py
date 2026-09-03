@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 import typer
 
 app = typer.Typer(help="通用 AI Agent 评测框架")
@@ -36,7 +38,8 @@ def list_tasks() -> None:
 def run(
     task: str = typer.Option(..., "--task", help="任务 ID，如 T001"),
     agent: str = typer.Option("minimal-react", "--agent", help="后端 Agent 名称"),
-    model: str = typer.Option("deepseek-chat", "--model", help="LLM 模型名（minimal-react 用）"),
+    model: str = typer.Option("deepseek-chat", "--model", help="LLM 模型名"),
+    timeout: Optional[int] = typer.Option(None, "--timeout", help="覆盖任务默认超时（秒）"),
 ) -> None:
     """对单个任务执行一次评测（MVP）。"""
     from agent_eval.runner import run_one
@@ -47,7 +50,9 @@ def run(
         typer.echo(f"错误：找不到任务 {task}，可用: {sorted(tasks)}")
         raise typer.Exit(code=1)
 
-    config = {"agent": {"model": model}}
+    config: dict = {"agent": {"model": model}}
+    if timeout is not None:
+        config["agent"]["timeout_s"] = timeout
     record = run_one(tasks[task], agent, config=config)
 
     typer.echo(f"run_id: {record.run_id}")
