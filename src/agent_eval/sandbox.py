@@ -9,8 +9,10 @@ Windows 兼容方案（无法用 POSIX resource 限制内存/CPU）：
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,9 +41,10 @@ def run_command_sandboxed(
     - max_output_chars：回读 stdout/stderr 的最大字符数（超出截断）
     """
     cwd = Path(cwd)
-    with tempfile.TemporaryDirectory(prefix="agent-eval-sbox-") as tmp:
-        out_path = Path(tmp) / "stdout.log"
-        err_path = Path(tmp) / "stderr.log"
+    tmp = Path(tempfile.mkdtemp(prefix="agent-eval-sbox-"))
+    try:
+        out_path = tmp / "stdout.log"
+        err_path = tmp / "stderr.log"
         try:
             with out_path.open("w", encoding="utf-8", errors="replace") as fo, err_path.open(
                 "w", encoding="utf-8", errors="replace"
@@ -76,6 +79,18 @@ def run_command_sandboxed(
             return CommandResult(
                 ok=False, exit_code=-1, error=f"命令执行异常: {type(e).__name__}: {e}"
             )
+    finally:
+        _rmtree_retry(tmp)
+
+
+def _rmtree_retry(path: Path, attempts: int = 3, delay: float = 0.3) -> None:
+    """删除临时目录；Windows 下子进程句柄可能延迟释放，重试 + 忽略失败（避免残留阻塞）。"""
+    for _ in range(attempts):
+        try:
+            shutil.rmtree(path, ignore_errors=True)
+            return
+        except Exception:  # noqa: BLE001
+            time.sleep(delay)
 
 
 def _terminate(proc: subprocess.Popen) -> None:
