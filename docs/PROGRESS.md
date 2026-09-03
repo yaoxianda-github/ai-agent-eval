@@ -2,7 +2,7 @@
 
 > 通用 AI Agent 评测框架（可分享、可复用）
 > 仓库：https://github.com/yaoxianda-github/ai-agent-eval
-> 最后更新：2026-09-04（**MVP 7/7 + V2.0 3/3 完成；V2.1 Web 工作台实现完成，待最终验收**）
+> 最后更新：2026-09-04（**MVP 7/7 + V2.0 3/3 完成；V2.1 pytest 56 全绿；V2.2 已验证通过（67 全绿 + T502/T601 真实运行）**）
 
 ## 冲刺进度
 
@@ -36,7 +36,18 @@
   4. **run_id 不一致**：`run_one` 内部自生成 vs Web 预生成 → `run_one` 支持传入 `run_id`
   5. **前端白屏**：历史页一处字符串引号不配对（JS 语法错误）→ 修复
   6. **UI 布局**：内容区完全拉满到屏幕右侧
-- **状态**：浏览器可正常打开、布局完成；pytest 56 全绿待最终确认；git 待提交
+- **状态**：浏览器可正常打开、布局完成；**pytest 56 全绿（已确认）**；git 待提交
+
+## V2.2 增强（2026-09-04 晚实现，已验证通过）
+
+- **LLM-as-a-Judge 语义判分**：`judge.py`（client 可注入 / 无 key·失败·无产物诚实降级 / verdict 与确定性同构 + score/reasoning）；runner 在 `verifier=llm_judge` 时追加判分；TaskSpec 新增 `rubric` 字段；T502 配自定义 rubric 闭环；任务管理页支持 llm_judge + rubric
+- **Langfuse 可选分析层**：`observability.py` 默认 no-op，启用后记录每次 LLM 调用（token/耗时）；minimal_react 每步 + judge 判分均已埋点；未装 SDK 静默降级
+- **新任务 T601**（日志错误统计，确定性 + `scripts/verify_t601.py` 复核）——任务包扩至 6 个
+- **一键启动**：`agent-eval workbench` / `start_workbench.bat` / `scripts/build_workbench.py`（PyInstaller 打包）
+- **明确不做**：黑盒桌面端采集器（需桌面级自动化）、插件注册表、Docker 沙箱、pip 发布
+- **自测**：`tests/test_judge.py`（7）+ `tests/test_observability.py`（3）+ test_web 新增 llm_judge/rubric 用例；全量 pytest **67 全绿（已确认）**
+- **真实链路验证（已确认）**：T502 真实 LLM 判分 6/6（score=0.92，含 reasoning）；T601 确定性任务 3/3（score=1.0，含独立复核脚本）
+- **修复记录**：T601 校验口径两处 bug——① 日志格式为「时间戳 ERROR 消息」，`startswith("ERROR")` 恒为 0，改按级别字段匹配；② 正则 token 数写错多算一位，修正后 3/3
 
 ## MVP 交付物
 
@@ -57,9 +68,10 @@
 
 - **MVP（已推送）**：b19dd1b Day 1-3 · 4361d35 Day 4-5 · d0626b4 Day 6 · 87d7786 Day 7
 - **V2.0（已推送）**：71b67bf Day1 单测+Day2 沙箱 · ea36faf Windows 清理竞态 · ac66575 V2 计划+Day2 收尾
-- **待提交（工作树积压）**：V2.0-Day3 多 run 采样 / V2.1 全部（web/ + tests/test_web.py + pyproject + README + V2_PLAN + PROGRESS）
+- **待提交（工作树积压）**：V2.0-Day3 多 run 采样 / V2.1 全部（web/ + tests/test_web.py + pyproject + README + V2_PLAN + PROGRESS）/ V2.2（judge.py + observability.py + T601 + 一键启动 + 测试 + 文档）
 
 ## 下一步
 
-- **V2.1 最终验收**：`pytest` 56 全绿 → 工作台端到端（跑任务 → 下钻 → 对比 → 报告）→ git 分两笔提交推送
-- **V2.2**：Langfuse 追踪（分析层）、LLM-as-a-Judge（T502 开放任务）、更多后端/任务、黑盒桌面端采集、一键打包启动
+- **V2.2 验收**：`pytest` 预期 67 全绿 → T502 真实判分（需 DEEPSEEK_API_KEY）→ T601 真实运行 → 工作台端到端 → git 分三笔提交推送（Day3 / V2.1 / V2.2）
+- **V2.2 未做项**（黑盒采集、插件注册表、Docker 沙箱、pip 发布）：按需评估
+- **V2.3 候选**：更多后端横向基准、插件注册表、pip 发布

@@ -214,6 +214,7 @@
         '<div class="field"><label>标签（逗号分隔）</label><input id="g-tags" placeholder="file,text"></div>' +
       "</div>" +
       '<div class="field" style="margin-bottom:12px;"><label>任务描述</label><textarea id="g-desc" placeholder="说明 Agent 需要在工作目录中完成什么、产出什么文件"></textarea></div>' +
+      '<div class="field" style="margin-bottom:12px;"><label>评分标准 rubric（仅 llm_judge 需要；留空使用默认标准）</label><textarea id="g-rubric" placeholder="例如：1. 内容完整性(30分)… 2. 准确性(25分)…"></textarea></div>' +
       '<div class="field" style="margin-bottom:12px;"><label>校验点（ground_truth.checkpoints）</label></div>' +
       '<div id="cp-list"></div>' +
       '<button class="btn secondary" id="btn-add-cp" type="button">+ 添加校验点</button> ' +
@@ -279,6 +280,7 @@
       timeout_s: Number(el("g-timeout").value || 300),
       tags: el("g-tags").value.trim(),
       description: el("g-desc").value.trim(),
+      rubric: el("g-rubric").value.trim(),
       checkpoints: collectCheckpoints()
     };
     el("btn-gen").disabled = true;

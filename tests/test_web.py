@@ -279,3 +279,47 @@ def test_task_generate_invalid(client):
         json={"id": "bad id!!", "title": "x", "level": "L9", "checkpoints": []},
     )
     assert r.status_code == 400
+
+
+def test_task_generate_llm_judge_rubric(tmp_path, monkeypatch):
+    """V2.2：生成 llm_judge 任务时写入 rubric，且生成后可被框架正常加载。"""
+    monkeypatch.setattr(
+        "agent_eval.runner.get_backend", lambda name, **kw: FakeBackend(**kw)
+    )
+    from agent_eval.web.app import create_app
+
+    tasks_dir = _make_tasks_dir(tmp_path)
+    app = create_app(
+        tasks_dir=tasks_dir,
+        results_dir=tmp_path / "results" / "runs",
+        report_dir=tmp_path / "reports",
+        db_path=tmp_path / "results" / "run_history.db",
+    )
+    c = TestClient(app)
+
+    r = c.post(
+        "/api/tasks/generate",
+        json={
+            "id": "T602",
+            "title": "LLM 判分任务",
+            "level": "L5",
+            "verifier": "llm_judge",
+            "weight": 2.0,
+            "timeout_s": 300,
+            "tags": "report",
+            "description": "基于聊天记录输出周报",
+            "rubric": "1. 内容完整性(30分); 2. 信息准确性(25分)",
+            "checkpoints": [
+                {"id": "c1", "type": "file_exists", "path": "output/report.md", "desc": "已生成周报"},
+            ],
+        },
+    )
+    assert r.status_code == 200, r.text
+    text = Path(r.json()["spec_path"]).read_text(encoding="utf-8")
+    assert "verifier: llm_judge" in text
+    assert "rubric" in text and "内容完整性" in text
+
+    tasks = c.get("/api/tasks").json()["tasks"]
+    t = next(x for x in tasks if x["id"] == "T602")
+    assert t["verifier"] == "llm_judge"
+    assert "内容完整性" in t["rubric"]

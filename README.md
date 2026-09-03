@@ -30,6 +30,12 @@
 
 * **Web 评测工作台（V2.1）**：本地 FastAPI + 单页前端，浏览器全程操作——新建任务、运行、下钻轨迹、对比、看报告，CLI 引擎零重写
 
+* **LLM-as-a-Judge 语义判分（V2.2）**：`verifier: llm_judge` 的开放任务（如 T502 周报）在确定性校验之外，由 LLM 按 rubric 判分（完整性/准确性/结构/语言），verdict 附带 score 与 reasoning，可下钻
+
+* **可选 Langfuse 分析层（V2.2）**：默认零依赖 no-op；设置 `AGENT_EVAL_TRACE=langfuse` + 凭据后自动记录每次 LLM 调用（输入/输出/token/耗时），用于成本与行为归因
+
+* **一键启动（V2.2）**：`agent-eval workbench` 或双击 `start_workbench.bat` 即启动工作台；`scripts/build_workbench.py` 可打包为单文件可执行程序
+
 ## 快速开始
 
 环境要求：Python 3.9+，一个 LLM API Key（默认 DeepSeek）。
@@ -63,11 +69,19 @@ agent-eval run --task T001 --agent minimal-react --runs 3   # 多 run 采样（V
 
 agent-eval report                              # 聚合全部 run 生成报告（reports/report.html）
 
-\# 5) Web 评测工作台（V2.1，可选）
+\# 5) Web 评测工作台（V2.1+，可选）
 
 pip install -e ".\[web]"
 
 python -m agent\_eval.web --port 8000          # 浏览器打开 http://127.0.0.1:8000
+
+agent-eval workbench                          # 等价启动命令；或双击 start\_workbench.bat
+
+\# 6) Langfuse 分析层（V2.2，可选）
+
+\#    setx AGENT\_EVAL\_TRACE "langfuse" + 配置 LANGFUSE\_PUBLIC\_KEY / SECRET\_KEY / HOST
+
+pip install langfuse                          # 未安装时自动降级为 no-op
 ```
 
 ## 后端（Backend）
@@ -122,19 +136,25 @@ ai-agent-eval/
 
 │   ├── stats.py          # 多 run 采样统计（best/mean/std/pass_rate）
 
+│   ├── judge.py          # V2.2 LLM-as-a-Judge 语义判分器（verifier=llm_judge）
+
+│   ├── observability.py  # V2.2 可选 Langfuse trace 层（默认 no-op）
+
 │   ├── web/              # V2.1 Web 工作台：app.py(FastAPI) / store.py(SQLite) / taskgen.py / static/ 单页前端
 
 │   └── backends/         # 后端注册表（base / minimal\_react / aider）
 
-├── tasks/                # 任务包：manifest.yaml + \<id>/spec.yaml + fixtures/
+├── tasks/                # 任务包：manifest.yaml + \<id>/spec.yaml + fixtures/（T001/T102/T205/T401/T502/T601）
 
-├── scripts/              # gen\_fixtures.py + 各任务判定脚本 verify\_\*.py
+├── scripts/              # gen\_fixtures.py + 各任务判定脚本 verify\_\*.py + build\_workbench.py
 
 ├── results/              # run 产物（git 忽略）
 
 ├── reports/              # 报告输出（git 忽略）
 
-├── docs/                 # task-spec.md + PROGRESS.md
+├── start\_workbench.bat   # 一键启动工作台（双击即可）
+
+├── docs/                 # task-spec.md + PROGRESS.md + V2_PLAN.md
 
 └── LICENSE               # MIT
 ```
@@ -147,7 +167,9 @@ ai-agent-eval/
 
 * **适配度差异**：不同 Agent 擅长不同任务类型（如 aider 在 "改已有代码" 上通过，在 "从零生成数据产物" 上可能循环超时）—— 这正是评测要暴露的信息
 
-* **MVP 未做**：Langfuse 可观测、黑盒采集器（豆包工作 / WorkBuddy 等桌面端）、插件注册表、LLM-as-a-Judge、Docker 沙箱隔离
+* **已完成**：LLM-as-a-Judge（T502 闭环，开放任务语义判分）、Langfuse 可选分析层、T601 日志统计任务、一键启动（workbench 命令 / bat / PyInstaller）
+
+* **V2.2 未做**：黑盒采集器（豆包工作 / WorkBuddy 等桌面端，需桌面级自动化）、插件注册表、Docker 沙箱隔离
 
 ## Web 工作台（V2.1）
 
@@ -173,6 +195,8 @@ ai-agent-eval/
 
 * V2.0（引擎地基）：框架单测 + 命令沙箱 + 多 run 采样（已完成）
 
-* V2.1（Web 工作台）：FastAPI + 单页前端 + SQLite（已实现，待验证）
+* V2.1（Web 工作台）：FastAPI + 单页前端 + SQLite（已实现，pytest 56 全绿）
 
-* V2.2：Langfuse 追踪、LLM-as-a-Judge、黑盒采集器、插件注册表、多后端横向基准、pip 发布
+* V2.2（增强，已实现待验收）：LLM-as-a-Judge（T502 闭环 + rubric）· Langfuse 可选分析层 · T601 日志统计任务 · 一键启动（workbench/bat/PyInstaller）
+
+* V2.2 未做：黑盒桌面端采集器、插件注册表、Docker 沙箱隔离、pip 发布

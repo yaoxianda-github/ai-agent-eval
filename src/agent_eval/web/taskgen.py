@@ -54,7 +54,7 @@ def build_spec(data: dict) -> dict:
     if not checkpoints:
         raise ValueError("至少需要一个校验点")
 
-    return {
+    spec: dict = {
         "id": task_id,
         "title": title,
         "level": level,
@@ -67,6 +67,11 @@ def build_spec(data: dict) -> dict:
         "cost_budget_usd": float(data.get("cost_budget_usd", 0.5)),
         "timeout_s": int(data.get("timeout_s", 300)),
     }
+    # V2.2：llm_judge 任务可自定义评分标准 rubric（可选，缺省用内置默认）
+    rubric = str(data.get("rubric", "")).strip()
+    if rubric:
+        spec["rubric"] = rubric
+    return spec
 
 
 def generate_task_pack(tasks_dir: Path, data: dict) -> dict:

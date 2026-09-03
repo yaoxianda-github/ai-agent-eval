@@ -1,6 +1,6 @@
 # V2 实施计划：本地优先 Web 评测工作台
 
-> 更新：2026-09-04（**V2.0 完成 3/3**；V2.1 已实现 + 运行链路修复完成，待最终验收/提交）
+> 更新：2026-09-04（**V2.0 完成 3/3**；V2.1 已实现 + 修复完成；V2.2 已实现并验证通过，待提交）
 > 定位：给测试工程师使用的、**本地优先的 Web 评测工作台**（用户已确认方向）
 > 高保真原型：`docs/workbench_prototype.html`（已定稿，6 个页面，含任务管理）
 
@@ -58,9 +58,17 @@ FastAPI 服务层（list-tasks / list-backends / run / runs / report）
 
 实现清单：`src/agent_eval/web/`（app.py / store.py / taskgen.py / __main__.py / static/）、`tests/test_web.py`（13 用例，TestClient + FakeBackend）。
 
-### V2.2 增强（迭代，不设死期）
+### V2.2 增强（2026-09-04 晚实现，已验证通过）
 
-Langfuse 追踪接入（分析层）· LLM-as-a-Judge（T502 开放任务）· 更多后端/任务 · 黑盒桌面端采集 · 一键打包启动。
+**已实现**：
+- **LLM-as-a-Judge 判分器**：`judge.py`（client 可注入、无 key/失败/无产物诚实降级、verdict 与确定性同构 + score/reasoning）；`runner` 在 `verifier=llm_judge` 时追加语义判分；`TaskSpec` 新增 `rubric` 字段；T502 配自定义 rubric 闭环；任务生成器/前端表单支持 llm_judge + rubric
+- **Langfuse 可选分析层**：`observability.py` 默认 no-op，`AGENT_EVAL_TRACE=langfuse` + 凭据时记录每次 LLM 调用（token/耗时）；minimal_react 每步与 judge 判分均已埋点；未装 SDK 静默降级
+- **新任务 T601（日志错误统计）**：确定性判定 + `scripts/verify_t601.py` 复核脚本，任务包扩至 6 个
+- **一键启动**：`agent-eval workbench` 命令 + `start_workbench.bat`（双击启动）+ `scripts/build_workbench.py`（PyInstaller 打包）
+
+**未做（明确不做）**：黑盒桌面端采集器（豆包工作/WorkBuddy，需桌面级自动化，超出本环境能力）· 插件注册表 · Docker 沙箱隔离 · pip 发布。
+
+自测：`tests/test_judge.py`（FakeClient 注入，7 用例）+ `tests/test_observability.py`（3 用例）+ `test_web.py` 新增 llm_judge/rubric 生成用例；全量 pytest **67 全绿（已确认）**；T502 真实判分 6/6（score 0.92）、T601 真实运行 3/3（score 1.0）均已通过。
 
 ## 四、里程碑与 Git
 
@@ -70,7 +78,8 @@ Langfuse 追踪接入（分析层）· LLM-as-a-Judge（T502 开放任务）· �
 - [ ] V2.0-Day3 多 run 采样 + 统计 + 报告采样区块（待提交）
 - [ ] V2.1 Web 工作台：FastAPI + 单页前端 + SQLite + 13 个 web 用例（实现+修复完成，待最终验收/提交）
 - [ ] V2.1 全流程打通（新建任务 → 运行 → 下钻 → 对比 → 报告）
-- [ ] V2.2 按里程碑逐个验收
+- [ ] V2.2 实现（LLM-as-a-Judge / Langfuse / T601 / 一键启动）验收：pytest 67 全绿 + T502 真实判分 + T601 真实运行
+- [ ] V2.2 未做项评估：黑盒采集器、插件注册表、Docker 沙箱、pip 发布
 
 ## 五、验收总标准
 
