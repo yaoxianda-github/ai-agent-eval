@@ -1,6 +1,6 @@
 # V2 实施计划：本地优先 Web 评测工作台
 
-> 更新：2026-09-03（**V2.0 完成 3/3**；V2.1 已实现，待验证/验收）
+> 更新：2026-09-04（**V2.0 完成 3/3**；V2.1 已实现 + 运行链路修复完成，待最终验收/提交）
 > 定位：给测试工程师使用的、**本地优先的 Web 评测工作台**（用户已确认方向）
 > 高保真原型：`docs/workbench_prototype.html`（已定稿，6 个页面，含任务管理）
 
@@ -34,7 +34,16 @@ FastAPI 服务层（list-tasks / list-backends / run / runs / report）
 
 ### V2.1 Web 工作台 MVP（6-10 个工作日，1-2 周）——按原型实现
 
-> 状态：**已实现完成**（2026-09-03 晚），待运行验证/验收。
+> 状态：**已实现**（2026-09-03 晚落盘，09-04 完成自测与修复），待最终验收（pytest 56 全绿 + 端到端走查 + git 提交）。
+
+**已完成的修复（2026-09-04）**：
+- Python 3.9 类型兼容：pydantic 运行时求值 `str | None` 失败 → `Optional[str]`
+- SQLite 跨线程：后台 run 线程写入 + API 请求线程读取 → `check_same_thread=False` + 线程锁
+- run_id 一致性：`run_one` 支持传入 `run_id`（Web 预生成 id 与实际落盘目录对齐）
+- 前端白屏：历史页一处字符串引号不配对（JS 语法错误）→ 修复
+- UI 布局：内容区完全拉满到屏幕右侧
+
+验收后置事项：`pytest` 56 全绿确认 → 工作台端到端走查 → git 提交推送（与 V2.0-Day3 分两笔 commit）。
 
 | 页面（对齐原型） | 后端能力 |
 |---|---|
@@ -47,7 +56,7 @@ FastAPI 服务层（list-tasks / list-backends / run / runs / report）
 
 技术选型：**FastAPI + 原生 JS 单页**（工程感强、面试可深挖、适合控制型工作台）；SQLite 持久化 run 历史索引。
 
-实现清单：`src/agent_eval/web/`（app.py / store.py / taskgen.py / __main__.py / static/）、`tests/test_web.py`（14 用例，TestClient + FakeBackend）。
+实现清单：`src/agent_eval/web/`（app.py / store.py / taskgen.py / __main__.py / static/）、`tests/test_web.py`（13 用例，TestClient + FakeBackend）。
 
 ### V2.2 增强（迭代，不设死期）
 
@@ -59,7 +68,7 @@ Langfuse 追踪接入（分析层）· LLM-as-a-Judge（T502 开放任务）· �
 - [x] `ea36faf` sandbox Windows 清理竞态修复（已推送）
 - [x] `ac66575` V2 实施计划 + V2.0-Day2 收尾（已推送）
 - [ ] V2.0-Day3 多 run 采样 + 统计 + 报告采样区块（待提交）
-- [ ] V2.1 Web 工作台：FastAPI + 单页前端 + SQLite + 14 个 web 用例（待验证/提交）
+- [ ] V2.1 Web 工作台：FastAPI + 单页前端 + SQLite + 13 个 web 用例（实现+修复完成，待最终验收/提交）
 - [ ] V2.1 全流程打通（新建任务 → 运行 → 下钻 → 对比 → 报告）
 - [ ] V2.2 按里程碑逐个验收
 
