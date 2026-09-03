@@ -28,6 +28,8 @@
 
 * **自包含 HTML 报告**：`agent-eval report` 聚合全部 run，离线可打开，适合演示与分享
 
+* **Web 评测工作台（V2.1）**：本地 FastAPI + 单页前端，浏览器全程操作——新建任务、运行、下钻轨迹、对比、看报告，CLI 引擎零重写
+
 ## 快速开始
 
 环境要求：Python 3.9+，一个 LLM API Key（默认 DeepSeek）。
@@ -57,7 +59,15 @@ agent-eval list-tasks                          # 列出任务包中的任务
 
 agent-eval run --task T001 --agent minimal-react   # 跑单个任务（-c 可加 --model）
 
+agent-eval run --task T001 --agent minimal-react --runs 3   # 多 run 采样（V2.0）
+
 agent-eval report                              # 聚合全部 run 生成报告（reports/report.html）
+
+\# 5) Web 评测工作台（V2.1，可选）
+
+pip install -e ".\[web]"
+
+python -m agent\_eval.web --port 8000          # 浏览器打开 http://127.0.0.1:8000
 ```
 
 ## 后端（Backend）
@@ -110,6 +120,10 @@ ai-agent-eval/
 
 │   ├── tools.py          # ReAct 工具集（路径安全限制在工作目录内）
 
+│   ├── stats.py          # 多 run 采样统计（best/mean/std/pass_rate）
+
+│   ├── web/              # V2.1 Web 工作台：app.py(FastAPI) / store.py(SQLite) / taskgen.py / static/ 单页前端
+
 │   └── backends/         # 后端注册表（base / minimal\_react / aider）
 
 ├── tasks/                # 任务包：manifest.yaml + \<id>/spec.yaml + fixtures/
@@ -135,10 +149,30 @@ ai-agent-eval/
 
 * **MVP 未做**：Langfuse 可观测、黑盒采集器（豆包工作 / WorkBuddy 等桌面端）、插件注册表、LLM-as-a-Judge、Docker 沙箱隔离
 
+## Web 工作台（V2.1）
+
+本地优先的单机工作台，浏览器全程操作，复用 CLI 引擎（零重写）：
+
+| 页面 | 能力 |
+| --- | --- |
+| 工作台 | 选任务/后端/模型/超时/采样次数 → 启动运行 → 轮询进度 → 结果 + 多 run 统计 |
+| 任务管理 | 现有任务列表 + 新建任务表单（动态校验点编辑器，生成 spec.yaml + fixtures 骨架 + 更新 manifest） |
+| 运行历史 | SQLite 索引，按任务/后端/状态筛选，点击下钻 |
+| 运行详情 | 判定结果 + 步骤轨迹 + 产物文件预览（含路径穿越防护） |
+| 对比 | Agent × 任务得分矩阵 + 采样统计（N/mean/best/σ）+ 任务通过率 |
+| 报告 | 复用引擎 reporter 生成自包含 HTML，iframe 内嵌查看 |
+| 设置 | 目录/版本 + 环境变量说明 |
+
+启动：`pip install -e ".[web]"` → `python -m agent_eval.web --port 8000` → 打开 http://127.0.0.1:8000
+
 ## 路线图
 
 
 
 * MVP（1 周）：5 任务任务包 × 2 后端，HTML 对比报告
 
-* 后续：Langfuse 追踪、黑盒采集器、插件注册表、多后端横向基准、pip 发布
+* V2.0（引擎地基）：框架单测 + 命令沙箱 + 多 run 采样（已完成）
+
+* V2.1（Web 工作台）：FastAPI + 单页前端 + SQLite（已实现，待验证）
+
+* V2.2：Langfuse 追踪、LLM-as-a-Judge、黑盒采集器、插件注册表、多后端横向基准、pip 发布

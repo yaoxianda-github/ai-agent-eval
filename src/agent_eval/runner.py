@@ -49,10 +49,15 @@ def run_one(
     config: dict | None = None,
     results_dir: Path | None = None,
     keep_workspace: bool = True,
+    run_id: str | None = None,
 ) -> RunRecord:
-    """对单个任务执行一次评测，返回并落盘 RunRecord。"""
+    """对单个任务执行一次评测，返回并落盘 RunRecord。
+
+    run_id：可选。不传时自动生成（CLI 默认行为）；Web 工作台传入预生成的
+    run_id，保证 API 返回的 run_id 与实际落盘目录一致。
+    """
     config = config or {}
-    run_id = uuid.uuid4().hex[:12]
+    run_id = run_id or uuid.uuid4().hex[:12]
     results_dir = results_dir or default_results_dir()
     run_dir = results_dir / run_id
     workspace = run_dir / "workspace"

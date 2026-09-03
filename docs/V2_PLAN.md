@@ -1,6 +1,6 @@
 # V2 实施计划：本地优先 Web 评测工作台
 
-> 更新：2026-09-03（**V2.0 完成 3/3**，V2.1 待启动）
+> 更新：2026-09-03（**V2.0 完成 3/3**；V2.1 已实现，待验证/验收）
 > 定位：给测试工程师使用的、**本地优先的 Web 评测工作台**（用户已确认方向）
 > 高保真原型：`docs/workbench_prototype.html`（已定稿，6 个页面，含任务管理）
 
@@ -34,16 +34,20 @@ FastAPI 服务层（list-tasks / list-backends / run / runs / report）
 
 ### V2.1 Web 工作台 MVP（6-10 个工作日，1-2 周）——按原型实现
 
+> 状态：**已实现完成**（2026-09-03 晚），待运行验证/验收。
+
 | 页面（对齐原型） | 后端能力 |
 |---|---|
-| 工作台（运行控制台） | FastAPI：任务列表 / 后端列表 / 参数 / 异步运行 + 进度 |
-| 任务管理（新建任务） | 任务 spec 生成（YAML + fixtures 骨架 + 判定脚本模板） |
-| 运行详情（判定+轨迹下钻） | run 详情 API（verdicts / steps / 产物） |
+| 工作台（运行控制台） | FastAPI：任务列表 / 后端列表 / 参数 / 异步运行 + 进度轮询 |
+| 任务管理（新建任务） | 任务 spec 生成（YAML + fixtures 骨架 + 校验点动态编辑器 + manifest 更新） |
+| 运行详情（判定+轨迹下钻） | run 详情 API（verdicts / steps / 产物预览） |
 | 对比（Agent×任务矩阵） | 聚合多 run 统计（均值/最好/方差） |
-| 运行历史 | run 历史查询 / 筛选 / 导出 |
-| 报告 | 复用 reporter 生成 HTML/JSON |
+| 运行历史 | SQLite run 索引，筛选 / 下钻 |
+| 报告 | 复用 reporter 生成 HTML，iframe 内嵌 |
 
-技术选型：**FastAPI + 原生 JS 单页**（工程感强、面试可深挖、适合控制型工作台）；SQLite 持久化 run 历史。
+技术选型：**FastAPI + 原生 JS 单页**（工程感强、面试可深挖、适合控制型工作台）；SQLite 持久化 run 历史索引。
+
+实现清单：`src/agent_eval/web/`（app.py / store.py / taskgen.py / __main__.py / static/）、`tests/test_web.py`（14 用例，TestClient + FakeBackend）。
 
 ### V2.2 增强（迭代，不设死期）
 
@@ -55,7 +59,7 @@ Langfuse 追踪接入（分析层）· LLM-as-a-Judge（T502 开放任务）· �
 - [x] `ea36faf` sandbox Windows 清理竞态修复（已推送）
 - [x] `ac66575` V2 实施计划 + V2.0-Day2 收尾（已推送）
 - [ ] V2.0-Day3 多 run 采样 + 统计 + 报告采样区块（待提交）
-- [ ] V2.1 骨架：FastAPI + 单页前端起服务
+- [ ] V2.1 Web 工作台：FastAPI + 单页前端 + SQLite + 14 个 web 用例（待验证/提交）
 - [ ] V2.1 全流程打通（新建任务 → 运行 → 下钻 → 对比 → 报告）
 - [ ] V2.2 按里程碑逐个验收
 
