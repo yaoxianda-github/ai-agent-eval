@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Agent 评测平台 · 零基础操作手册</title>
+<link rel="stylesheet" href="https://miaoda.feishu.cn/fonts/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+:root{
+  --bg:#F6F4EF;
+  --bg-soft:#EFECE4;
+  --ink:#16233B;
+  --ink2:#33415C;
+  --accent:#1F8A70;
+  --accent-soft:rgba(31,138,112,0.10);
+  --amber:#C58A2D;
+  --amber-soft:rgba(197,138,45,0.12);
+  --muted:#77819A;
+  --line:rgba(22,35,59,0.14);
+  --on-ink:#F6F4EF;
+  --on-ink-muted:rgba(246,244,239,0.74);
+  --font-sans:'Noto Sans SC','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
+  --font-mono:'IBM Plex Mono','SFMono-Regular',Consolas,'Courier New',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;}
+body{font-family:var(--font-sans);color:var(--ink2);background:var(--bg);line-height:1.7;font-size:17px;}
+
+.wrap{max-width:1080px;margin:0 auto;padding:0 28px;}
+
+/* ===== Hero ===== */
+.hero{background:var(--ink);color:var(--on-ink);position:relative;overflow:hidden;}
+.hero::after{
+  content:'';position:absolute;right:-120px;top:-120px;width:420px;height:420px;
+  background:radial-gradient(circle at center,rgba(31,138,112,0.35),transparent 68%);
+}
+.hero-inner{max-width:1080px;margin:0 auto;padding:72px 28px 64px;position:relative;z-index:1;}
+.hero .kicker{font-size:15px;font-weight:700;letter-spacing:.24em;color:#7FD4BC;text-transform:uppercase;}
+.hero h1{font-size:52px;font-weight:900;line-height:1.15;margin:18px 0 20px;max-width:20em;}
+.hero .sub{font-size:20px;color:var(--on-ink-muted);max-width:40em;}
+.hero .meta{margin-top:34px;display:flex;flex-wrap:wrap;gap:12px;}
+.hero .meta span{font-size:14px;color:var(--on-ink-muted);border:1px solid rgba(246,244,239,0.28);border-radius:999px;padding:6px 16px;}
+.hero .sim{
+  margin-top:40px;background:rgba(246,244,239,0.06);border:1px solid rgba(246,244,239,0.18);
+  border-radius:16px;padding:24px 28px;max-width:46em;
+}
+.hero .sim .t{font-size:15px;font-weight:700;color:#7FD4BC;letter-spacing:.08em;}
+.hero .sim p{font-size:18px;color:var(--on-ink);margin-top:8px;}
+
+/* ===== 章节导航 ===== */
+.nav{
+  position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line);
+}
+.nav-inner{max-width:1080px;margin:0 auto;padding:14px 28px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+.nav a{
+  font-size:15px;font-weight:500;color:var(--ink2);text-decoration:none;
+  padding:6px 14px;border-radius:999px;white-space:nowrap;
+}
+.nav a:hover{background:var(--accent-soft);color:var(--accent);}
+
+/* ===== 章节 ===== */
+section{padding:64px 0 8px;scroll-margin-top:70px;}
+.sec-head{display:flex;align-items:baseline;gap:16px;margin-bottom:8px;}
+.sec-no{font-family:var(--font-mono);font-size:20px;font-weight:600;color:var(--accent);}
+.sec-head h2{font-size:32px;font-weight:900;color:var(--ink);line-height:1.2;}
+.sec-lead{font-size:18px;color:var(--muted);max-width:46em;margin:6px 0 28px;}
+h3{font-size:21px;font-weight:900;color:var(--ink);margin:34px 0 12px;}
+p{margin:10px 0;max-width:60em;}
+.mono{font-family:var(--font-mono);}
+.accent{color:var(--accent);font-weight:600;}
+b,strong{color:var(--ink);}
+
+/* ===== 卡片网格 ===== */
+.grid{display:grid;gap:18px;margin:18px 0;}
+.g3{grid-template-columns:repeat(auto-fit,minmax(280px,1fr));}
+.g2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr));}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px;}
+.card .tag{display:inline-block;font-size:13px;font-weight:700;color:var(--accent);border:1px solid rgba(31,138,112,0.45);border-radius:999px;padding:3px 12px;margin-bottom:10px;}
+.card h4{font-size:18px;font-weight:900;color:var(--ink);margin-bottom:6px;}
+.card p{font-size:15px;margin:0;color:var(--ink2);}
+.card.amber .tag{color:var(--amber);border-color:rgba(197,138,45,0.5);}
+
+/* ===== 流程示意 ===== */
+.pipeline{display:flex;flex-wrap:wrap;gap:12px;align-items:stretch;margin:22px 0;}
+.pipe{flex:1 1 150px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;}
+.pipe .n{font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--accent);}
+.pipe .t{font-size:16px;font-weight:900;color:var(--ink);margin-top:2px;}
+.pipe .d{font-size:13.5px;color:var(--muted);margin-top:4px;line-height:1.5;}
+.pipe-arr{align-self:center;color:var(--muted);font-size:20px;padding:0 2px;}
+
+/* ===== 步骤 ===== */
+.steps{list-style:none;margin:20px 0;display:flex;flex-direction:column;gap:16px;}
+.steps li{display:flex;gap:18px;}
+.steps .n{
+  flex:none;width:40px;height:40px;border-radius:50%;background:var(--ink);color:var(--on-ink);
+  font-family:var(--font-mono);font-weight:600;font-size:18px;display:flex;align-items:center;justify-content:center;
+}
+.steps .b h4{font-size:18px;font-weight:900;color:var(--ink);}
+.steps .b p{font-size:15.5px;margin:4px 0 0;}
+
+/* ===== 代码块 ===== */
+.code{
+  font-family:var(--font-mono);font-size:15px;line-height:1.65;color:#EAF0EC;
+  background:#14203A;border-radius:12px;padding:18px 22px;margin:14px 0;
+  overflow-x:auto;white-space:pre;border:1px solid rgba(255,255,255,0.08);
+}
+.code .cmt{color:#8FA0C2;}
+.code .cmd{color:#7FD4BC;}
+
+/* ===== 表格 ===== */
+.tbl-scroll{overflow-x:auto;margin:16px 0;}
+table{width:100%;border-collapse:collapse;background:#fff;min-width:640px;}
+th,td{text-align:left;padding:12px 16px;font-size:14.5px;border-bottom:1px solid var(--line);vertical-align:top;}
+th{font-weight:700;color:var(--accent);background:var(--bg-soft);white-space:nowrap;}
+td{color:var(--ink2);line-height:1.6;}
+td.mono,th.mono{font-family:var(--font-mono);}
+td:first-child{font-weight:600;color:var(--ink);}
+tr:last-child td{border-bottom:none;}
+.tag-pill{display:inline-block;font-size:12.5px;font-weight:700;border-radius:999px;padding:2px 10px;white-space:nowrap;}
+.pill-green{color:var(--accent);background:var(--accent-soft);}
+.pill-amber{color:var(--amber);background:var(--amber-soft);}
+.pill-gray{color:var(--muted);background:rgba(119,129,154,0.14);}
+
+/* ===== 界面示意 ===== */
+.win{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;margin:18px 0;max-width:920px;}
+.win .bar{display:flex;align-items:center;gap:7px;background:var(--bg-soft);padding:10px 16px;border-bottom:1px solid var(--line);}
+.win .bar .d{width:11px;height:11px;border-radius:50%;background:rgba(22,35,59,0.18);}
+.win .addr{flex:1;margin-left:8px;font-family:var(--font-mono);font-size:13px;color:var(--muted);background:#fff;border-radius:6px;padding:5px 12px;}
+.win .body{display:flex;min-height:360px;}
+.win .side{width:172px;background:var(--ink);color:var(--on-ink);padding:16px 12px;display:flex;flex-direction:column;gap:6px;flex:none;}
+.win .side .logo{font-size:14px;font-weight:900;margin-bottom:8px;color:#7FD4BC;}
+.win .side .nav{font-size:13.5px;padding:6px 10px;border-radius:7px;color:var(--on-ink-muted);}
+.win .side .nav.on{background:var(--accent);color:#fff;font-weight:700;}
+.win .main{flex:1;padding:18px 22px;display:flex;flex-direction:column;gap:12px;overflow:auto;}
+.win .main .cap{font-size:16px;font-weight:900;color:var(--ink);}
+.win .row{display:flex;gap:10px;align-items:center;font-size:13.5px;color:var(--ink2);}
+.win .ctl{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:13.5px;color:var(--ink2);}
+.win .btn{background:var(--accent);color:#fff;border-radius:7px;padding:7px 18px;font-size:13.5px;font-weight:700;}
+.win .prog{height:11px;background:var(--bg);border:1px solid var(--line);border-radius:6px;overflow:hidden;}
+.win .prog i{display:block;height:100%;width:62%;background:var(--accent);}
+.win .cell{display:flex;gap:8px;font-size:13.5px;color:var(--ink2);padding:6px 0;border-bottom:1px solid var(--line);}
+.win .cell b{font-family:var(--font-mono);color:var(--accent);flex:none;}
+.fig-cap{font-size:13.5px;color:var(--muted);margin:4px 0 6px;}
+
+/* ===== FAQ / 术语 ===== */
+.faq{display:flex;flex-direction:column;gap:12px;margin:18px 0;}
+.faq details{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 20px;}
+.faq summary{font-size:16px;font-weight:700;color:var(--ink);cursor:pointer;}
+.faq details p{font-size:15px;margin:10px 0 0;}
+
+.note{
+  border-left:3px solid var(--accent);background:var(--accent-soft);
+  border-radius:0 12px 12px 0;padding:14px 18px;margin:16px 0;font-size:15px;
+}
+.note.warn{border-color:var(--amber);background:var(--amber-soft);}
+.note b{color:var(--ink);}
+
+/* ===== 结尾 ===== */
+.footer{margin-top:60px;background:var(--ink);color:var(--on-ink);}
+.footer-inner{max-width:1080px;margin:0 auto;padding:44px 28px;display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between;align-items:flex-end;}
+.footer h3{font-size:22px;font-weight:900;color:var(--on-ink);margin:0;}
+.footer p{color:var(--on-ink-muted);font-size:14.5px;margin:6px 0 0;}
+.footer .mono{color:#7FD4BC;}
+
+@media (max-width:768px){
+  body{font-size:16px;}
+  .hero h1{font-size:34px;}
+  .hero .sub{font-size:17px;}
+  .hero-inner{padding:48px 20px 44px;}
+  .wrap{padding:0 20px;}
+  .nav a{font-size:14px;padding:5px 11px;}
+  .sec-head h2{font-size:25px;}
+  .sec-lead{font-size:16px;}
+  .code{font-size:13px;padding:14px 16px;}
+  table{min-width:560px;}
+  .win .side{width:128px;}
+  .win .body{min-height:320px;}
+}
+</style>
+</head>
+<body>
+
+<!-- ===== Hero ===== -->
+<header class="hero">
+  <div class="hero-inner">
+    <div class="kicker">AI Agent 评测平台 · 操作手册</div>
+    <h1>给 Agent 出题、批改、打分，一页讲明白</h1>
+    <p class="sub">本手册写给从没接触过 Agent 评测的初级测试工程师。你不需要懂大模型原理，也不需要会写复杂代码——跟着步骤走，就能完成第一次评测，并理解每个表单参数的含义。</p>
+    <div class="meta">
+      <span>适用：ai-agent-eval 工作台</span>
+      <span>版本：V2.2</span>
+      <span>前置：Python 3.9+ 环境</span>
+      <span>耗时：约 10 分钟上手</span>
+    </div>
+    <div class="sim">
+      <div class="t">一句话理解这个平台</div>
+      <p>评测平台 = 给每个 AI Agent「出一套题」，让它在一个干净的工作目录里完成，再按「批改清单」逐条核对产物，最后给出一份带证据的得分报告。</p>
+    </div>
+  </div>
+</header>
+
+<!-- ===== 导航 ===== -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="#s1">1 是什么</a>
+    <a href="#s2">2 安装启动</a>
+    <a href="#s3">3 第一次评测</a>
+    <a href="#s4">4 表单参数</a>
+    <a href="#s5">5 新建任务</a>
+    <a href="#s6">6 看结果</a>
+    <a href="#s7">7 常见问题</a>
+    <a href="#s8">8 术语表</a>
+  </div>
+</nav>
+
+<div class="wrap">
+
+<!-- ===== 1 是什么 ===== -->
+<section id="s1">
+  <div class="sec-head">
+    <span class="sec-no">01</span>
+    <h2>评测平台是什么</h2>
+  </div>
+  <p class="sec-lead">先建立整体概念，再动手。这一节回答三个问题：评测的完整流程、四个关键概念、零基础最常见的顾虑。</p>
+
+  <h3>一次评测的完整流程</h3>
+  <p>整个评测可以拆成五个环节，每一步都有产物、可追溯：</p>
+  <div class="pipeline">
+    <div class="pipe"><div class="n">01</div><div class="t">任务包</div><div class="d">任务描述 + 初始文件 + 批改清单</div></div>
+    <div class="pipe-arr">→</div>
+    <div class="pipe"><div class="n">02</div><div class="t">评测引擎</div><div class="d">准备干净工作目录，调用 Agent</div></div>
+    <div class="pipe-arr">→</div>
+    <div class="pipe"><div class="n">03</div><div class="t">Agent 执行</div><div class="d">读任务、操作文件、产出结果</div></div>
+    <div class="pipe-arr">→</div>
+    <div class="pipe"><div class="n">04</div><div class="t">判定批改</div><div class="d">按校验点核对产物，逐条 PASS / FAIL</div></div>
+    <div class="pipe-arr">→</div>
+    <div class="pipe"><div class="n">05</div><div class="t">报告</div><div class="d">得分 + 轨迹 + 产物，一键出 HTML 报告</div></div>
+  </div>
+
+  <h3>四个必须理解的概念</h3>
+  <div class="grid g3">
+    <div class="card">
+      <div class="tag">任务 Task</div>
+      <h4>一套「考题」</h4>
+      <p>包含给 Agent 的指令（description）、初始文件（fixtures）、批改清单（checkpoints）和分值权重。任务都放在 <span class="mono">tasks/</span> 目录，一个任务一个文件夹。</p>
+    </div>
+    <div class="card">
+      <div class="tag">后端 Agent</div>
+      <h4>一个「考生」</h4>
+      <p>被测的 AI 助手。平台内置自研的 minimal-react 白盒 Agent，也可接入 aider 等第三方工具。同一套题可以让多个考生各做一遍，横向对比。</p>
+    </div>
+    <div class="card">
+      <div class="tag">校验点 Checkpoint</div>
+      <h4>批改清单的一条</h4>
+      <p>一条可自动执行的判定规则，例如「文件 output/report.md 存在」「内容包含 ERROR_COUNT=3」。全部通过 = 任务通过。</p>
+    </div>
+    <div class="card">
+      <div class="tag">得分 Score</div>
+      <h4>一次考试的结果</h4>
+      <p>得分 = 任务权重 × 校验点通过率。判分依据、步骤轨迹、原始产物全部保留，可一路下钻看证据。</p>
+    </div>
+  </div>
+
+  <h3>零基础最常见的问题</h3>
+  <div class="faq">
+    <details>
+      <summary>会不会很复杂？我需要先学大模型知识吗？</summary>
+      <p>不需要。平台把「评测」抽象成了「出题 + 批改」。你只需要：选一个任务 → 点运行 → 看结果。背后的模型调用、沙箱隔离、判分逻辑都由框架处理。</p>
+    </details>
+    <details>
+      <summary>我需要写代码吗？</summary>
+      <p>只是使用：完全不用。工作台全程浏览器操作。如果你以后想自己「出题」（新增任务），只需要填一张表单，平台会自动生成配置文件。</p>
+    </details>
+    <details>
+      <summary>跑一次评测会花很多钱吗？</summary>
+      <p>会消耗少量 LLM API 费用，但成本可控：默认模型 deepseek-chat 很便宜；单任务有成本预算上限（cost_budget_usd，默认 0.5 美元）；采样次数（runs）默认 1 次。第一次体验建议先跑 1 次。</p>
+    </details>
+    <details>
+      <summary>结果靠谱吗？会不会是 Agent「自报成绩」？</summary>
+      <p>不会。判定完全看产物，不看 Agent 自己怎么说——校验点检查的是真实生成的文件内容和命令执行结果。而且多 run 采样会给出多次运行的最好 / 平均 / 波动，把「运气」也暴露出来。</p>
+    </details>
+  </div>
+</section>
+
+<!-- ===== 2 安装启动 ===== -->
+<section id="s2">
+  <div class="sec-head">
+    <span class="sec-no">02</span>
+    <h2>安装与启动</h2>
+  </div>
+  <p class="sec-lead">环境准备好后，三步即可打开工作台。以下命令均在终端（Windows 的 CMD 或 PowerShell）执行。</p>
+
+  <h3>第 1 步：安装框架</h3>
+  <div class="code"><span class="cmt"># 进入项目目录</span>
+cd D:\xdyao\DoubaoWork\projects\ai-agent-eval
+
+<span class="cmt"># 安装开发依赖 + Web 工作台依赖</span>
+pip install -e ".[dev]"
+pip install -e ".[web]"</div>
+  <p>第一次安装会自动装上 FastAPI、uvicorn 等依赖。若提示失败，确认 Python 版本 ≥ 3.9（命令行执行 <span class="mono">python --version</span> 可查看）。</p>
+
+  <h3>第 2 步：配置 LLM API Key</h3>
+  <p>评测需要调用大模型让 Agent 干活。平台默认使用 DeepSeek，需要你准备一个 API Key。配置后请<span class="accent">重开终端</span>再继续。</p>
+  <div class="code"><span class="cmt"># Windows（写入用户环境变量，永久生效）</span>
+setx DEEPSEEK_API_KEY "sk-你的密钥"</div>
+  <div class="note">没有 Key 也能安装和打开工作台，但「运行评测」会因缺少密钥而失败。平台会如实报错，不会假装成功。</div>
+
+  <h3>第 3 步：启动工作台</h3>
+  <p>推荐方式（双击即可）：直接双击项目根目录的 <span class="mono">start_workbench.bat</span>。或在终端执行：</p>
+  <div class="code">agent-eval workbench</div>
+  <p>看到如下输出后，用浏览器打开 <span class="mono">http://127.0.0.1:8000</span> 就进入工作台了。</p>
+  <div class="code">Web 评测工作台启动中: http://127.0.0.1:8000 （Ctrl+C 停止）</div>
+  <div class="note warn">也可以换端口启动：<span class="mono">agent-eval workbench --port 8080</span>；或直接跑 <span class="mono">python -m agent_eval.web --port 8000</span>。关闭终端或按 Ctrl+C 即可停止服务。</div>
+</section>
+
+<!-- ===== 3 第一次评测 ===== -->
+<section id="s3">
+  <div class="sec-head">
+    <span class="sec-no">03</span>
+    <h2>第一次评测：4 步上手</h2>
+  </div>
+  <p class="sec-lead">第一次体验推荐用自带任务「T601 日志错误统计」——输入是一份日志文件，任务简单、判定明确、费用极低。</p>
+
+  <ol class="steps">
+    <li>
+      <div class="n">1</div>
+      <div class="b">
+        <h4>进入「工作台」视图</h4>
+        <p>打开 http://127.0.0.1:8000，左侧导航点击「工作台」，这是运行评测的入口。</p>
+      </div>
+    </li>
+    <li>
+      <div class="n">2</div>
+      <div class="b">
+        <h4>选择任务</h4>
+        <p>任务下拉框选择 <span class="mono">T601 · 日志错误统计</span>。任务列表来自 tasks 目录，会自动加载。</p>
+      </div>
+    </li>
+    <li>
+      <div class="n">3</div>
+      <div class="b">
+        <h4>点击「开始运行」</h4>
+        <p>后端、模型先用默认值（minimal-react / deepseek-chat），采样次数保持 1。点击后页面开始轮询进度。</p>
+      </div>
+    </li>
+    <li>
+      <div class="n">4</div>
+      <div class="b">
+        <h4>等待结果，查看判定</h4>
+        <p>几秒到几十秒后运行完成，页面展示每个校验点的 PASS / FAIL、得分，以及步骤轨迹和产物文件。</p>
+      </div>
+    </li>
+  </ol>
+
+  <h3>工作台长什么样</h3>
+  <div class="win">
+    <div class="bar"><span class="d"></span><span class="d"></span><span class="d"></span><div class="addr">127.0.0.1:8000</div></div>
+    <div class="body">
+      <div class="side">
+        <div class="logo">评测工作台</div>
+        <div class="nav on">工作台</div>
+        <div class="nav">任务管理</div>
+        <div class="nav">运行历史</div>
+        <div class="nav">运行详情</div>
+        <div class="nav">对比</div>
+        <div class="nav">报告</div>
+        <div class="nav">设置</div>
+      </div>
+      <div class="main">
+        <div class="cap">运行控制台</div>
+        <div class="row"><span>任务</span><div class="ctl">T601 · 日志错误统计</div></div>
+        <div class="row"><span>后端</span><div class="ctl">minimal-react</div></div>
+        <div class="row"><span>模型</span><div class="ctl">deepseek-chat</div><div class="btn">开始运行</div></div>
+        <div class="prog"><i></i></div>
+        <div class="cell"><b>[PASS]</b>已生成错误统计报告</div>
+        <div class="cell"><b>[PASS]</b>ERROR 计数正确（fixtures 3 条）</div>
+        <div class="cell"><b>[PASS]</b>独立复核与实际日志一致</div>
+      </div>
+    </div>
+  </div>
+  <p class="fig-cap">界面示意：工作台视图形态，真实界面以运行结果为准</p>
+
+  <div class="note"><b>怎么看结果：</b>绿色 [PASS] 表示该条校验点通过；[FAIL] 表示未通过，可在「运行详情」里下钻看判定依据、Agent 的每一步操作轨迹和生成的真实文件——找到「为什么没过」，比只看分数更有价值。</div>
+</section>
+
+<!-- ===== 4 表单参数 ===== -->
+<section id="s4">
+  <div class="sec-head">
+    <span class="sec-no">04</span>
+    <h2>表单参数详解</h2>
+  </div>
+  <p class="sec-lead">这是本手册的重点。「工作台」视图里的每个输入框、下拉框都对应一次评测的关键设置。下面逐个解释：它是什么、怎么选、新手建议。</p>
+
+  <h3>运行控制台：5 个参数</h3>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>参数</th><th>是什么</th><th>可选值</th><th>新手建议</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="mono">任务</td>
+          <td>要执行的考题（Task），决定 Agent 要完成什么、按什么清单批改。</td>
+          <td>任务列表，来自 <span class="mono">tasks/</span>（当前 6 个：T001/T102/T205/T401/T502/T601）</td>
+          <td>第一次选 <span class="mono">T601</span>，简单直观、费用低。</td>
+        </tr>
+        <tr>
+          <td class="mono">后端</td>
+          <td>被测的 Agent（考生）。不同后端能力与风格不同。</td>
+          <td><span class="mono">minimal-react</span>（自研白盒，记录每一步）· <span class="mono">aider</span>（第三方黑盒）</td>
+          <td>默认 minimal-react 即可，轨迹最完整。</td>
+        </tr>
+        <tr>
+          <td class="mono">模型</td>
+          <td>驱动 Agent 的底层大模型名。</td>
+          <td>默认 <span class="mono">deepseek-chat</span>，可换成你 Key 支持的其它模型</td>
+          <td>保持默认。换模型会改变行为，是评测的「自变量」之一。</td>
+        </tr>
+        <tr>
+          <td class="mono">超时（秒）</td>
+          <td>单个 Agent 本次运行的最长时长，超过即强制停止，判为未完成。</td>
+          <td>覆盖任务默认值（通常 300，T502 为 600，T601 为 120）</td>
+          <td>不填就用任务默认。任务卡住时，这是兜底保护。</td>
+        </tr>
+        <tr>
+          <td class="mono">采样次数</td>
+          <td>同一任务重复运行的次数（runs，1–20）。Agent 有随机性，跑多次才能看出稳定性。</td>
+          <td>1 – 20，默认 1</td>
+          <td>体验用 1；正式对比建议 3，可看到 best / mean / std。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>命令行等价参数</h3>
+  <p>如果你偏好命令行，同一套设置用 <span class="mono">agent-eval run</span> 完成，参数一一对应：</p>
+  <div class="code"><span class="cmd"># 完整参数示例</span>
+agent-eval run --task T601 --agent minimal-react --model deepseek-chat --timeout 120 --runs 3
+
+<span class="cmt"># 常用组合：跑 3 次采样看统计</span>
+agent-eval run --task T502 --agent minimal-react --runs 3
+<span class="cmt"># 输出示例：</span>
+<span class="cmt"># 统计 (N=3): best=0.92 mean=0.88 std=0.05 pass_rate=1.0</span></div>
+
+  <h3>这些参数背后的设计意图</h3>
+  <div class="grid g2">
+    <div class="card">
+      <div class="tag">为什么要采样</div>
+      <h4>对抗非确定性</h4>
+      <p>同一个 Agent 跑同一道题，结果可能不同。单次成绩可能是「运气」。多跑几次，<span class="mono">best</span> 看能力上限、<span class="mono">mean</span> 看平均水平、<span class="mono">std</span> 看稳定性。</p>
+    </div>
+    <div class="card">
+      <div class="tag">为什么要超时</div>
+      <h4>防止失控拖垮评测</h4>
+      <p>Agent 可能陷入死循环或长时间空转。超时会强制终止该次运行并记录，不会阻塞整批任务。</p>
+    </div>
+    <div class="card">
+      <div class="tag">后端 vs 模型</div>
+      <h4>两个不同的「变量」</h4>
+      <p>后端是 Agent 的思考与工具框架，模型是底层的语言能力。评测时可以固定一个、只改另一个，才能得出可信对比。</p>
+    </div>
+    <div class="card">
+      <div class="tag">成本控制</div>
+      <h4>评测不是烧钱</h4>
+      <p>采样次数、模型选择、任务成本预算共同控制花费。建议先小步验证，再放大采样。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 5 新建任务 ===== -->
+<section id="s5">
+  <div class="sec-head">
+    <span class="sec-no">05</span>
+    <h2>进阶：新建一个任务</h2>
+  </div>
+  <p class="sec-lead">会「出题」才算真正会用评测平台。在「任务管理」视图点新建，填一张表单，平台自动生成 spec.yaml、fixtures 骨架，并更新任务清单。</p>
+
+  <h3>新建任务表单字段</h3>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>字段</th><th>必填</th><th>说明</th><th>示例</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="mono">任务 ID</td><td><span class="tag-pill pill-green">必填</span></td><td>唯一标识，3–20 位字母/数字/下划线</td><td class="mono">T601</td></tr>
+        <tr><td class="mono">标题</td><td><span class="tag-pill pill-green">必填</span></td><td>给人和 Agent 看的简短名称</td><td>日志错误统计</td></tr>
+        <tr><td class="mono">级别</td><td><span class="tag-pill pill-green">必填</span></td><td>难度分层：L1 单步 / L2 多步 / L3 跨工具 / L4 故障注入 / L5 开放式</td><td class="mono">L2</td></tr>
+        <tr><td class="mono">描述</td><td>选填</td><td>给 Agent 的完整指令主体，越明确越好</td><td>读取 input/app.log，统计 ERROR 行数…</td></tr>
+        <tr><td class="mono">标签</td><td>选填</td><td>逗号分隔，便于检索</td><td class="mono">data, logging</td></tr>
+        <tr><td class="mono">判定方式</td><td><span class="tag-pill pill-green">必填</span></td><td><span class="mono">deterministic</span> 确定性校验；<span class="mono">llm_judge</span> 追加 LLM 语义判分（适合开放题）</td><td class="mono">deterministic</td></tr>
+        <tr><td class="mono">校验点</td><td><span class="tag-pill pill-green">至少 1 条</span></td><td>批改清单，可动态增删，每条含 id / 类型 / 判定字段</td><td class="mono">c1 file_exists…</td></tr>
+        <tr><td class="mono">权重</td><td>选填</td><td>任务得分占比，默认 1.0（T502 用 2.0 提高权重）</td><td class="mono">1.0</td></tr>
+        <tr><td class="mono">成本上限</td><td>选填</td><td>cost_budget_usd，预估单次花费上限，默认 0.5</td><td class="mono">0.1</td></tr>
+        <tr><td class="mono">超时</td><td>选填</td><td>timeout_s，默认 300 秒</td><td class="mono">120</td></tr>
+        <tr><td class="mono">评分标准 rubric</td><td>选填</td><td>仅判定方式为 llm_judge 时有效；缺省用内置标准（完整性/准确性/结构/语言）</td><td>四个章节各占 30/25/25/20 分…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>5 种校验点，一张表看懂</h3>
+  <p>校验点是任务的核心。它决定「什么算做对了」。</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>类型</th><th>判定逻辑（通过条件）</th><th>需要填写的字段</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="mono">file_exists</td><td>某个文件 / 目录存在</td><td class="mono">path</td></tr>
+        <tr><td class="mono">file_not_exists</td><td>某个文件 / 目录不存在</td><td class="mono">path</td></tr>
+        <tr><td class="mono">content_contains</td><td>文件内容匹配指定正则</td><td class="mono">path + pattern</td></tr>
+        <tr><td class="mono">content_not_contains</td><td>文件内容不包含指定正则</td><td class="mono">path + pattern</td></tr>
+        <tr><td class="mono">cmd_exit_zero</td><td>执行命令退出码为 0</td><td class="mono">cmd</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note"><b>约定：</b><span class="mono">path</span> 相对 Agent 的工作目录；<span class="mono">cmd</span> 中的 <span class="mono">@scripts/xxx.py</span> 会被替换成项目 <span class="mono">scripts/</span> 的绝对路径——把复核脚本放仓库里，避免被 Agent 篡改。</div>
+
+  <h3>一个完整例子：T601 日志错误统计</h3>
+  <p>输入是一份日志，要求 Agent 统计 ERROR 行数并写报告。它的三个校验点正好覆盖了三种典型判型：</p>
+  <div class="code"><span class="cmt"># tasks/T601/spec.yaml（节选）</span>
+description: 读取 input/app.log，统计 ERROR 级别日志行数，
+  输出 output/errors_report.md，第一行为 ERROR_COUNT=&lt;数量&gt;
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists          <span class="cmt"># ① 产物文件存在</span>
+      path: output/errors_report.md
+    - id: c2
+      type: content_contains     <span class="cmt"># ② 内容里有正确计数</span>
+      path: output/errors_report.md
+      pattern: "ERROR_COUNT=3"
+    - id: c3
+      type: cmd_exit_zero        <span class="cmt"># ③ 独立复核脚本通过</span>
+      cmd: "python @scripts/verify_t601.py ."
+
+verifier: deterministic</div>
+  <p>看到 <span class="mono">c3</span> 了吗？它用一段独立脚本重新核对报告计数是否和日志真实行数一致——这就是「判定也要被验证」，避免 Agent 写对了格式却没数对数据。</p>
+</section>
+
+<!-- ===== 6 看结果 ===== -->
+<section id="s6">
+  <div class="sec-head">
+    <span class="sec-no">06</span>
+    <h2>查看结果与报告</h2>
+  </div>
+  <p class="sec-lead">评测的价值在于可解释：每个结论都能一路下钻到原始证据。</p>
+
+  <h3>五个视图各看什么</h3>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>视图</th><th>用途</th><th>重点看什么</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="mono">工作台</td><td>发起评测</td><td>任务 / 后端 / 模型 / 超时 / 采样设置</td></tr>
+        <tr><td class="mono">任务管理</td><td>浏览与新建任务</td><td>新建任务表单、校验点编辑器</td></tr>
+        <tr><td class="mono">运行历史</td><td>查看所有历史运行</td><td>按任务 / 后端 / 状态筛选，点击下钻</td></tr>
+        <tr><td class="mono">运行详情</td><td>单次运行的完整证据</td><td>verdict 判定、步骤轨迹、产物文件预览</td></tr>
+        <tr><td class="mono">对比</td><td>Agent × 任务横向对比</td><td>得分矩阵 + 采样统计（N / mean / best / σ）</td></tr>
+        <tr><td class="mono">报告</td><td>生成可分享的 HTML 报告</td><td>聚合全部 run 的汇总报告，可离线打开</td></tr>
+        <tr><td class="mono">设置</td><td>查看环境信息</td><td>目录 / 版本 / 环境变量说明</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>如何阅读运行详情</h3>
+  <div class="grid g2">
+    <div class="card">
+      <div class="tag">判定结果 verdict</div>
+      <h4>逐条 PASS / FAIL</h4>
+      <p>每条校验点对应一条判定，带通过状态与说明。所有校验点通过 = 任务通过。</p>
+    </div>
+    <div class="card">
+      <div class="tag">步骤轨迹 steps</div>
+      <h4>Agent 做了什么</h4>
+      <p>白盒后端记录每一步（调用哪个工具、参数、观察结果）。黑盒后端记录单次调用输出。报告会注明口径。</p>
+    </div>
+    <div class="card">
+      <div class="tag">产物预览</div>
+      <h4>看真实文件</h4>
+      <p>工作目录里的产物文件可在线预览。仅支持常见文本类型且 ≤ 200KB，并做了路径穿越防护，安全浏览。</p>
+    </div>
+    <div class="card">
+      <div class="tag">采样统计</div>
+      <h4>多次运行怎么看</h4>
+      <p><span class="mono">N</span> 采样数 · <span class="mono">best</span> 最高分 · <span class="mono">mean</span> 平均分 · <span class="mono">std</span> 标准差（越小越稳）· <span class="mono">pass_rate</span> 通过率。</p>
+    </div>
+  </div>
+
+  <h3>一键生成分享报告</h3>
+  <p>在「报告」视图点击生成，或命令行执行 <span class="mono">agent-eval report</span>，会聚合全部运行记录，产出一个自包含的 HTML 报告（<span class="mono">reports/report.html</span>），离线也能打开，适合发给同事或放在评审里。</p>
+
+  <h3>关于语义判分（llm_judge）</h3>
+  <p>像「写周报」这类开放任务，无法用「文件内容匹配」判断质量。此时判定方式选 <span class="mono">llm_judge</span>，框架会让 LLM 按 rubric 打分（满分 100 折算成 0–1），输出 score 和 reasoning（判分理由）。</p>
+  <div class="note warn"><b>注意：</b>llm_judge 需要 API Key；若缺 Key、判分调用失败或没有产物，该条会如实记为不通过，但<span class="accent">不会中断整次评测</span>——这是平台「诚实降级」的设计。</div>
+</section>
+
+<!-- ===== 7 常见问题 ===== -->
+<section id="s7">
+  <div class="sec-head">
+    <span class="sec-no">07</span>
+    <h2>常见问题与排障</h2>
+  </div>
+  <p class="sec-lead">按「现象 → 原因 → 处理」整理最常见的问题。更详细日志可查看结果目录下的 run.json。</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>现象</th><th>可能原因</th><th>处理</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>运行报「缺少 LLM API Key」</td>
+          <td>未配置 DEEPSEEK_API_KEY / LLM_API_KEY</td>
+          <td>执行 <span class="mono">setx DEEPSEEK_API_KEY "sk-..."</span> 后重开终端，再启动工作台。</td>
+        </tr>
+        <tr>
+          <td>运行报「未知后端」</td>
+          <td>后端名称拼写错误或未安装</td>
+          <td>在下拉框里选存在的后端；aider 需额外 <span class="mono">pip install -e ".[aider]"</span>。</td>
+        </tr>
+        <tr>
+          <td>运行报「未知任务」</td>
+          <td>任务 ID 不存在于任务清单</td>
+          <td>在任务管理确认；任务目录需在 tasks/ 且在 manifest.yaml 中登记。</td>
+        </tr>
+        <tr>
+          <td>8080/8000 端口被占用</td>
+          <td>已有进程监听该端口</td>
+          <td>换端口：<span class="mono">agent-eval workbench --port 8081</span>。</td>
+        </tr>
+        <tr>
+          <td>产物预览失败</td>
+          <td>类型不在白名单，或文件 &gt; 200KB</td>
+          <td>预览仅支持 md/txt/csv/json/log/py/yaml/yml/xml/html/svg 且 ≤ 200KB；大文件请本地打开。</td>
+        </tr>
+        <tr>
+          <td>结果一直 pending / running</td>
+          <td>Agent 卡住或任务耗时长</td>
+          <td>等待超时强杀（任务默认超时）；或检查网络 / Key 是否有效。</td>
+        </tr>
+        <tr>
+          <td>多次运行结果不稳定</td>
+          <td>Agent 本身有随机性</td>
+          <td>属正常现象。加大采样次数（runs）看 best / mean / std，不要用单次下结论。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note"><b>结果都存在哪：</b>每次运行的结果在 <span class="mono">results/runs/&lt;run_id&gt;/</span>（含 run.json、workspace 工作目录），SQLite 只是历史索引，原始证据始终是文件。</div>
+</section>
+
+<!-- ===== 8 术语表 ===== -->
+<section id="s8">
+  <div class="sec-head">
+    <span class="sec-no">08</span>
+    <h2>术语速查表</h2>
+  </div>
+  <p class="sec-lead">遇到不认识的词，回这里查。</p>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>术语</th><th>含义</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="mono">Task 任务</td><td>一套考题：指令 + 初始文件 + 批改清单</td></tr>
+        <tr><td class="mono">Backend 后端</td><td>被测 Agent，如 minimal-react（白盒）/ aider（黑盒）</td></tr>
+        <tr><td class="mono">Checkpoint 校验点</td><td>批改清单里的一条判定规则（5 种类型）</td></tr>
+        <tr><td class="mono">Verdict 判定</td><td>单个校验点的结果：passed + 依据</td></tr>
+        <tr><td class="mono">Score 得分</td><td>权重 × 校验点通过率</td></tr>
+        <tr><td class="mono">Run 一次运行</td><td>一次完整的「任务 + Agent」评测</td></tr>
+        <tr><td class="mono">Runs 采样次数</td><td>同一任务重复运行次数（1–20），用于对抗随机性</td></tr>
+        <tr><td class="mono">Fixtures 初始文件</td><td>运行前复制进干净工作目录的输入文件</td></tr>
+        <tr><td class="mono">Workspace 工作目录</td><td>Agent 本次运行的沙箱目录，产物在其中</td></tr>
+        <tr><td class="mono">Spec 任务卡</td><td>tasks/&lt;id&gt;/spec.yaml，任务契约文件</td></tr>
+        <tr><td class="mono">Manifest 清单</td><td>tasks/manifest.yaml，登记任务包包含哪些任务</td></tr>
+        <tr><td class="mono">run.json</td><td>一次运行的完整结果文件（权威记录）</td></tr>
+        <tr><td class="mono">Rubric 评分标准</td><td>llm_judge 语义判分时的评分细则</td></tr>
+        <tr><td class="mono">LLM-as-a-Judge</td><td>用 LLM 对开放任务产物做语义打分</td></tr>
+        <tr><td class="mono">deterministic 判定</td><td>确定性校验点判定（文件/内容/命令）</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+</div>
+
+<!-- ===== 结尾 ===== -->
+<footer class="footer">
+  <div class="footer-inner">
+    <div>
+      <h3>现在，打开工作台试试看</h3>
+      <p>第一次评测建议：T601 + minimal-react + 采样 1 次。跑通之后，再尝试采样 3 次看统计。</p>
+    </div>
+    <p>ai-agent-eval · V2.2 · <span class="mono">github.com/yaoxianda-github/ai-agent-eval</span></p>
+  </div>
+</footer>
+
+</body>
+</html>
