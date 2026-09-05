@@ -1,0 +1,42 @@
+id: T002
+title: 文本标点与 BOM 规范化
+level: L1
+description: |
+  读取 input/ 下所有 .txt 文件：去除 UTF-8 BOM 头，并将全角标点（，。！？；：）
+  转换为半角标点（, . ! ? ; :），覆盖写回原文件。
+  最后生成 output/report.md，说明共处理了几个文件。
+tags: [file, text, encoding]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/report.md
+      desc: 已生成处理报告
+    - id: c2
+      type: content_not_contains
+      path: input/*.txt
+      pattern: "\ufeff"
+      desc: 所有 txt 已去除 BOM
+    - id: c3
+      type: content_not_contains
+      path: input/*.txt
+      pattern: "[，。！？；：]"
+      desc: 所有 txt 不再含全角标点
+    - id: c4
+      type: content_contains
+      path: output/report.md
+      pattern: "文件"
+      desc: 报告中提及处理文件
+    - id: c5
+      type: cmd_exit_zero
+      cmd: "python @scripts/verify_t002.py ."
+      desc: 独立复核：无 BOM 且无全角标点
+
+verifier: deterministic
+weight: 1.0
+cost_budget_usd: 0.1
+timeout_s: 300

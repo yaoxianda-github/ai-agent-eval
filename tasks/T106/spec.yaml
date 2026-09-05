@@ -1,0 +1,28 @@
+id: T106
+title: JSON 配置修复
+level: L2
+description: |
+  input/config.json 存在多处非法配置：字段类型错误（name 应为字符串、version 应为整数、
+  retries 应为整数）与取值范围越界（timeout 应在 1-60 之间、max_conn 应不小于 1、
+  rate_limit 应在 0-1 之间）。请修复所有问题，输出 output/config.fixed.json，
+  要求是一个合法 JSON 且全部字段满足上述约束。不要修改 input/config.json。
+tags: [data, json, config]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/config.fixed.json
+      desc: 已生成修复后的配置
+    - id: c2
+      type: cmd_exit_zero
+      cmd: "python @scripts/verify_t106.py ."
+      desc: 独立复核：JSON 合法且字段类型与范围全部正确
+
+verifier: deterministic
+weight: 1.2
+cost_budget_usd: 0.1
+timeout_s: 300

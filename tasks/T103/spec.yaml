@@ -1,0 +1,31 @@
+id: T103
+title: 多源订单合并去重
+level: L2
+description: |
+  读取 input/orders_a.csv 与 input/orders_b.csv（列：order_id, customer, amount），
+  两文件存在重复 order_id（以 a 文件为准）。合并去重后输出 output/merged.csv（列：order_id, customer, amount），
+  并按 order_id 排序。同时输出 output/stats.md，需包含两行：TOTAL_ORDERS=<唯一订单数> 与 TOTAL_AMOUNT=<总金额>。
+tags: [data, csv, merge, dedup]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/merged.csv
+      desc: 已生成合并文件
+    - id: c2
+      type: file_exists
+      path: output/stats.md
+      desc: 已生成统计说明
+    - id: c3
+      type: cmd_exit_zero
+      cmd: "python @scripts/verify_t103.py ."
+      desc: 独立复核：去重结果与统计数字一致
+
+verifier: deterministic
+weight: 1.2
+cost_budget_usd: 0.1
+timeout_s: 300

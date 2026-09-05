@@ -1,0 +1,33 @@
+id: T207
+title: 日志多级统计报告
+level: L3
+description: |
+  读取 input/app.log，日志行格式为：YYYY-MM-DD HH:MM:SS LEVEL [module] message。
+  统计各级别（INFO/ERROR/WARN）的行数，以及出现 ERROR 最多的 3 个模块。
+  输出 output/log_report.md，需包含以下键值行（值精确）：
+  TOTAL=、INFO=、ERROR=、WARN=，以及 ERROR_TOP3=<模块1,模块2,模块3>（按 ERROR 数降序，并列按模块名排序）。
+tags: [data, logging, analysis]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/log_report.md
+      desc: 已生成日志统计报告
+    - id: c2
+      type: content_contains
+      path: output/log_report.md
+      pattern: "ERROR=5"
+      desc: ERROR 计数正确（fixtures 中 5 条）
+    - id: c3
+      type: cmd_exit_zero
+      cmd: "python @scripts/verify_t207.py ."
+      desc: 独立复核：级别计数与 ERROR 模块 Top3 与实际日志一致
+
+verifier: deterministic
+weight: 1.5
+cost_budget_usd: 0.1
+timeout_s: 300

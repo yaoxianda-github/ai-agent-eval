@@ -1,0 +1,28 @@
+id: T307
+title: 逻辑推理谜题
+level: L2
+description: |
+  读取 input/puzzle.txt 中的谜题并解答，将答案（一个整数）写入 output/answer.txt，
+  不要包含其他内容。
+  （任务形态借鉴 AgentBench 的横向思维谜题（Lateral Thinking Puzzles）子任务：
+  纯文本推理、答案唯一、可精确判定。）
+tags: [reasoning, puzzle, agentbench, exact_match]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/answer.txt
+      desc: 已写出答案
+    - id: c2
+      type: cmd_exit_zero
+      cmd: "python @scripts/verify_t307.py ."
+      desc: 独立复核：答案精确匹配
+
+verifier: deterministic
+weight: 1.2
+cost_budget_usd: 0.05
+timeout_s: 300

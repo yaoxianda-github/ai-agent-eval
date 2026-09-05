@@ -1,0 +1,18 @@
+2026-08-03 09:01:00 INFO [api] request handled id=1
+2026-08-03 09:02:00 INFO [api] request handled id=2
+2026-08-03 09:03:00 INFO [api] request handled id=3
+2026-08-03 09:04:00 INFO [api] request handled id=4
+2026-08-03 09:05:00 INFO [api] request handled id=5
+2026-08-03 09:06:00 INFO [api] request handled id=6
+2026-08-03 09:01:30 INFO [db] query ok id=1
+2026-08-03 09:02:30 INFO [db] query ok id=2
+2026-08-03 09:03:30 INFO [db] query ok id=3
+2026-08-03 09:04:30 INFO [db] query ok id=4
+2026-08-03 10:00:00 ERROR [auth] login failed user=u1
+2026-08-03 10:01:00 ERROR [auth] token expired user=u2
+2026-08-03 10:02:00 ERROR [api] 500 on /v1/items
+2026-08-03 10:03:00 ERROR [api] 500 on /v1/orders
+2026-08-03 10:04:00 ERROR [db] connection timeout
+2026-08-03 10:05:00 WARN [api] slow request 1.2s
+2026-08-03 10:06:00 WARN [db] retry count high
+2026-08-03 10:07:00 WARN [auth] password weak

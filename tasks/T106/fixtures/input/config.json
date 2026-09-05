@@ -1,0 +1,9 @@
+{
+  "name": 123,
+  "service": "worker",
+  "version": "2",
+  "retries": 3,
+  "timeout": 120,
+  "max_conn": -5,
+  "rate_limit": 1.5
+}

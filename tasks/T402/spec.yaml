@@ -1,0 +1,35 @@
+id: T402
+title: 性能缺陷修复
+level: L4
+description: |
+  input/processor.py 读取 input/orders.csv（列：order_id, amount），按 amount 降序排名，
+  输出 output/rank.txt，每行格式：rank,order_id,amount（rank 从 1 开始）。
+  当前实现存在两个缺陷：
+  1) 排名从 0 开始（应为 1）；
+  2) 使用冒泡排序，复杂度 O(n^2)，在数据量较大时非常慢。
+  请修复这两个问题（可用内置排序），保持输出格式不变。不要修改 input/orders.csv。
+  修复后运行脚本生成 output/rank.txt，并确保在较大数据量（约 2 万行）下也能快速完成（<10 秒）。
+tags: [code, python, performance, fault]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/rank.txt
+      desc: 已生成排名结果
+    - id: c2
+      type: cmd_exit_zero
+      cmd: "python input/processor.py"
+      desc: 修复后的脚本可成功运行
+    - id: c3
+      type: cmd_exit_zero
+      cmd: "python @scripts/verify_t402.py ."
+      desc: 独立复核：排名正确且大数据量下性能达标
+
+verifier: deterministic
+weight: 1.5
+cost_budget_usd: 0.1
+timeout_s: 600

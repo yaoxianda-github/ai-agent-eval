@@ -1,0 +1,27 @@
+id: T003
+title: 文件批量重命名规范化
+level: L1
+description: |
+  input/ 目录下的文件名命名混乱（含大写、空格、括号）。请按以下规则重命名所有文件：
+  1) 文件名转小写；2) 空格替换为 "-"；3) 移除字符 ( 和 )；4) 扩展名转小写。
+  重命名后在原目录保留，并生成 output/rename_map.md，每行格式：旧文件名 -> 新文件名。
+tags: [file, rename, convention]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/rename_map.md
+      desc: 已生成重命名映射
+    - id: c2
+      type: cmd_exit_zero
+      cmd: "python @scripts/verify_t003.py ."
+      desc: 独立复核：全部文件已按规则重命名且映射完整
+
+verifier: deterministic
+weight: 1.0
+cost_budget_usd: 0.1
+timeout_s: 300

@@ -1,0 +1,29 @@
+id: T308
+title: 销售数据条件查询
+level: L2
+description: |
+  读取 input/sales.csv（列：date, region, product, amount，date 格式 YYYY-MM-DD）。
+  查询「华东 区域在 2026 年第 1 季度（1-3 月）的总销售额」，将结果（保留两位小数的数字）
+  写入 output/answer.txt。答案应只含数字。
+  （任务形态借鉴 AgentBench 的数据库查询（Database Querying）子任务简化版：
+  条件筛选 + 聚合，答案唯一可精确判定。）
+tags: [data, query, aggregation, agentbench, exact_match]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/answer.txt
+      desc: 已写出答案
+    - id: c2
+      type: cmd_exit_zero
+      cmd: "python @scripts/verify_t308.py ."
+      desc: 独立复核：重算条件聚合结果并与 answer.txt 精确比对
+
+verifier: deterministic
+weight: 1.2
+cost_budget_usd: 0.1
+timeout_s: 300

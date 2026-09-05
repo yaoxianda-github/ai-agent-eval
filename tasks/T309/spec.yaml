@@ -1,0 +1,35 @@
+id: T309
+title: 迷你仓库 Issue 修复
+level: L4
+description: |
+  input/repo/ 是一个小型 Python 模块仓库。请阅读 input/repo/issue.md 中描述的缺陷，
+  修复 input/repo/stats.py 中 mean 与 median 的实现（mean 应返回平均值；median 应排序后
+  取中位数，偶数个取中间两数平均）。不要修改 input/repo/basic.py。
+  修复后输出 output/issue_resolved.md，说明你修复了什么（需含"修复"或"fixed"等字样）。
+  隐藏测试会独立校验修复的正确性。
+  （任务形态借鉴 SWE-bench 基准：仓库级 issue 驱动修复 + 隐藏测试判定。）
+tags: [code, python, issue, swe_bench, hidden_test]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/issue_resolved.md
+      desc: 已提交修复说明
+    - id: c2
+      type: content_contains
+      path: output/issue_resolved.md
+      pattern: "修复|fixed|resolved"
+      desc: 修复说明包含修复描述
+    - id: c3
+      type: cmd_exit_zero
+      cmd: "python @scripts/verify_t309.py ."
+      desc: 独立复核：隐藏测试断言 mean/median 全部通过
+
+verifier: deterministic
+weight: 1.5
+cost_budget_usd: 0.1
+timeout_s: 300

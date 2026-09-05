@@ -1,0 +1,49 @@
+id: T504
+title: 销售数据洞察分析
+level: L5
+description: |
+  input/orders.csv 为一年（2026 年）的订单数据，列：date, region, product, amount
+  （region 取值：华东/华北/华南/西部；product 取值：A/B/C）。
+  请分析数据并撰写 output/analysis.md 数据分析报告，需覆盖：
+  1) 总体规模（总订单数、总销售额）；
+  2) 按月趋势（含趋势判断）；
+  3) 区域对比（含华南/西部差异）；
+  4) 产品对比（Top 产品）；
+  5) 异常发现（例如 7 月华北的异常低谷）与原因推断；
+  6) 业务建议。
+  报告需基于真实数据，结构清晰、有数据支撑。
+tags: [data, analysis, report, llm_judge]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/analysis.md
+      desc: 已生成分析报告
+    - id: c2
+      type: content_contains
+      path: output/analysis.md
+      pattern: "趋势|月度|按月"
+      desc: 包含趋势分析
+    - id: c3
+      type: content_contains
+      path: output/analysis.md
+      pattern: "区域|region|地区"
+      desc: 包含区域对比
+
+verifier: llm_judge
+weight: 2.0
+cost_budget_usd: 0.3
+timeout_s: 600
+
+# 开放任务语义判分标准
+rubric: |
+  请对数据分析报告判分（满分 100）：
+  1. 内容完整性（30 分）：覆盖总体规模、按月趋势、区域对比、产品对比、异常发现、建议六个部分；
+  2. 数据准确性（25 分）：关键数字与订单数据一致（总销售额、区域排序、7 月华北异常等），无编造；
+  3. 分析深度（25 分）：趋势与异常有合理推断，而非仅罗列数字；
+  4. 组织与表达（20 分）：结构清晰、语言专业、无错别字。
+  评分参考：>=85 优秀，70-84 良好，60-69 及格，<60 不达标。

@@ -1,0 +1,43 @@
+id: T503
+title: 开源项目 README 撰写
+level: L5
+description: |
+  input/project/ 是一个小型 Python 项目（calculator.py 计算器模块、cli.py 命令行入口、
+  data_loader.py CSV 加载）。请阅读代码后撰写 output/README.md，需包含：
+  1) 项目简介；2) 模块功能说明；3) 安装与使用方式（含 CLI 示例）；4) 一个代码调用示例。
+  内容需准确反映项目实际能力，结构清晰、语言专业。
+tags: [doc, writing, llm_judge]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/README.md
+      desc: 已生成 README
+    - id: c2
+      type: content_contains
+      path: output/README.md
+      pattern: "```"
+      desc: 包含代码示例
+    - id: c3
+      type: content_contains
+      path: output/README.md
+      pattern: "使用|用法|Usage|安装|Install"
+      desc: 包含使用说明
+
+verifier: llm_judge
+weight: 2.0
+cost_budget_usd: 0.3
+timeout_s: 600
+
+# 开放任务语义判分标准
+rubric: |
+  请对 README 质量判分（满分 100）：
+  1. 内容完整性（30 分）：涵盖项目简介、模块说明、使用方式、代码示例四个部分；
+  2. 信息准确性（25 分）：对 calculator/cli/data_loader 的描述与代码实际能力一致，无虚构；
+  3. 组织清晰度（25 分）：结构层次分明、无重复冗余、易于阅读；
+  4. 语言表达（20 分）：通顺专业、无错别字。
+  评分参考：>=85 优秀，70-84 良好，60-69 及格，<60 不达标。

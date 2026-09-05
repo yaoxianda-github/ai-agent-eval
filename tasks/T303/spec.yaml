@@ -1,0 +1,34 @@
+id: T303
+title: 实现缺失函数并通过验证
+level: L4
+description: |
+  input/money.py 中的 parse_amount 函数当前抛出 NotImplementedError（待实现）。
+  请实现该函数：将金额字符串解析为浮点数，支持千分位逗号、$/$ 前缀、负数，
+  例如 "1,234.56" -> 1234.56、"$100" -> 100.0、"-50" -> -50.0、"- $50.5" -> -50.5。
+  input/tests/test_money.py 会调用该函数并断言结果，请勿修改测试文件。
+  实现后确保所有断言通过。
+tags: [code, python, implement]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: input/money.py
+      desc: 源文件存在
+    - id: c2
+      type: content_not_contains
+      path: input/money.py
+      pattern: "NotImplementedError"
+      desc: 缺失函数已被实现（不再抛出）
+    - id: c3
+      type: cmd_exit_zero
+      cmd: "python @scripts/verify_t303.py ."
+      desc: 独立复核：测试全部断言通过
+
+verifier: deterministic
+weight: 1.5
+cost_budget_usd: 0.1
+timeout_s: 300

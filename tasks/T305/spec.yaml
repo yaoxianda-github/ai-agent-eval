@@ -1,0 +1,28 @@
+id: T305
+title: 员工档案推理问答
+level: L3
+description: |
+  读取 input/employees.csv（列：name, dept_id, years, salary）。
+  找出「年薪最高且工龄（years）不小于 5 年」的员工，将其部门编号（dept_id）写入
+  output/answer.txt。答案应为一个数字（不要包含其他内容）。
+  （任务形态借鉴 GAIA 基准的精确短答案判定：多步读取与条件推理，答案唯一可精确匹配。）
+tags: [data, reasoning, gaia, exact_match]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/answer.txt
+      desc: 已写出答案
+    - id: c2
+      type: cmd_exit_zero
+      cmd: "python @scripts/verify_t305.py ."
+      desc: 独立复核：从数据重算答案并与 answer.txt 精确比对
+
+verifier: deterministic
+weight: 1.5
+cost_budget_usd: 0.1
+timeout_s: 300

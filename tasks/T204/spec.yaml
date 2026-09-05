@@ -1,0 +1,28 @@
+id: T204
+title: 文档按类别归档
+level: L3
+description: |
+  input/docs/ 下有若干 .md 文档，每篇首行为 front-matter（形如 category: api）。
+  请读取每篇文档的 category，将其移动到 output/archive/<类别>/ 目录下
+  （如 category: api 的文档移到 output/archive/api/），文件名保持不变。
+  原 input/docs/ 下不应再残留 .md 文件。目录不存在则创建。
+tags: [file, organize, frontmatter]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/archive
+      desc: 已创建归档目录
+    - id: c2
+      type: cmd_exit_zero
+      cmd: "python @scripts/verify_t204.py ."
+      desc: 独立复核：每篇文档按 category 归档到正确目录且原目录已清空
+
+verifier: deterministic
+weight: 1.5
+cost_budget_usd: 0.1
+timeout_s: 300
