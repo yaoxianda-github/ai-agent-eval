@@ -159,6 +159,28 @@ core:  [T001, T102, T103, T207, T305, T306, T308, T303, T401, T402]  # runs=3, t
 
 注：T303、T402 本轮 2/3（各 1 次 run 波动），runs=3 多数制（≥2 过即任务 PASS）恰好吸收了单次波动——这正是多采样的意义。
 
+### 6.3 被测后端切换 deepseek-harness（2026-09-06，正式卡口跑绿）
+
+按既定路线（minimal-react 为弱基线，换官方 agent harness 后重跑 core），完成 DeepSeek 官方 **deepseek-harness**（`dsh` CLI，MIT）接入：
+
+1. **后端实现** `src/agent_eval/backends/deepseek_harness.py`：黑盒 subprocess 调 `dsh --profile headless "<task>"`；
+2. **关键修复**：默认使用评测专用隔离 `DSH_HOME`（`~/.cache/agent-eval/dsh-home`，首次运行自动初始化 headless profile）——`~/.dsh` 携带用户个人凭据，实测导致 dsh AUTH 403 预扣失败且不可控；隔离后凭据只来自环境变量 `DEEPSEEK_API_KEY`，干净跑通；
+3. **兼容修复**：`__init__` 接收 `max_steps` 保留参数（runner 透传，黑盒无步数概念）；
+4. **CI workflow**：演示仓库 `agent-eval.yml` 增加 `setup-node@v4`（Node **22**，dsh 依赖 `Promise.withResolvers`，Node 20 启动即崩）+ 局部安装 `@deepseek-ai/dsh` 加入 PATH + `agent-eval ci --gate core --agent deepseek-harness`。
+
+实测数据（core 10 任务 × 3 runs）：
+
+| 项 | minimal-react（CI Run #16） | deepseek-harness（本地） | deepseek-harness（CI Run #18） |
+|---|---|---|---|
+| gate 通过率 | 0.8 < 0.9 **FAIL** | **1.0 ≥ 0.9 PASS** | **1.0 ≥ 0.9 PASS** |
+| T303（L4 验证） | 1/3 | 3/3 | 3/3 |
+| T402（L4 修复） | 1/3 | 3/3 | 3/3 |
+| 其余 8 任务 | 3/3 | 3/3 | 3/3 |
+| 总耗时 | 452.8s | 418.0s | 510.6s |
+| 合并动作 | 阻断（PR #3 关闭留证） | — | **放行（PR #4 已合并 main）** |
+
+结论：T303/T402 对 minimal-react 是真实能力瓶颈（非环境问题，verify 纯标准库无环境依赖）；切换官方 harness 后 core 卡口 10/10 稳定全绿。PR #4 合并后演示仓库 main 即 core + deepseek-harness 正式门禁。
+
 ## 7. 使用方法（接入真实项目）
 
 1. **仓库 Secrets**：Settings → Secrets and variables → Actions → 添加 `DEEPSEEK_API_KEY`（`agent-eval ci` 通过环境变量读取）。
@@ -168,7 +190,7 @@ core:  [T001, T102, T103, T207, T305, T306, T308, T303, T401, T402]  # runs=3, t
 
 ## 8. 后续扩展（按用户既定路线）
 
-- 被侧后端：前期 `minimal-react`（白盒基线），后续扩展到其它 Backend（注册表已支持）；
+- 被侧后端：`minimal-react`（白盒基线）与 **`deepseek-harness`（官方 agent harness，已接入并跑绿 core）**，注册表支持继续扩展；
 - checkpoint 级 testcase：已实现（JUnit 每个 checkpoint 一个 testcase）；
 - 多 agent 横向对比：`agent-eval ci` 支持指定 agent，可扩展 gate 定义"每 agent × 每任务"通过率矩阵；
 - 成本核算：工作台已有"预计成本/实际成本"列，CI 侧可将 `ci-report.json` 成本字段接入成本看板；
