@@ -9,6 +9,26 @@
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
   }
+  // 安全截断：按码点截断，不劈开 emoji 等代理对（避免 � 乱码）
+  function clip(s, n) {
+    s = String(s == null ? "" : s);
+    if (s.length <= n) return s;
+    var cut = n;
+    while (cut > 0) {
+      var c = s.charCodeAt(cut);
+      if (c >= 0xD800 && c <= 0xDFFF) { cut--; continue; }  // 落点在高位代理 → 前移
+      break;
+    }
+    return s.slice(0, cut) + "…";
+  }
+  // 轨迹参数序列化：dict → JSON 文本；否则字符串化
+  function strOf(v) {
+    if (v == null) return "";
+    if (typeof v === "object") {
+      try { return JSON.stringify(v); } catch (e) { return String(v); }
+    }
+    return String(v);
+  }
   function fmtTime(s) { return s ? String(s).slice(0, 19) : "-"; }
   function fmtDur(s) { var d = Number(s); return isFinite(d) ? d.toFixed(1) + "s" : "-"; }
 
@@ -454,8 +474,8 @@
       }).join("");
       var steps = (r.steps || []).map(function (s, i) {
         return '<div class="step-item"><b>#' + (i + 1) + "</b> " + esc(s.action || s.step || "") +
-          (s.args ? " <code>" + esc(String(s.args).slice(0, 120)) + "</code>" : "") +
-          (s.observation ? '<div class="muted">→ ' + esc(String(s.observation).slice(0, 160)) + "</div>" : "") +
+          (s.args ? " <code>" + esc(clip(strOf(s.args), 120)) + "</code>" : "") +
+          (s.observation ? '<div class="muted">→ ' + esc(clip(strOf(s.observation), 160)) + "</div>" : "") +
           "</div>";
       }).join("") || '<div class="muted">（黑盒后端无可视化轨迹）</div>';
       var sc = (r.metrics && r.metrics.score) || 0;

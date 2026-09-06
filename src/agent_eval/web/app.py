@@ -40,6 +40,19 @@ _READABLE_EXTS = {
 _MAX_FILE_BYTES = 200 * 1024
 
 
+def _clean_surrogates(v):
+    """清洗孤立代理项/异常控制符，防止前端显示 � 乱码（双保险，前端 clip 也已兜底）。"""
+    if isinstance(v, dict):
+        return {k: _clean_surrogates(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_clean_surrogates(x) for x in v]
+    if isinstance(v, str):
+        # 孤立代理项 → 丢弃；其他控制符（除 \n \t \r）→ 空格
+        cleaned = v.encode("utf-16", "surrogatepass").decode("utf-16", "ignore")
+        return "".join(ch if (ch in "\n\t\r" or ord(ch) >= 32) else " " for ch in cleaned)
+    return v
+
+
 def _app_version() -> str:
     try:
         return _pkg_version("agent-eval")
@@ -76,7 +89,9 @@ def create_app(
         p = results_dir / run_id / "run.json"
         if not p.exists():
             raise HTTPException(status_code=404, detail=f"run 不存在: {run_id}")
-        return json.loads(p.read_text(encoding="utf-8"))
+        rec = json.loads(p.read_text(encoding="utf-8"))
+        rec["steps"] = [_clean_surrogates(s) for s in (rec.get("steps") or [])]
+        return rec
 
     def _workspace(run_id: str) -> Path:
         ws = results_dir / run_id / "workspace"
