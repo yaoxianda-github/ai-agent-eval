@@ -1,0 +1,113 @@
+{
+  "generated_by": "agent_eval.costing.build_benchmark",
+  "note": "token 为 (agent, task) 历史 run 均值；定价见 pricing_for()",
+  "agents": {
+    "minimal-react": {
+      "T402": {
+        "runs": 1,
+        "prompt_tokens": 37834,
+        "completion_tokens": 1741
+      },
+      "T003": {
+        "runs": 1,
+        "prompt_tokens": 3775,
+        "completion_tokens": 317
+      },
+      "T504": {
+        "runs": 3,
+        "prompt_tokens": 91853,
+        "completion_tokens": 4962
+      },
+      "T308": {
+        "runs": 1,
+        "prompt_tokens": 2677,
+        "completion_tokens": 253
+      },
+      "T307": {
+        "runs": 1,
+        "prompt_tokens": 1655,
+        "completion_tokens": 120
+      },
+      "T305": {
+        "runs": 1,
+        "prompt_tokens": 1789,
+        "completion_tokens": 145
+      },
+      "T205": {
+        "runs": 1,
+        "prompt_tokens": 7333,
+        "completion_tokens": 946
+      },
+      "T207": {
+        "runs": 1,
+        "prompt_tokens": 4730,
+        "completion_tokens": 343
+      },
+      "T601": {
+        "runs": 1,
+        "prompt_tokens": 2559,
+        "completion_tokens": 162
+      },
+      "T502": {
+        "runs": 1,
+        "prompt_tokens": 3142,
+        "completion_tokens": 429
+      },
+      "T103": {
+        "runs": 1,
+        "prompt_tokens": 4403,
+        "completion_tokens": 498
+      },
+      "T503": {
+        "runs": 1,
+        "prompt_tokens": 7023,
+        "completion_tokens": 1918
+      },
+      "T401": {
+        "runs": 1,
+        "prompt_tokens": 4612,
+        "completion_tokens": 400
+      },
+      "T204": {
+        "runs": 1,
+        "prompt_tokens": 4220,
+        "completion_tokens": 304
+      },
+      "T102": {
+        "runs": 1,
+        "prompt_tokens": 4259,
+        "completion_tokens": 478
+      },
+      "T002": {
+        "runs": 1,
+        "prompt_tokens": 2489,
+        "completion_tokens": 430
+      },
+      "T309": {
+        "runs": 1,
+        "prompt_tokens": 9373,
+        "completion_tokens": 1048
+      },
+      "T001": {
+        "runs": 3,
+        "prompt_tokens": 8799,
+        "completion_tokens": 816
+      },
+      "T306": {
+        "runs": 1,
+        "prompt_tokens": 3117,
+        "completion_tokens": 288
+      },
+      "T106": {
+        "runs": 1,
+        "prompt_tokens": 1113,
+        "completion_tokens": 234
+      },
+      "T303": {
+        "runs": 1,
+        "prompt_tokens": 10304,
+        "completion_tokens": 1617
+      }
+    }
+  }
+}

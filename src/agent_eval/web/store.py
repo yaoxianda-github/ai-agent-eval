@@ -72,11 +72,13 @@ class RunStore:
 
     def list_runs(
         self,
-        limit: int = 100,
+        limit: int = 20,
+        offset: int = 0,
         task_id: str | None = None,
         agent_id: str | None = None,
         status: str | None = None,
-    ) -> list[dict]:
+    ) -> tuple[list[dict], int]:
+        """分页查询运行记录，返回 (记录列表, 满足筛选条件的总数)。"""
         sql = "SELECT * FROM runs"
         conds: list[str] = []
         args: list = []
@@ -89,14 +91,15 @@ class RunStore:
         if status:
             conds.append("status=?")
             args.append(status)
-        if conds:
-            sql += " WHERE " + " AND ".join(conds)
-        sql += " ORDER BY created_at DESC, run_id DESC LIMIT ?"
-        args.append(int(limit))
+        where = (" WHERE " + " AND ".join(conds)) if conds else ""
         with self._lock:
-            rows = self._conn.execute(sql, args).fetchall()
+            total = self._conn.execute(f"SELECT COUNT(*) FROM runs{where}", args).fetchone()[0]
+            rows = self._conn.execute(
+                sql + where + " ORDER BY created_at DESC, run_id DESC LIMIT ? OFFSET ?",
+                args + [int(limit), int(offset)],
+            ).fetchall()
             cols = [d[0] for d in self._conn.execute("SELECT * FROM runs LIMIT 1").description]
-        return [dict(zip(cols, r)) for r in rows]
+        return [dict(zip(cols, r)) for r in rows], int(total)
 
     def rebuild(self, results_dir: Path) -> int:
         """扫描 results_dir/*/run.json 重建索引，返回已索引 run 数。"""

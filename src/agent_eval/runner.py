@@ -84,6 +84,18 @@ def run_one(
             verdicts.append(judge_llm(task, workspace))
         metrics = score_task(task, verdicts)
 
+    # V2.3：LLM token 用量汇总（CI 成本核算；黑盒后端/无 key 时为 0）
+    usage: dict = {"prompt_tokens": 0, "completion_tokens": 0}
+    if result.usage:
+        usage["prompt_tokens"] += result.usage.get("prompt_tokens", 0) or 0
+        usage["completion_tokens"] += result.usage.get("completion_tokens", 0) or 0
+    for v in verdicts:
+        u = v.get("usage") if isinstance(v, dict) else None
+        if u:
+            usage["prompt_tokens"] += u.get("prompt_tokens", 0) or 0
+            usage["completion_tokens"] += u.get("completion_tokens", 0) or 0
+    metrics["usage"] = usage
+
     record = RunRecord(
         run_id=run_id,
         agent_id=agent_id,

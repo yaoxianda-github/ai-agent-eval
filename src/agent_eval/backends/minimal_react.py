@@ -94,6 +94,8 @@ class MinimalReactBackend(Backend):
             api_key=self.api_key,
             base_url=base_url or os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
         )
+        # LLM token 用量累计（CI 成本核算）
+        self._usage: dict = {"prompt_tokens": 0, "completion_tokens": 0}
 
     def _ask(self, messages: list[dict]) -> tuple[dict | None, str]:
         """调用 LLM 并解析 action；单步失败自动重试。返回 (action, raw)；action 为 None 表示重试耗尽。"""
@@ -107,12 +109,18 @@ class MinimalReactBackend(Backend):
                     max_tokens=600,
                 )
                 raw = resp.choices[0].message.content or ""
+                usage = getattr(resp, "usage", None)
+                if usage is not None:
+                    self._usage["prompt_tokens"] += getattr(usage, "prompt_tokens", 0) or 0
+                    self._usage["completion_tokens"] += (
+                        getattr(usage, "completion_tokens", 0) or 0
+                    )
                 trace_llm_call(
                     "agent_step",
                     model=self.model,
                     messages=messages,
                     response=raw,
-                    usage=getattr(resp, "usage", None),
+                    usage=usage,
                     tags=["minimal-react"],
                 )
                 action = _extract_json(raw)
@@ -139,6 +147,7 @@ class MinimalReactBackend(Backend):
                 status="error",
                 steps=[],
                 error="缺少 LLM API Key，请设置环境变量 DEEPSEEK_API_KEY",
+                usage=self._usage or None,
             )
 
         messages = [
@@ -161,6 +170,7 @@ class MinimalReactBackend(Backend):
                     steps=steps,
                     duration_s=round(time.time() - start, 3),
                     error=f"整体超时（>{self.timeout_s}s）",
+                    usage=self._usage or None,
                 )
             action, raw = self._ask(messages)
             if action is None:
@@ -172,6 +182,7 @@ class MinimalReactBackend(Backend):
                     steps=steps,
                     duration_s=round(time.time() - start, 3),
                     error=raw,
+                    usage=self._usage or None,
                 )
 
             tool = action.get("tool")
@@ -184,7 +195,10 @@ class MinimalReactBackend(Backend):
 
             if tool == "finish":
                 return BackendResult(
-                    status="completed", steps=steps, duration_s=round(time.time() - start, 3)
+                    status="completed",
+                    steps=steps,
+                    duration_s=round(time.time() - start, 3),
+                    usage=self._usage or None,
                 )
 
             messages.append({"role": "assistant", "content": raw})
@@ -195,4 +209,5 @@ class MinimalReactBackend(Backend):
             steps=steps,
             duration_s=round(time.time() - start, 3),
             error=f"达到最大步数 {self.max_steps}",
+            usage=self._usage or None,
         )

@@ -27,6 +27,9 @@
   // ---------- 状态 ----------
   var meta = null;
   var tasksCache = null;
+  var costsCache = null;
+  var histPage = 0;      // 运行历史当前页（从 0 起）
+  var histLimit = 20;    // 每页条数
   var backendsCache = null;
   var pollTimer = null;
 
@@ -44,6 +47,29 @@
   function loadBackends() {
     return api("/api/backends").then(function (d) { backendsCache = d.backends; return d.backends; });
   }
+  function loadCosts() {
+    return api("/api/costs").then(function (d) { costsCache = d; return d; });
+  }
+
+  // ---------- 成本计算说明提示（ⓘ） ----------
+  function costTip(html) {
+    return '<span class="cost-tip-wrap"><span class="cost-tip-icon" tabindex="0">ⓘ</span>' +
+      '<span class="cost-tip-box">' + html + "</span></span>";
+  }
+  function bindCostTips() {
+    var icons = document.querySelectorAll(".cost-tip-icon");
+    for (var i = 0; i < icons.length; i++) {
+      (function (ic) {
+        var wrap = ic.closest(".cost-tip-wrap");
+        if (!wrap) return;
+        ic.onmouseenter = function () { wrap.classList.add("open"); };
+        ic.onmouseleave = function () { wrap.classList.remove("open"); };
+        ic.onclick = function () { wrap.classList.toggle("open"); };
+        ic.onfocus = function () { wrap.classList.add("open"); };
+        ic.onblur = function () { wrap.classList.remove("open"); };
+      })(icons[i]);
+    }
+  }
 
   // ---------- 渲染容器 ----------
   function view() { return el("view"); }
@@ -55,8 +81,40 @@
   }
 
   // ---------- 视图：工作台 ----------
+  function updateCost() {
+    // 根据所选 任务/后端/采样次数 实时估算 LLM 成本
+    var taskId = el("f-task") && el("f-task").value;
+    var agentId = el("f-agent") && el("f-agent").value;
+    var runs = Math.max(1, Number((el("f-runs") && el("f-runs").value) || 1));
+    var box = el("f-cost");
+    if (!box || !costsCache || !taskId) return;
+    var price = costsCache.pricing || { input_cny_per_m: 2, output_cny_per_m: 3 };
+    var cell = ((costsCache.benchmark || {})[agentId] || {})[taskId];
+    var task = null;
+    if (tasksCache) {
+      for (var i = 0; i < tasksCache.length; i++) {
+        if (tasksCache[i].id === taskId) { task = tasksCache[i]; break; }
+      }
+    }
+    var pt, ct, src;
+    if (cell && (cell.prompt_tokens || cell.completion_tokens)) {
+      pt = cell.prompt_tokens * runs;
+      ct = cell.completion_tokens * runs;
+      src = "实测基准";
+    } else if (task) {
+      var est = (costsCache.level_estimate || {})[task.level] || { prompt_tokens: 4500, completion_tokens: 500 };
+      pt = est.prompt_tokens * runs;
+      ct = est.completion_tokens * runs;
+      if (task.verifier === "llm_judge") { pt += 1500 * runs; ct += 500 * runs; }
+      src = "估算";
+    } else { return; }
+    var cost = pt / 1e6 * price.input_cny_per_m + ct / 1e6 * price.output_cny_per_m;
+    box.innerHTML = "¥" + cost.toFixed(4) +
+      " <span class='muted'>（" + src + " · " + runs + " run）</span>";
+  }
+
   function viewDashboard() {
-    Promise.all([loadTasks(), loadBackends()]).then(function () {
+    Promise.all([loadTasks(), loadBackends(), loadCosts()]).then(function () {
       var taskOpts = tasksCache.map(function (t) {
         return '<option value="' + esc(t.id) + '">' + esc(t.id + " · " + t.title) + "</option>";
       }).join("");
@@ -76,10 +134,15 @@
             '<div class="field"><label>超时（秒，留空用任务默认）</label><input id="f-timeout" type="number" placeholder="300"></div>' +
             '<div class="field"><label>采样次数 --runs</label><input id="f-runs" type="number" value="1" min="1" max="20"></div>' +
           "</div>" +
+          '<div class="form-row"><div class="field"><label>预计 LLM 成本</label><span id="f-cost" class="muted">—</span></div></div>' +
           '<button class="btn" id="btn-run">开始运行</button> <span class="muted">多 run 采样用于对抗 LLM 非确定性</span>' +
         "</div>" +
         '<div id="run-result"></div>'
       );
+      el("f-task").onchange = updateCost;
+      el("f-agent").onchange = updateCost;
+      el("f-runs").oninput = updateCost;
+      updateCost();
       el("btn-run").onclick = startRun;
     }).catch(function (e) { renderErr(e.message); });
   }
@@ -181,14 +244,19 @@
   function viewTasks() {
     loadTasks().then(function () {
       var rows = tasksCache.map(function (t) {
+        var ce = t.cost_estimate;
+        var costTxt = ce ? (ce.source === "measured" ? "" : "~") + "¥" + ce.cost_cny.toFixed(4) : "—";
         return "<tr><td>" + esc(t.id) + "</td><td>" + esc(t.title) + "</td><td>" + esc(t.level) +
           "</td><td>" + esc(t.verifier) + "</td><td>" + esc(t.weight) + "</td><td>" +
-          (t.checkpoints ? t.checkpoints.length : 0) + " 个</td><td>" + esc(t.timeout_s) + "s</td></tr>";
+          (t.checkpoints ? t.checkpoints.length : 0) + " 个</td><td>" + esc(t.timeout_s) + "s</td><td>" +
+          costTxt + "</td></tr>";
       }).join("");
       renderHTML(
         '<h2 class="page-title">任务管理</h2>' +
         '<div class="card"><h3>现有任务（' + tasksCache.length + "）</h3>" +
-          '<table><tr><th>ID</th><th>标题</th><th>级别</th><th>判定</th><th>权重</th><th>校验点</th><th>超时</th></tr>' +
+          '<table><tr><th>ID</th><th>标题</th><th>级别</th><th>判定</th><th>权重</th><th>校验点</th><th>超时</th><th>预计成本/run' +
+          costTip("预计成本 = 单次 run 的 token 消耗 × 模型单价。<br>默认模型 deepseek-chat：输入 ¥2/百万 token、输出 ¥3/百万 token（缓存未命中口径）。<br><br>有实测：取该后端（minimal-react）在此任务的历史 run 的 metrics.usage 均值；<br>无实测：按任务级别 L1-L5 估算，数值前标「~」。<br><br>单价可用环境变量 LLM_INPUT_CNY_PER_M / LLM_OUTPUT_CNY_PER_M 覆盖。") +
+          "</th></tr>" +
           rows + "</table></div>" +
         '<div class="card"><h3>新建任务</h3>' + taskFormHTML() + "</div>" +
         '<div id="task-result"></div>'
@@ -196,6 +264,7 @@
       el("btn-gen").onclick = genTask;
       el("btn-add-cp").onclick = addCheckpointRow;
       addCheckpointRow();
+      bindCostTips();
     }).catch(function (e) { renderErr(e.message); });
   }
 
@@ -320,13 +389,13 @@
           '<div id="h-list"><div class="empty">加载中…</div></div>' +
         "</div>"
       );
-      el("h-filter").onclick = loadHistory;
+      el("h-filter").onclick = function () { histPage = 0; loadHistory(); };
       loadHistory();
     }).catch(function (e) { renderErr(e.message); });
   }
 
   function loadHistory() {
-    var q = [];
+    var q = ["limit=" + histLimit, "offset=" + (histPage * histLimit)];
     var tv = el("h-task") && el("h-task").value;
     var av = el("h-agent") && el("h-agent").value;
     var sv = el("h-status") && el("h-status").value;
@@ -337,18 +406,35 @@
       var list = el("h-list");
       if (!d.runs || !d.runs.length) { list.innerHTML = '<div class="empty">暂无运行记录</div>'; return; }
       var rows = d.runs.map(function (r) {
+        var costTxt = (r.actual_cost_cny !== null && r.actual_cost_cny !== undefined)
+          ? "¥" + r.actual_cost_cny.toFixed(4) : "—";
         return '<tr class="clickable" data-rid="' + esc(r.run_id) + '">' +
           "<td>" + esc(fmtTime(r.created_at)) + "</td>" +
           "<td><b>" + esc(r.run_id) + "</b></td>" +
           "<td>" + esc(r.task_id) + "</td><td>" + esc(r.agent_id) + "</td>" +
           "<td>" + statusBadge(r.status) + "</td>" +
           "<td>" + esc(r.score) + "</td><td>" + fmtDur(r.duration_s) + "</td><td>" + esc(r.steps) + "</td>" +
+          "<td>" + costTxt + "</td>" +
           "</tr>";
       }).join("");
-      list.innerHTML = '<table><tr><th>时间</th><th>run_id</th><th>任务</th><th>后端</th><th>状态</th><th>score</th><th>时长</th><th>步数</th></tr>' + rows + "</table>";
+      var total = Number(d.total || 0);
+      var pages = Math.max(1, Math.ceil(total / histLimit));
+      var cur = Math.min(histPage + 1, pages);
+      var pager = '<div class="pager">' +
+        '<button class="btn secondary small" id="h-prev"' + (histPage <= 0 ? " disabled" : "") + '>‹ 上一页</button>' +
+        '<span class="pager-info">第 ' + cur + " / " + pages + " 页 · 共 " + total + " 条</span>" +
+        '<button class="btn secondary small" id="h-next"' + (histPage >= pages - 1 ? " disabled" : "") + '>下一页 ›</button>' +
+        "</div>";
+      list.innerHTML = '<table><tr><th>时间</th><th>run_id</th><th>任务</th><th>后端</th><th>状态</th><th>score</th><th>时长</th><th>步数</th><th>实际成本' +
+        costTip("实际成本 = 本次评测实际消耗的 token（run.json 的 metrics.usage）按模型单价折算。<br>默认模型 deepseek-chat：输入 ¥2/百万 token、输出 ¥3/百万 token。<br><br>token 埋点（metrics.usage）之前的历史 run 无记录，显示「—」。<br><br>单价可用环境变量 LLM_INPUT_CNY_PER_M / LLM_OUTPUT_CNY_PER_M 覆盖。") +
+        "</th></tr>" + rows + "</table>" + pager;
       list.querySelectorAll("tr.clickable").forEach(function (tr) {
         tr.onclick = function () { location.hash = "#/run/" + tr.getAttribute("data-rid"); };
       });
+      var prevBtn = el("h-prev"), nextBtn = el("h-next");
+      if (prevBtn) prevBtn.onclick = function () { if (histPage > 0) { histPage--; loadHistory(); } };
+      if (nextBtn) nextBtn.onclick = function () { if (histPage < pages - 1) { histPage++; loadHistory(); } };
+      bindCostTips();
     }).catch(function (e) { el("h-list").innerHTML = '<div class="err-banner">' + esc(e.message) + "</div>"; });
   }
 

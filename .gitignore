@@ -10,7 +10,8 @@ venv/
 env/
 
 # 运行产物
-results/
+results/*
+!results/cost_benchmark.json
 reports/*.html
 !reports/.gitkeep
 *.log

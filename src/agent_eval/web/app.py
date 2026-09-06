@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import Body, FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent_eval.backends import _BACKENDS, list_backends
@@ -137,8 +137,34 @@ def create_app(
 
     @app.get("/api/tasks")
     def api_tasks() -> dict:
+        from agent_eval.costing import estimate_cost, load_benchmark
+
         tasks = _task_map()
-        return {"tasks": [_task_to_dict(t) for t in tasks.values()]}
+        bench = load_benchmark()
+        out = []
+        for t in tasks.values():
+            d = _task_to_dict(t)
+            est = estimate_cost(
+                "minimal-react", t.id, level=t.level, verifier=t.verifier, runs=1, benchmark=bench
+            )
+            d["cost_estimate"] = est
+            out.append(d)
+        return {"tasks": out}
+
+    @app.get("/api/costs")
+    def api_costs() -> dict:
+        """成本核算数据：定价 + (agent, task) 实测 token 基准 + 级别估算。"""
+        from agent_eval.costing import LEVEL_ESTIMATE, load_benchmark, pricing_for
+
+        return {
+            "pricing": pricing_for(),
+            "benchmark": load_benchmark().get("agents", {}),
+            "default_agent": "minimal-react",
+            "level_estimate": {
+                k: {"prompt_tokens": v[0], "completion_tokens": v[1]}
+                for k, v in LEVEL_ESTIMATE.items()
+            },
+        }
 
     @app.get("/api/backends")
     def api_backends() -> dict:
@@ -192,16 +218,39 @@ def create_app(
 
     @app.get("/api/runs")
     def list_run_history(
-        limit: int = Query(100, ge=1, le=500),
+        limit: int = Query(20, ge=1, le=500),
+        offset: int = Query(0, ge=0),
         task_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         status: Optional[str] = None,
     ) -> dict:
-        return {
-            "runs": store.list_runs(
-                limit=limit, task_id=task_id, agent_id=agent_id, status=status
-            )
-        }
+        from agent_eval.costing import pricing_for
+
+        runs, total = store.list_runs(
+            limit=limit, offset=offset, task_id=task_id, agent_id=agent_id, status=status
+        )
+        price = pricing_for()
+        for r in runs:
+            # 实际成本：从 run.json 的 metrics.usage 读取（无 usage 时为 None）
+            r["actual_cost_cny"] = None
+            r["tokens"] = None
+            p = results_dir / r["run_id"] / "run.json"
+            if p.exists():
+                try:
+                    d = json.loads(p.read_text(encoding="utf-8"))
+                    usage = (d.get("metrics") or {}).get("usage") or {}
+                    pt = usage.get("prompt_tokens") or 0
+                    ct = usage.get("completion_tokens") or 0
+                    if pt or ct:
+                        r["actual_cost_cny"] = round(
+                            pt / 1e6 * price["input_cny_per_m"]
+                            + ct / 1e6 * price["output_cny_per_m"],
+                            4,
+                        )
+                        r["tokens"] = {"prompt_tokens": pt, "completion_tokens": ct}
+                except Exception:  # noqa: BLE001
+                    pass
+        return {"runs": runs, "total": total, "limit": limit, "offset": offset}
 
     # ---------- 运行产物 ----------
     @app.get("/api/runs/{run_id}/files")
@@ -266,11 +315,30 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(e))
 
     # ---------- 静态页 ----------
+    @app.middleware("http")
+    async def _no_cache_static(request, call_next):
+        # 本地评测工作台：静态资源不缓存，前端改动即时生效
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+        return response
+
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     @app.get("/")
-    def index() -> FileResponse:
-        return FileResponse(_STATIC_DIR / "index.html")
+    def index() -> HTMLResponse:
+        # 静态资源 URL 注入文件 mtime 版本号：前端改动后浏览器强制拉新，不再受缓存干扰
+        try:
+            js_v = int((_STATIC_DIR / "app.js").stat().st_mtime)
+            css_v = int((_STATIC_DIR / "style.css").stat().st_mtime)
+        except OSError:
+            js_v = css_v = 0
+        html = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        html = (
+            html.replace("/static/app.js", f"/static/app.js?v={js_v}")
+            .replace("/static/style.css", f"/static/style.css?v={css_v}")
+        )
+        return HTMLResponse(html)
 
     return app
 

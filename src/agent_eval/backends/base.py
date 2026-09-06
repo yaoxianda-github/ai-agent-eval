@@ -16,6 +16,8 @@ class BackendResult:
 
     status: completed（Agent 自报完成）/ max_steps（步数耗尽）/ timeout / error
     steps:  步骤级轨迹，每步 {step, action, args, observation, ts}
+    usage:  可选 LLM token 用量累计（{prompt_tokens, completion_tokens}），
+            供 CI 成本核算；黑盒后端（如 dsh）拿不到时可为 None。
     """
 
     status: str = "completed"
@@ -23,6 +25,7 @@ class BackendResult:
     duration_s: float = 0.0
     stdout: str = ""
     error: str = ""
+    usage: dict | None = None
 
 
 class Backend(ABC):

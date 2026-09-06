@@ -16,6 +16,7 @@ app = typer.Typer(help="通用 AI Agent 评测框架")
 def list_tasks() -> None:
     """列出任务包中的所有任务（读取 manifest + 各 spec.yaml）。"""
     from agent_eval.spec import find_tasks_dir, load_task_pack
+    from agent_eval.costing import estimate_cost, load_benchmark
 
     tasks_dir = find_tasks_dir()
     try:
@@ -24,14 +25,25 @@ def list_tasks() -> None:
         typer.echo(f"错误：{exc}")
         raise typer.Exit(code=1)
 
+    bench = load_benchmark()
+    default_agent = "minimal-react"
     typer.echo(f"任务包: {tasks_dir}")
-    typer.echo(f"{'ID':<6}{'级别':<5}{'权重':<7}{'判定':<13}标题")
-    typer.echo("-" * 64)
+    typer.echo(f"{'ID':<6}{'级别':<5}{'权重':<7}{'判定':<13}{'预计成本':<14}标题")
+    typer.echo("-" * 78)
     for t in sorted(tasks, key=lambda x: x.id):
-        typer.echo(
-            f"{t.id:<6}{t.level:<5}{t.weight:<7.1f}{t.verifier:<13}{t.title}"
+        est = estimate_cost(
+            default_agent, t.id, level=t.level, verifier=t.verifier, runs=1, benchmark=bench
         )
-    typer.echo(f"\n共 {len(tasks)} 个任务")
+        mark = "" if est["source"] == "measured" else "~"
+        typer.echo(
+            f"{t.id:<6}{t.level:<5}{t.weight:<7.1f}{t.verifier:<13}"
+            f"{mark}¥{est['cost_cny']:<12.4f}{t.title}"
+        )
+    typer.echo(
+        "\n共 {} 个任务（预计成本：{} 基准，官方口径 ¥2/M 输入 + ¥3/M 输出，~ 为估算）".format(
+            len(tasks), default_agent
+        )
+    )
 
 
 @app.command("run")
@@ -46,11 +58,21 @@ def run(
     from agent_eval.runner import run_one
     from agent_eval.spec import find_tasks_dir, load_task_pack
     from agent_eval.stats import summarize_scores
+    from agent_eval.costing import estimate_cost
 
     tasks = {t.id: t for t in load_task_pack(find_tasks_dir())}
     if task not in tasks:
         typer.echo(f"错误：找不到任务 {task}，可用: {sorted(tasks)}")
         raise typer.Exit(code=1)
+
+    # 执行前提示预计 LLM 成本（实测基准 / 分级估算）
+    est = estimate_cost(
+        agent, task, level=tasks[task].level, verifier=tasks[task].verifier, runs=runs
+    )
+    src = "实测基准" if est["source"] == "measured" else "分级估算"
+    typer.echo(
+        f"预计成本: ¥{est['cost_cny']:.4f}（{agent} × {runs} run · {src} · {est['note']}）"
+    )
 
     config: dict = {"agent": {"model": model}}
     if timeout is not None:

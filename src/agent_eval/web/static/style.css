@@ -82,3 +82,30 @@ pre.code {
   .nav { flex-direction: row; flex-wrap: wrap; }
   .content { padding: 16px; }
 }
+
+/* ---------- 成本提示 ⓘ ---------- */
+.cost-tip-wrap { position: relative; display: inline-block; margin-left: 5px; vertical-align: -1px; }
+.cost-tip-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; border-radius: 50%;
+  background: rgba(31,58,95,0.12); color: #1F3A5F;
+  font-size: 10.5px; line-height: 1; cursor: help; user-select: none;
+}
+.cost-tip-icon:hover { background: rgba(31,58,95,0.22); }
+.cost-tip-box {
+  display: none; position: absolute; top: 20px; right: 0; z-index: 60;
+  width: 300px; padding: 10px 12px; border-radius: 10px;
+  background: #fff; border: 1px solid rgba(0,0,0,0.10);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.14);
+  font-size: 11.5px; line-height: 1.65; color: #4A5568; font-weight: 400;
+  text-align: left; white-space: normal;
+}
+.cost-tip-wrap.open .cost-tip-box { display: block; }
+@media (max-width: 720px) {
+  .cost-tip-box { width: 240px; right: auto; left: 0; }
+}
+
+/* ---------- 分页 ---------- */
+.btn.small { padding: 5px 12px; font-size: 12px; border-radius: 6px; }
+.pager { display: flex; align-items: center; gap: 14px; justify-content: flex-end; margin-top: 14px; }
+.pager-info { font-size: 12px; color: #6B7280; }

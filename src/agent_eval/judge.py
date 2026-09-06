@@ -91,6 +91,7 @@ class LLMJudge:
             "LLM_API_KEY"
         )
         self.client = client
+        self._usage: dict = {"prompt_tokens": 0, "completion_tokens": 0}
         if self.client is None and self.api_key:
             import openai  # 延迟导入
 
@@ -147,6 +148,11 @@ class LLMJudge:
             duration_ms = int(round((time.time() - start) * 1000))
             raw = resp.choices[0].message.content or ""
             usage = getattr(resp, "usage", None)
+            if usage is not None:
+                self._usage["prompt_tokens"] += getattr(usage, "prompt_tokens", 0) or 0
+                self._usage["completion_tokens"] += (
+                    getattr(usage, "completion_tokens", 0) or 0
+                )
             trace_llm_call(
                 "judge",
                 model=self.model,
@@ -167,6 +173,7 @@ class LLMJudge:
                 "detail": f"语义判分 score={round(score, 3)}：{reasoning}"[:300],
                 "score": score,
                 "reasoning": reasoning,
+                "usage": dict(self._usage) or None,
             }
         except Exception as e:  # noqa: BLE001 - 判分失败不应中断评测
             return {
