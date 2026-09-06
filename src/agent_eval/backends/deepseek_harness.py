@@ -45,6 +45,38 @@ def _find_dsh_cmd() -> str | None:
     return None
 
 
+def _default_dsh_home() -> Path:
+    """评测专用的隔离 DSH_HOME（缓存到用户 cache 目录）。
+
+    不能用 ~/.dsh：那可能带用户个人凭据/配置（实测旧凭据会导致 dsh 403
+    预扣失败，且不可控）。隔离 home 首次运行自动初始化 headless profile，
+    之后复用；凭据完全来自环境变量 DEEPSEEK_API_KEY，干净可控。
+    """
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".cache"
+    )
+    return Path(base) / "agent-eval" / "dsh-home"
+
+
+def _ensure_headless_profile(dsh_home: Path, cmd: str) -> None:
+    """确保隔离 home 已初始化 headless profile（幂等）。"""
+    marker = dsh_home / "profiles" / "headless" / "cordis.yml"
+    if marker.is_file():
+        return
+    dsh_home.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["DSH_HOME"] = str(dsh_home)
+    subprocess.run(
+        [cmd, "--profile", "headless", "--dump-default-config"],
+        cwd=str(dsh_home),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=env,
+        timeout=120,
+        check=False,
+    )
+
+
 class DeepseekHarnessBackend(Backend):
     name = "deepseek-harness"
     version = "0.1.0"
@@ -56,15 +88,18 @@ class DeepseekHarnessBackend(Backend):
         timeout_s: int = 300,
         cmd: str | None = None,
         dsh_home: str | None = None,
+        max_steps: int | None = None,
     ) -> None:
         # model 保留接口：dsh 的模型通过其 profile 配置选择，headless 用默认模型
+        # max_steps 保留接口：dsh 黑盒无步数概念，由 dsh 自身循环控制
         self.model = model
+        self.max_steps = max_steps
         self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get(
             "LLM_API_KEY"
         )
         self.timeout_s = timeout_s
         self.cmd = cmd or _find_dsh_cmd()
-        self.dsh_home = dsh_home
+        self.dsh_home = Path(dsh_home) if dsh_home else _default_dsh_home()
 
     def run(self, task, workspace) -> BackendResult:
         if not self.cmd:
@@ -75,12 +110,14 @@ class DeepseekHarnessBackend(Backend):
         if not self.api_key:
             return BackendResult(status="error", error="缺少 DEEPSEEK_API_KEY")
 
+        # 隔离 DSH_HOME：避免 ~/.dsh 用户凭据污染（实测旧凭据导致 403 预扣失败）
+        _ensure_headless_profile(self.dsh_home, self.cmd)
+
         # dsh headless：一条一次性任务，退出码 0=完成 / 1=中止或错误
         cmd = [self.cmd, "--profile", "headless", task.description]
         env = os.environ.copy()
         env.setdefault("DEEPSEEK_API_KEY", self.api_key)
-        if self.dsh_home:
-            env["DSH_HOME"] = self.dsh_home
+        env["DSH_HOME"] = str(self.dsh_home)
 
         start = time.time()
         proc = subprocess.Popen(
