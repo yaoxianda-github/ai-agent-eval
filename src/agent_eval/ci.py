@@ -281,10 +281,12 @@ def run_gate(
     config_path: Path | str = DEFAULT_CONFIG,
     results_dir: Path | str = "results/runs",
     run_one_impl=None,
+    track_balance: bool = True,
 ) -> dict:
     """执行一个 gate（core/full），返回完整结果 dict（含通过判定与报告数据）。
 
     run_one_impl：可注入替代实现（测试用）；默认 runner.run_one。
+    track_balance：开启"余额差分"真实成本采集（黑盒后端 token 成本为 0 时的兜底）。
     """
     from agent_eval.costing import pricing_for
     from agent_eval.runner import run_one as _run_one
@@ -307,6 +309,9 @@ def run_gate(
         if missing:
             raise ValueError(f"gate {gate_name} 引用了不存在的任务: {missing}")
 
+    from agent_eval.balance import fetch_balance_cny
+
+    bal_start = fetch_balance_cny() if track_balance else None
     runs = runs_override or g["runs"]
     started = time.time()
     task_results: list[dict] = []
@@ -333,6 +338,11 @@ def run_gate(
         + total_tokens["completion_tokens"] / 1e6 * price["output_cny_per_m"],
         4,
     )
+    bal_end = fetch_balance_cny() if track_balance else None
+    balance_cost_cny = None
+    if bal_start is not None and bal_end is not None:
+        diff = round(bal_start - bal_end, 4)
+        balance_cost_cny = max(diff, 0.0)
     return {
         "gate": gate_name,
         "agent": agent,
@@ -347,6 +357,9 @@ def run_gate(
         "duration_s": round(time.time() - started, 2),
         "tokens": total_tokens,
         "cost_cny": cost_cny,
+        "balance_cost_cny": balance_cost_cny,
+        "balance_start_cny": bal_start,
+        "balance_end_cny": bal_end,
         "config_path": cfg["path"],
     }
 
@@ -391,9 +404,17 @@ def run_gate_cli(
     typer_like(
         f"gate 通过率: {result['pass_rate']} / 阈值 {result['min_pass_rate']}  ->  {status}"
     )
+    # 成本口径：余额差分（真实扣费）优先；否则 token 计价；都无则标注未采集
+    bal_cost = result.get("balance_cost_cny")
+    if bal_cost is not None:
+        cost_desc = f"成本 ¥{bal_cost:.4f}（余额差分，余额 {result.get('balance_start_cny')} → {result.get('balance_end_cny')}）"
+    elif result["cost_cny"] > 0:
+        cost_desc = f"成本约 ¥{result['cost_cny']:.4f}（token 计价）"
+    else:
+        cost_desc = "成本未采集（无 DEEPSEEK_API_KEY 或无 token 计量）"
     typer_like(
         f"耗时 {result['duration_s']}s · token {result['tokens']['prompt_tokens']:,}/"
-        f"{result['tokens']['completion_tokens']:,} · 成本约 ¥{result['cost_cny']:.4f}"
+        f"{result['tokens']['completion_tokens']:,} · {cost_desc}"
     )
 
     # 报告文件
@@ -410,6 +431,7 @@ def run_gate_cli(
             "pass_rate": result["pass_rate"],
             "status": status,
             "cost_cny": result["cost_cny"],
+            "balance_cost_cny": result.get("balance_cost_cny"),
             "duration_s": result["duration_s"],
         },
         allure_dir,

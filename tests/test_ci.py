@@ -265,6 +265,7 @@ def test_run_gate_injected_runner(tmp_path):
     result = run_gate(
         "core", agent="minimal-react", model="deepseek-chat",
         config_path=cfg, results_dir=tmp_path / "runs", run_one_impl=fake_run_one,
+        track_balance=False,
     )
     assert calls == ["T001", "T001", "T106", "T106"]  # 2 任务 × 2 runs
     by_id = {t["task_id"]: t for t in result["task_results"]}
@@ -274,3 +275,40 @@ def test_run_gate_injected_runner(tmp_path):
     assert result["pass_rate"] == 0.5
     assert result["tokens"] == {"prompt_tokens": 400, "completion_tokens": 80}
     assert result["cost_cny"] > 0
+
+
+def test_run_gate_balance_diff(tmp_path, monkeypatch):
+    """余额差分：跑前 100 → 跑后 99.5，balance_cost_cny=0.5（黑盒后端兜底成本）。"""
+    cfg = tmp_path / "gate.yaml"
+    cfg.write_text(
+        "gate:\n"
+        "  core:\n"
+        "    tasks: [T001]\n"
+        "    runs: 1\n"
+        "    task_pass_ratio: 0.5\n"
+        "    min_pass_rate: 0.5\n",
+        encoding="utf-8",
+    )
+
+    def fake_run_one(task, agent, config=None, results_dir=None, **kw):
+        return make_record(
+            task_id=task.id, passed_flags=(True,),
+            usage=None,  # 黑盒后端无 token
+        )
+
+    balances = iter([100.0, 99.5])
+    monkeypatch.setattr(
+        "agent_eval.balance.fetch_balance_cny",
+        lambda *a, **k: next(balances),
+    )
+    result = run_gate(
+        "core", agent="deepseek-harness", model="deepseek-chat",
+        config_path=cfg, results_dir=tmp_path / "runs", run_one_impl=fake_run_one,
+        track_balance=True,
+    )
+    assert result["balance_start_cny"] == 100.0
+    assert result["balance_end_cny"] == 99.5
+    assert result["balance_cost_cny"] == 0.5
+    # 黑盒后端 token=0 → token 计价为 0，差分补上真实成本
+    assert result["cost_cny"] == 0.0
+    assert result["balance_cost_cny"] > 0
