@@ -48,6 +48,7 @@ class TaskSpec:
     weight: float = 1.0
     cost_budget_usd: float = 0.5
     timeout_s: int = 300
+    max_steps: Optional[int] = None  # 可选：覆盖后端默认步数上限（如 L4 修复类任务提额）
     tags: list[str] = field(default_factory=list)
     rubric: str = ""  # V2.2：verifier=llm_judge 时的评分标准（任务作者自定义）
     spec_path: Optional[Path] = None
@@ -77,6 +78,7 @@ class TaskSpec:
             weight=float(data.get("weight", 1.0)),
             cost_budget_usd=float(data.get("cost_budget_usd", 0.5)),
             timeout_s=int(data.get("timeout_s", 300)),
+            max_steps=int(data["max_steps"]) if data.get("max_steps") else None,
             tags=list(data.get("tags", [])),
             rubric=str(data.get("rubric", "")),
             spec_path=path,

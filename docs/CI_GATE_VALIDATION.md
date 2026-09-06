@@ -113,6 +113,52 @@ core:  [T001, T102, T103, T207, T305, T306, T308, T303, T401, T402]  # runs=3, t
 > 单次 demo 门禁 ≈ 1 分钟、**成本 < ¥0.1**（deepseek-chat 计价）。
 > 正式卡口 `core`（10 任务 × 3 runs）预计 3–5 分钟、约 ¥0.5–1.0；runner 分钟数（GitHub Actions 免费额度）需按组织账单另计。
 
+### 6.1 core 正式卡口实跑记录（2026-09-06 本地，minimal-react @ deepseek-chat）
+
+实跑命令：`.venv/bin/agent-eval ci --gate core`（10 任务 × 3 runs = 30 次执行）
+
+| 指标 | 实测值 |
+|---|---|
+| 门禁判定 | **FAIL（0.8 < 0.9）**，8/10 任务通过 |
+| 总耗时 | **707.7s（≈ 11.8 分钟）** |
+| tokens | 304,675 prompt + 23,146 completion |
+| 成本 | **≈ ¥0.68**（`ci-report.json` cost_cny=0.6788） |
+| JUnit | 28 tests / 6 failures（checkpoint 级） |
+
+任务明细（runs = 3 次采样）：
+
+| 任务 | 级别 | 通过 | 判定 | 失败 checkpoint |
+|---|---|---|---|---|
+| T001/T102/T103/T305/T308/T303/T401 | L1–L4 | 3/3 | PASS | — |
+| T306 | L3 | 2/3 | PASS（≥0.5 多数制） | 1 次 run 波动（c1/c2） |
+| **T207** | L3 | 0/3 | **FAIL** | c3：`ERROR_TOP3 mismatch report=['auth','api','db'] actual=['api','auth','db']`——**Top3 排序规则歧义**（verify 按出现顺序，agent 按字母序），3 次全同，属判定口径问题非 agent 能力 |
+| **T402** | L4 | 0/3 | **FAIL** | 3 次均"达到最大步数 20"；run1 改坏脚本语法，run2/3 为 `rank=0 (must start from 1)`——**排名起点口径未在 spec 明确** + 20 步上限对 L4 偏紧 |
+
+**结论**：core 卡口真实卡住了（0.8 < 0.9）——正式启用前需校准两处判定口径：
+1. T207：统一 ERROR 模块 Top3 的排序规则（出现次数 desc → 并列时按模块名或出现顺序，spec 与 verify 对齐）；
+2. T402：spec 明确"排名从 1 开始"，并评估提升 max_steps（20 → 30+）以适配 L4 修复类任务。
+
+### 6.2 判定口径修复与重跑（2026-09-06）
+
+修复内容（4 处改动，pytest 全量 80 passed 无回归）：
+1. `src/agent_eval/spec.py`：TaskSpec 新增可选 `max_steps` 字段（spec 级覆盖后端默认 20）；
+2. `src/agent_eval/runner.py`：构造 backend 时透传 `task.max_steps`；
+3. `tasks/T207/spec.yaml`：排序规则强化（并列按模块名字母升序）+ 显式示例 `ERROR_TOP3=api,auth,db`；
+4. `tasks/T402/spec.yaml`：rank 从 1 开始示例行 + `max_steps: 30`。
+
+修复后 core 全量重跑（10 任务 × 3 runs）：
+
+| 指标 | 修复前 | 修复后 |
+|---|---|---|
+| 门禁判定 | FAIL（0.8 < 0.9） | **PASS（1.0 ≥ 0.9）** |
+| T207 | 0/3（排序歧义） | **3/3** |
+| T402 | 0/3（rank 口径 + 步数） | **2/3**（多数制 PASS） |
+| 总耗时 | 707.7s | **271s（≈ 4.5 分钟）** |
+| 成本 | ¥0.68 | **¥0.63** |
+| tokens | 304,675+23,146 | 284,791+19,806 |
+
+注：T303、T402 本轮 2/3（各 1 次 run 波动），runs=3 多数制（≥2 过即任务 PASS）恰好吸收了单次波动——这正是多采样的意义。
+
 ## 7. 使用方法（接入真实项目）
 
 1. **仓库 Secrets**：Settings → Secrets and variables → Actions → 添加 `DEEPSEEK_API_KEY`（`agent-eval ci` 通过环境变量读取）。

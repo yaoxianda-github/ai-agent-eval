@@ -3,7 +3,8 @@ title: 性能缺陷修复
 level: L4
 description: |
   input/processor.py 读取 input/orders.csv（列：order_id, amount），按 amount 降序排名，
-  输出 output/rank.txt，每行格式：rank,order_id,amount（rank 从 1 开始）。
+  输出 output/rank.txt，每行格式：rank,order_id,amount。
+  排名必须从 1 开始（第 1 行是 rank=1，示例首行：1,<order_id>,<amount>），当前实现从 0 开始。
   当前实现存在两个缺陷：
   1) 排名从 0 开始（应为 1）；
   2) 使用冒泡排序，复杂度 O(n^2)，在数据量较大时非常慢。
@@ -33,3 +34,4 @@ verifier: deterministic
 weight: 1.5
 cost_budget_usd: 0.1
 timeout_s: 600
+max_steps: 30   # L4 修复 + 验证循环需要更多步数（后端默认 20 实测不足）

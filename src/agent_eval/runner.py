@@ -66,9 +66,11 @@ def run_one(
 
     _copy_fixtures(task, workspace)
 
-    # 后端默认超时取任务 spec 的 timeout_s，可被 config 覆盖
+    # 后端默认超时取任务 spec 的 timeout_s，可被 config 覆盖；max_steps 同理
     agent_kwargs = dict(config.get("agent", {}))
     agent_kwargs.setdefault("timeout_s", task.timeout_s)
+    if task.max_steps:
+        agent_kwargs.setdefault("max_steps", task.max_steps)
     backend = get_backend(agent_id, **agent_kwargs)
     start = time.time()
     result = backend.run(task, workspace)

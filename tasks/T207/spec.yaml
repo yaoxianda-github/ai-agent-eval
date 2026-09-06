@@ -5,7 +5,9 @@ description: |
   读取 input/app.log，日志行格式为：YYYY-MM-DD HH:MM:SS LEVEL [module] message。
   统计各级别（INFO/ERROR/WARN）的行数，以及出现 ERROR 最多的 3 个模块。
   输出 output/log_report.md，需包含以下键值行（值精确）：
-  TOTAL=、INFO=、ERROR=、WARN=，以及 ERROR_TOP3=<模块1,模块2,模块3>（按 ERROR 数降序，并列按模块名排序）。
+  TOTAL=、INFO=、ERROR=、WARN=，以及 ERROR_TOP3=<模块1,模块2,模块3>。
+  排序规则：按 ERROR 出现次数降序；出现次数并列时，按模块名字母升序（a→z）。
+  示例：若 ERROR 计数为 api=2、auth=2、db=1，则必须输出 ERROR_TOP3=api,auth,db（api 与 auth 并列按字母序，api 在前）。
 tags: [data, logging, analysis]
 
 fixtures:
