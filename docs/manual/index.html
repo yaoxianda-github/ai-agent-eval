@@ -142,6 +142,17 @@ tr:last-child td{border-bottom:none;}
 .win .cell b{font-family:var(--font-mono);color:var(--accent);flex:none;}
 .fig-cap{font-size:13.5px;color:var(--muted);margin:4px 0 6px;}
 
+/* ===== 时间线（轨迹回放） ===== */
+.timeline{display:flex;flex-wrap:wrap;gap:0;margin:22px 0;align-items:stretch;}
+.tl-node{flex:1 1 160px;position:relative;padding:16px 14px 16px 40px;background:#fff;border:1px solid var(--line);border-radius:12px;}
+.tl-node .dot{position:absolute;left:14px;top:20px;width:14px;height:14px;border-radius:50%;}
+.tl-node .t{font-size:15px;font-weight:900;color:var(--ink);}
+.tl-node .d{font-size:13px;color:var(--muted);margin-top:4px;line-height:1.5;}
+.tl-node.intent .dot{background:#2563EB;}
+.tl-node.retrieval .dot{background:#4C7A5A;}
+.tl-node.llm .dot{background:#6D4C8A;}
+.tl-node.tool .dot{background:#C87828;}
+
 /* ===== FAQ / 术语 ===== */
 .faq{display:flex;flex-direction:column;gap:12px;margin:18px 0;}
 .faq details{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 20px;}
@@ -184,17 +195,18 @@ tr:last-child td{border-bottom:none;}
 <header class="hero">
   <div class="hero-inner">
     <div class="kicker">AI Agent 评测平台 · 操作手册</div>
-    <h1>给 Agent 出题、批改、打分，一页讲明白</h1>
-    <p class="sub">本手册写给从没接触过 Agent 评测的初级测试工程师。你不需要懂大模型原理，也不需要会写复杂代码——跟着步骤走，就能完成第一次评测，并理解每个表单参数的含义。</p>
+    <h1>给 Agent 出题、批改、打分、卡口，一页讲明白</h1>
+    <p class="sub">本手册写给从没接触过 Agent 评测的初级测试工程师。你不需要懂大模型原理，也不需要会写复杂代码——跟着步骤走，就能完成第一次评测、看懂轨迹回放、接入 CI 质量门禁，并理解每个参数的含义。</p>
     <div class="meta">
       <span>适用：ai-agent-eval 工作台</span>
-      <span>版本：V2.2</span>
+      <span>版本：V2.5</span>
+      <span>23 任务 · 3 后端</span>
       <span>前置：Python 3.9+ 环境</span>
-      <span>耗时：约 10 分钟上手</span>
+      <span>耗时：约 15 分钟上手</span>
     </div>
     <div class="sim">
       <div class="t">一句话理解这个平台</div>
-      <p>评测平台 = 给每个 AI Agent「出一套题」，让它在一个干净的工作目录里完成，再按「批改清单」逐条核对产物，最后给出一份带证据的得分报告。</p>
+      <p>评测平台 = 给每个 AI Agent「出一套题」，让它在干净的工作目录里完成，再按「批改清单」逐条核对产物，给出带证据的得分报告；更进一步，把这套评测接入 GitHub CI，核心任务不达标就自动阻断代码合并。</p>
     </div>
   </div>
 </header>
@@ -207,9 +219,11 @@ tr:last-child td{border-bottom:none;}
     <a href="#s3">3 第一次评测</a>
     <a href="#s4">4 表单参数</a>
     <a href="#s5">5 新建任务</a>
-    <a href="#s6">6 看结果</a>
-    <a href="#s7">7 常见问题</a>
-    <a href="#s8">8 术语表</a>
+    <a href="#s6">6 结果与轨迹</a>
+    <a href="#s7">7 CI 门禁</a>
+    <a href="#s8">8 成本核算</a>
+    <a href="#s9">9 常见问题</a>
+    <a href="#s10">10 术语表</a>
   </div>
 </nav>
 
@@ -221,43 +235,55 @@ tr:last-child td{border-bottom:none;}
     <span class="sec-no">01</span>
     <h2>评测平台是什么</h2>
   </div>
-  <p class="sec-lead">先建立整体概念，再动手。这一节回答三个问题：评测的完整流程、四个关键概念、零基础最常见的顾虑。</p>
+  <p class="sec-lead">先建立整体概念，再动手。这一节回答三个问题：评测的完整流程、五个关键概念、零基础最常见的顾虑。</p>
 
   <h3>一次评测的完整流程</h3>
-  <p>整个评测可以拆成五个环节，每一步都有产物、可追溯：</p>
+  <p>整个评测可以拆成六个环节，每一步都有产物、可追溯：</p>
   <div class="pipeline">
     <div class="pipe"><div class="n">01</div><div class="t">任务包</div><div class="d">任务描述 + 初始文件 + 批改清单</div></div>
     <div class="pipe-arr">→</div>
     <div class="pipe"><div class="n">02</div><div class="t">评测引擎</div><div class="d">准备干净工作目录，调用 Agent</div></div>
     <div class="pipe-arr">→</div>
-    <div class="pipe"><div class="n">03</div><div class="t">Agent 执行</div><div class="d">读任务、操作文件、产出结果</div></div>
+    <div class="pipe"><div class="n">03</div><div class="t">Agent 执行</div><div class="d">读任务、检索知识、操作文件</div></div>
     <div class="pipe-arr">→</div>
-    <div class="pipe"><div class="n">04</div><div class="t">判定批改</div><div class="d">按校验点核对产物，逐条 PASS / FAIL</div></div>
+    <div class="pipe"><div class="n">04</div><div class="t">轨迹记录</div><div class="d">每一步意图/检索/模型/工具</div></div>
     <div class="pipe-arr">→</div>
-    <div class="pipe"><div class="n">05</div><div class="t">报告</div><div class="d">得分 + 轨迹 + 产物，一键出 HTML 报告</div></div>
+    <div class="pipe"><div class="n">05</div><div class="t">判定批改</div><div class="d">按校验点核对产物，逐条 PASS</div></div>
+    <div class="pipe-arr">→</div>
+    <div class="pipe"><div class="n">06</div><div class="t">报告/门禁</div><div class="d">得分 + 轨迹 + 成本，可接 CI</div></div>
   </div>
 
-  <h3>四个必须理解的概念</h3>
+  <h3>五个必须理解的概念</h3>
   <div class="grid g3">
     <div class="card">
       <div class="tag">任务 Task</div>
       <h4>一套「考题」</h4>
-      <p>包含给 Agent 的指令（description）、初始文件（fixtures）、批改清单（checkpoints）和分值权重。任务都放在 <span class="mono">tasks/</span> 目录，一个任务一个文件夹。</p>
+      <p>包含给 Agent 的指令（description）、初始文件（fixtures）、批改清单（checkpoints）和分值权重。任务都放在 <span class="mono">tasks/</span> 目录，当前共 23 个。</p>
     </div>
     <div class="card">
       <div class="tag">后端 Agent</div>
       <h4>一个「考生」</h4>
-      <p>被测的 AI 助手。平台内置自研的 minimal-react 白盒 Agent，也可接入 aider 等第三方工具。同一套题可以让多个考生各做一遍，横向对比。</p>
+      <p>被测的 AI 助手。平台内置三个后端：minimal-react（自研白盒基线）、deepseek-harness（DeepSeek 官方黑盒）、aider（第三方黑盒）。同一套题可让多个考生各做一遍横向对比。</p>
     </div>
     <div class="card">
       <div class="tag">校验点 Checkpoint</div>
       <h4>批改清单的一条</h4>
-      <p>一条可自动执行的判定规则，例如「文件 output/report.md 存在」「内容包含 ERROR_COUNT=3」。全部通过 = 任务通过。</p>
+      <p>一条可自动执行的判定规则，例如「文件 answer.txt 存在」「内容包含 36」。全部通过 = 任务通过。共 5 种确定性类型 + LLM 语义判分。</p>
     </div>
     <div class="card">
-      <div class="tag">得分 Score</div>
-      <h4>一次考试的结果</h4>
-      <p>得分 = 任务权重 × 校验点通过率。判分依据、步骤轨迹、原始产物全部保留，可一路下钻看证据。</p>
+      <div class="tag">轨迹 Traces</div>
+      <h4>Agent 的「思考过程」</h4>
+      <p>运行详情页以时间线展示全链路：输入意图 → 知识检索 → 模型生成 → 工具执行。黑盒后端（dsh）也能通过 session 解析还原模型 reasoning 与工具决策。</p>
+    </div>
+    <div class="card">
+      <div class="tag">门禁 Gate</div>
+      <h4>上线的「拦路虎」</h4>
+      <p>把评测接入 GitHub CI：core 任务包通过率不达标，退出码非 0，分支保护 required check 直接阻断合并。让 Agent 能力成为硬卡口，不是软参考。</p>
+    </div>
+    <div class="card">
+      <div class="tag">成本 Cost</div>
+      <h4>花了多少钱</h4>
+      <p>双口径：任务选择时看「预计成本」（token 模型估算），运行后看「实际成本」（DeepSeek 余额差分，精度 ¥0.09）。工作台与 CI 报告均展示。</p>
     </div>
   </div>
 
@@ -265,19 +291,23 @@ tr:last-child td{border-bottom:none;}
   <div class="faq">
     <details>
       <summary>会不会很复杂？我需要先学大模型知识吗？</summary>
-      <p>不需要。平台把「评测」抽象成了「出题 + 批改」。你只需要：选一个任务 → 点运行 → 看结果。背后的模型调用、沙箱隔离、判分逻辑都由框架处理。</p>
+      <p>不需要。平台把「评测」抽象成了「出题 + 批改 + 看轨迹」。你只需要：选一个任务 → 点运行 → 看结果和轨迹。背后的模型调用、沙箱隔离、判分逻辑、CI 集成都由框架处理。</p>
     </details>
     <details>
       <summary>我需要写代码吗？</summary>
-      <p>只是使用：完全不用。工作台全程浏览器操作。如果你以后想自己「出题」（新增任务），只需要填一张表单，平台会自动生成配置文件。</p>
+      <p>只是使用：完全不用。工作台全程浏览器操作。如果你以后想自己「出题」（新增任务），只需要填一张表单，平台会自动生成配置文件。CI 门禁只需在 GitHub 仓库加一个 workflow 文件。</p>
     </details>
     <details>
       <summary>跑一次评测会花很多钱吗？</summary>
-      <p>会消耗少量 LLM API 费用，但成本可控：默认模型 deepseek-chat 很便宜；单任务有成本预算上限（cost_budget_usd，默认 0.5 美元）；采样次数（runs）默认 1 次。第一次体验建议先跑 1 次。</p>
+      <p>成本可控：默认模型 deepseek-chat 很便宜；任务管理页每任务有「预计成本」提示；运行后「实际成本」用余额差分精确到 ¥0.09。实测 core 门禁 12 任务 × 3 采样 = 36 次运行，总成本仅 ¥0.06。第一次体验建议先跑 1 次。</p>
     </details>
     <details>
       <summary>结果靠谱吗？会不会是 Agent「自报成绩」？</summary>
-      <p>不会。判定完全看产物，不看 Agent 自己怎么说——校验点检查的是真实生成的文件内容和命令执行结果。而且多 run 采样会给出多次运行的最好 / 平均 / 波动，把「运气」也暴露出来。</p>
+      <p>不会。判定完全看产物，不看 Agent 自己怎么说——校验点检查的是真实生成的文件内容和命令执行结果。多 run 采样会给出 best / mean / std / pass_rate，把「运气」也暴露出来。轨迹回放让你能看到 Agent 每一步在做什么。</p>
+    </details>
+    <details>
+      <summary>黑盒后端（如 deepseek-harness）能看到模型思考过程吗？</summary>
+      <p>可以。V2.4 起，deepseek-harness 运行结束后会解析其隔离 DSH_HOME 下的 session.jsonl.zstd，提取模型 reasoning、工具决策、最终输出（llm 节点）与工具执行（tool 节点），在轨迹回放时间线里完整呈现——黑盒不再「黑」。</p>
     </details>
   </div>
 </section>
@@ -288,29 +318,34 @@ tr:last-child td{border-bottom:none;}
     <span class="sec-no">02</span>
     <h2>安装与启动</h2>
   </div>
-  <p class="sec-lead">环境准备好后，三步即可打开工作台。以下命令均在终端（Windows 的 CMD 或 PowerShell）执行。</p>
+  <p class="sec-lead">环境准备好后，三步即可打开工作台。以下命令均在终端执行（macOS 的 Terminal / Windows 的 CMD 或 PowerShell）。</p>
 
   <h3>第 1 步：安装框架</h3>
-  <div class="code"><span class="cmt"># 进入项目目录</span>
-cd D:\xdyao\DoubaoWork\projects\ai-agent-eval
+  <div class="code"><span class="cmt"># 进入项目目录（macOS 示例）</span>
+cd ~/Desktop/yaoxianda/doubaowork/ai-agent-eval
 
 <span class="cmt"># 安装开发依赖 + Web 工作台依赖</span>
 pip install -e ".[dev]"
 pip install -e ".[web]"</div>
   <p>第一次安装会自动装上 FastAPI、uvicorn 等依赖。若提示失败，确认 Python 版本 ≥ 3.9（命令行执行 <span class="mono">python --version</span> 可查看）。</p>
+  <div class="note"><b>使用 deepseek-harness 后端：</b>需额外安装 Node.js ≥ 22（dsh 运行时依赖）。dsh 会使用评测专用隔离目录 <span class="mono">~/.cache/agent-eval/dsh-home</span>，凭据只来自环境变量 <span class="mono">DEEPSEEK_API_KEY</span>，不会读取你个人的 <span class="mono">~/.dsh/</span> 配置（避免旧凭据导致 403）。</div>
 
   <h3>第 2 步：配置 LLM API Key</h3>
   <p>评测需要调用大模型让 Agent 干活。平台默认使用 DeepSeek，需要你准备一个 API Key。配置后请<span class="accent">重开终端</span>再继续。</p>
-  <div class="code"><span class="cmt"># Windows（写入用户环境变量，永久生效）</span>
+  <div class="code"><span class="cmt"># macOS / Linux（写入 ~/.zshrc 或 ~/.bashrc 永久生效）</span>
+echo 'export DEEPSEEK_API_KEY="sk-你的密钥"' >> ~/.zshrc
+source ~/.zshrc
+
+<span class="cmt"># Windows（写入用户环境变量，永久生效）</span>
 setx DEEPSEEK_API_KEY "sk-你的密钥"</div>
   <div class="note">没有 Key 也能安装和打开工作台，但「运行评测」会因缺少密钥而失败。平台会如实报错，不会假装成功。</div>
 
   <h3>第 3 步：启动工作台</h3>
-  <p>推荐方式（双击即可）：直接双击项目根目录的 <span class="mono">start_workbench.bat</span>。或在终端执行：</p>
+  <p>在终端执行：</p>
   <div class="code">agent-eval workbench</div>
   <p>看到如下输出后，用浏览器打开 <span class="mono">http://127.0.0.1:8000</span> 就进入工作台了。</p>
   <div class="code">Web 评测工作台启动中: http://127.0.0.1:8000 （Ctrl+C 停止）</div>
-  <div class="note warn">也可以换端口启动：<span class="mono">agent-eval workbench --port 8080</span>；或直接跑 <span class="mono">python -m agent_eval.web --port 8000</span>。关闭终端或按 Ctrl+C 即可停止服务。</div>
+  <div class="note warn"><b>后台运行（推荐）：</b>macOS/Linux 可用 <span class="mono">nohup agent-eval workbench > /tmp/workbench.log 2>&1 &</span> 后台启动，关掉终端不中断。端口被占用时先释放：<span class="mono">lsof -ti tcp:8000 | xargs kill -9</span>（macOS），再重启。也可换端口：<span class="mono">agent-eval workbench --port 8080</span>。</div>
 </section>
 
 <!-- ===== 3 第一次评测 ===== -->
@@ -319,7 +354,7 @@ setx DEEPSEEK_API_KEY "sk-你的密钥"</div>
     <span class="sec-no">03</span>
     <h2>第一次评测：4 步上手</h2>
   </div>
-  <p class="sec-lead">第一次体验推荐用自带任务「T601 日志错误统计」——输入是一份日志文件，任务简单、判定明确、费用极低。</p>
+  <p class="sec-lead">第一次体验推荐用自带任务「T001 批量日期格式规范化」——输入是一份文本文件，任务简单、判定明确、费用极低。想体验 RAG 检索可选 T701。</p>
 
   <ol class="steps">
     <li>
@@ -332,22 +367,22 @@ setx DEEPSEEK_API_KEY "sk-你的密钥"</div>
     <li>
       <div class="n">2</div>
       <div class="b">
-        <h4>选择任务</h4>
-        <p>任务下拉框选择 <span class="mono">T601 · 日志错误统计</span>。任务列表来自 tasks 目录，会自动加载。</p>
+        <h4>选择任务与后端</h4>
+        <p>任务下拉框选择 <span class="mono">T001 · 批量日期格式规范化</span>。后端先用默认 <span class="mono">minimal-react</span>（白盒基线，轨迹最完整）。任务列表来自 tasks 目录，共 23 个。</p>
       </div>
     </li>
     <li>
       <div class="n">3</div>
       <div class="b">
-        <h4>点击「开始运行」</h4>
-        <p>后端、模型先用默认值（minimal-react / deepseek-chat），采样次数保持 1。点击后页面开始轮询进度。</p>
+        <h4>查看预计成本，点击「开始运行」</h4>
+        <p>任务选择后可看到「预计成本」提示（token 模型估算）。模型先用默认 deepseek-chat，采样次数保持 1。点击后页面开始轮询进度。</p>
       </div>
     </li>
     <li>
       <div class="n">4</div>
       <div class="b">
-        <h4>等待结果，查看判定</h4>
-        <p>几秒到几十秒后运行完成，页面展示每个校验点的 PASS / FAIL、得分，以及步骤轨迹和产物文件。</p>
+        <h4>等待结果，查看判定与轨迹</h4>
+        <p>几秒到几十秒后运行完成，页面展示每个校验点的 PASS / FAIL、得分、实际成本。点击「运行详情」可下钻看轨迹回放时间线（输入意图→知识检索→模型生成→工具执行）、步骤轨迹和产物文件。</p>
       </div>
     </li>
   </ol>
@@ -368,19 +403,19 @@ setx DEEPSEEK_API_KEY "sk-你的密钥"</div>
       </div>
       <div class="main">
         <div class="cap">运行控制台</div>
-        <div class="row"><span>任务</span><div class="ctl">T601 · 日志错误统计</div></div>
+        <div class="row"><span>任务</span><div class="ctl">T001 · 批量日期格式规范化</div></div>
         <div class="row"><span>后端</span><div class="ctl">minimal-react</div></div>
         <div class="row"><span>模型</span><div class="ctl">deepseek-chat</div><div class="btn">开始运行</div></div>
         <div class="prog"><i></i></div>
-        <div class="cell"><b>[PASS]</b>已生成错误统计报告</div>
-        <div class="cell"><b>[PASS]</b>ERROR 计数正确（fixtures 3 条）</div>
-        <div class="cell"><b>[PASS]</b>独立复核与实际日志一致</div>
+        <div class="cell"><b>[PASS]</b>output/dates_normalized.txt 存在</div>
+        <div class="cell"><b>[PASS]</b>日期格式全部为 YYYY-MM-DD</div>
+        <div class="cell"><b>[PASS]</b>行数与输入一致（12 行）</div>
       </div>
     </div>
   </div>
   <p class="fig-cap">界面示意：工作台视图形态，真实界面以运行结果为准</p>
 
-  <div class="note"><b>怎么看结果：</b>绿色 [PASS] 表示该条校验点通过；[FAIL] 表示未通过，可在「运行详情」里下钻看判定依据、Agent 的每一步操作轨迹和生成的真实文件——找到「为什么没过」，比只看分数更有价值。</div>
+  <div class="note"><b>怎么看结果：</b>绿色 [PASS] 表示该条校验点通过；[FAIL] 表示未通过。在「运行详情」里下钻看<span class="accent">轨迹回放时间线</span>——能看到 Agent 每一步的意图、检索了什么知识、模型生成了什么、调用了什么工具，找到「为什么没过」比只看分数更有价值。</div>
 </section>
 
 <!-- ===== 4 表单参数 ===== -->
@@ -401,14 +436,14 @@ setx DEEPSEEK_API_KEY "sk-你的密钥"</div>
         <tr>
           <td class="mono">任务</td>
           <td>要执行的考题（Task），决定 Agent 要完成什么、按什么清单批改。</td>
-          <td>任务列表，来自 <span class="mono">tasks/</span>（当前 6 个：T001/T102/T205/T401/T502/T601）</td>
-          <td>第一次选 <span class="mono">T601</span>，简单直观、费用低。</td>
+          <td>任务列表，来自 <span class="mono">tasks/</span>（当前 23 个，覆盖 L1-L5，含 RAG 检索任务 T701/T702）</td>
+          <td>第一次选 <span class="mono">T001</span>，简单直观、费用低；想体验检索选 <span class="mono">T701</span>。</td>
         </tr>
         <tr>
           <td class="mono">后端</td>
           <td>被测的 Agent（考生）。不同后端能力与风格不同。</td>
-          <td><span class="mono">minimal-react</span>（自研白盒，记录每一步）· <span class="mono">aider</span>（第三方黑盒）</td>
-          <td>默认 minimal-react 即可，轨迹最完整。</td>
+          <td><span class="mono">minimal-react</span>（自研白盒基线，轨迹最完整）· <span class="mono">deepseek-harness</span>（DeepSeek 官方黑盒，可还原模型层）· <span class="mono">aider</span>（第三方黑盒）</td>
+          <td>默认 minimal-react 即可。对比官方 Agent 能力选 deepseek-harness。</td>
         </tr>
         <tr>
           <td class="mono">模型</td>
@@ -426,28 +461,31 @@ setx DEEPSEEK_API_KEY "sk-你的密钥"</div>
           <td class="mono">采样次数</td>
           <td>同一任务重复运行的次数（runs，1–20）。Agent 有随机性，跑多次才能看出稳定性。</td>
           <td>1 – 20，默认 1</td>
-          <td>体验用 1；正式对比建议 3，可看到 best / mean / std。</td>
+          <td>体验用 1；正式对比建议 3，可看到 best / mean / std / pass_rate。</td>
         </tr>
       </tbody>
     </table>
   </div>
 
+  <h3>预计成本提示</h3>
+  <p>任务选择后，工作台会显示该任务的「预计成本」（基于 token 成本模型估算：prompt ¥1/1M、completion ¥2/1M）。列右上角有感叹号，鼠标悬浮或点击可查看成本计算逻辑。无数据时显示「--」并附说明。</p>
+
   <h3>命令行等价参数</h3>
   <p>如果你偏好命令行，同一套设置用 <span class="mono">agent-eval run</span> 完成，参数一一对应：</p>
   <div class="code"><span class="cmd"># 完整参数示例</span>
-agent-eval run --task T601 --agent minimal-react --model deepseek-chat --timeout 120 --runs 3
+agent-eval run --task T001 --agent minimal-react --model deepseek-chat --timeout 300 --runs 3
 
 <span class="cmt"># 常用组合：跑 3 次采样看统计</span>
-agent-eval run --task T502 --agent minimal-react --runs 3
+agent-eval run --task T701 --agent minimal-react --runs 3
 <span class="cmt"># 输出示例：</span>
-<span class="cmt"># 统计 (N=3): best=0.92 mean=0.88 std=0.05 pass_rate=1.0</span></div>
+<span class="cmt"># 统计 (N=3): best=1.0 mean=1.0 std=0.0 pass_rate=1.0</span></div>
 
   <h3>这些参数背后的设计意图</h3>
   <div class="grid g2">
     <div class="card">
       <div class="tag">为什么要采样</div>
       <h4>对抗非确定性</h4>
-      <p>同一个 Agent 跑同一道题，结果可能不同。单次成绩可能是「运气」。多跑几次，<span class="mono">best</span> 看能力上限、<span class="mono">mean</span> 看平均水平、<span class="mono">std</span> 看稳定性。</p>
+      <p>同一个 Agent 跑同一道题，结果可能不同。单次成绩可能是「运气」。多跑几次，<span class="mono">best</span> 看能力上限、<span class="mono">mean</span> 看平均水平、<span class="mono">std</span> 看稳定性、<span class="mono">pass_rate</span> 看通过率。</p>
     </div>
     <div class="card">
       <div class="tag">为什么要超时</div>
@@ -460,9 +498,9 @@ agent-eval run --task T502 --agent minimal-react --runs 3
       <p>后端是 Agent 的思考与工具框架，模型是底层的语言能力。评测时可以固定一个、只改另一个，才能得出可信对比。</p>
     </div>
     <div class="card">
-      <div class="tag">成本控制</div>
+      <div class="tag">成本透明</div>
       <h4>评测不是烧钱</h4>
-      <p>采样次数、模型选择、任务成本预算共同控制花费。建议先小步验证，再放大采样。</p>
+      <p>任务选择时看预计成本，运行后看实际成本（余额差分）。采样次数、模型选择共同控制花费。建议先小步验证，再放大采样。</p>
     </div>
   </div>
 </section>
@@ -482,14 +520,14 @@ agent-eval run --task T502 --agent minimal-react --runs 3
         <tr><th>字段</th><th>必填</th><th>说明</th><th>示例</th></tr>
       </thead>
       <tbody>
-        <tr><td class="mono">任务 ID</td><td><span class="tag-pill pill-green">必填</span></td><td>唯一标识，3–20 位字母/数字/下划线</td><td class="mono">T601</td></tr>
-        <tr><td class="mono">标题</td><td><span class="tag-pill pill-green">必填</span></td><td>给人和 Agent 看的简短名称</td><td>日志错误统计</td></tr>
+        <tr><td class="mono">任务 ID</td><td><span class="tag-pill pill-green">必填</span></td><td>唯一标识，3–20 位字母/数字/下划线</td><td class="mono">T701</td></tr>
+        <tr><td class="mono">标题</td><td><span class="tag-pill pill-green">必填</span></td><td>给人和 Agent 看的简短名称</td><td>知识库检索-质保查询</td></tr>
         <tr><td class="mono">级别</td><td><span class="tag-pill pill-green">必填</span></td><td>难度分层：L1 单步 / L2 多步 / L3 跨工具 / L4 故障注入 / L5 开放式</td><td class="mono">L2</td></tr>
-        <tr><td class="mono">描述</td><td>选填</td><td>给 Agent 的完整指令主体，越明确越好</td><td>读取 input/app.log，统计 ERROR 行数…</td></tr>
-        <tr><td class="mono">标签</td><td>选填</td><td>逗号分隔，便于检索</td><td class="mono">data, logging</td></tr>
+        <tr><td class="mono">描述</td><td>选填</td><td>给 Agent 的完整指令主体，越明确越好</td><td>在 kb/ 知识库检索云帆服务器整机质保月数…</td></tr>
+        <tr><td class="mono">标签</td><td>选填</td><td>逗号分隔，便于检索</td><td class="mono">rag, retrieval</td></tr>
         <tr><td class="mono">判定方式</td><td><span class="tag-pill pill-green">必填</span></td><td><span class="mono">deterministic</span> 确定性校验；<span class="mono">llm_judge</span> 追加 LLM 语义判分（适合开放题）</td><td class="mono">deterministic</td></tr>
         <tr><td class="mono">校验点</td><td><span class="tag-pill pill-green">至少 1 条</span></td><td>批改清单，可动态增删，每条含 id / 类型 / 判定字段</td><td class="mono">c1 file_exists…</td></tr>
-        <tr><td class="mono">权重</td><td>选填</td><td>任务得分占比，默认 1.0（T502 用 2.0 提高权重）</td><td class="mono">1.0</td></tr>
+        <tr><td class="mono">权重</td><td>选填</td><td>任务得分占比，默认 1.0</td><td class="mono">1.0</td></tr>
         <tr><td class="mono">成本上限</td><td>选填</td><td>cost_budget_usd，预估单次花费上限，默认 0.5</td><td class="mono">0.1</td></tr>
         <tr><td class="mono">超时</td><td>选填</td><td>timeout_s，默认 300 秒</td><td class="mono">120</td></tr>
         <tr><td class="mono">评分标准 rubric</td><td>选填</td><td>仅判定方式为 llm_judge 时有效；缺省用内置标准（完整性/准确性/结构/语言）</td><td>四个章节各占 30/25/25/20 分…</td></tr>
@@ -497,7 +535,7 @@ agent-eval run --task T502 --agent minimal-react --runs 3
     </table>
   </div>
 
-  <h3>5 种校验点，一张表看懂</h3>
+  <h3>5 种确定性校验点 + LLM 语义判分</h3>
   <p>校验点是任务的核心。它决定「什么算做对了」。</p>
   <div class="tbl-scroll">
     <table>
@@ -510,59 +548,87 @@ agent-eval run --task T502 --agent minimal-react --runs 3
         <tr><td class="mono">content_contains</td><td>文件内容匹配指定正则</td><td class="mono">path + pattern</td></tr>
         <tr><td class="mono">content_not_contains</td><td>文件内容不包含指定正则</td><td class="mono">path + pattern</td></tr>
         <tr><td class="mono">cmd_exit_zero</td><td>执行命令退出码为 0</td><td class="mono">cmd</td></tr>
+        <tr><td class="mono">llm_judge</td><td>LLM 按 rubric 语义判分（开放任务）</td><td class="mono">rubric（可选）</td></tr>
       </tbody>
     </table>
   </div>
   <div class="note"><b>约定：</b><span class="mono">path</span> 相对 Agent 的工作目录；<span class="mono">cmd</span> 中的 <span class="mono">@scripts/xxx.py</span> 会被替换成项目 <span class="mono">scripts/</span> 的绝对路径——把复核脚本放仓库里，避免被 Agent 篡改。</div>
 
-  <h3>一个完整例子：T601 日志错误统计</h3>
-  <p>输入是一份日志，要求 Agent 统计 ERROR 行数并写报告。它的三个校验点正好覆盖了三种典型判型：</p>
-  <div class="code"><span class="cmt"># tasks/T601/spec.yaml（节选）</span>
-description: 读取 input/app.log，统计 ERROR 级别日志行数，
-  输出 output/errors_report.md，第一行为 ERROR_COUNT=&lt;数量&gt;
+  <h3>RAG 检索任务怎么设计</h3>
+  <p>V2.4 起，工具集新增 <span class="mono">search_kb</span>（BM25 检索），Agent 可在任务的 <span class="mono">kb/</span> 知识库中做关键词检索。设计 RAG 任务时：</p>
+  <div class="grid g2">
+    <div class="card">
+      <div class="tag">知识库</div>
+      <h4>多文档 + 干扰项</h4>
+      <p>在 <span class="mono">fixtures/kb/</span> 放多份 Markdown 文档，其中包含干扰信息（如其他产品也标类似数字），逼 Agent 用完整查询而非单关键词检索。</p>
+    </div>
+    <div class="card">
+      <div class="tag">校验点</div>
+      <h4>产物 + 内容双重校验</h4>
+      <p>用 file_exists 检查答案文件存在，用 content_contains 检查答案包含正确内容。T701 要求答案只含数字（如 36），T702 要求两段信息归纳。</p>
+    </div>
+  </div>
 
-ground_truth:
-  checkpoints:
-    - id: c1
-      type: file_exists          <span class="cmt"># ① 产物文件存在</span>
-      path: output/errors_report.md
-    - id: c2
-      type: content_contains     <span class="cmt"># ② 内容里有正确计数</span>
-      path: output/errors_report.md
-      pattern: "ERROR_COUNT=3"
-    - id: c3
-      type: cmd_exit_zero        <span class="cmt"># ③ 独立复核脚本通过</span>
-      cmd: "python @scripts/verify_t601.py ."
-
-verifier: deterministic</div>
-  <p>看到 <span class="mono">c3</span> 了吗？它用一段独立脚本重新核对报告计数是否和日志真实行数一致——这就是「判定也要被验证」，避免 Agent 写对了格式却没数对数据。</p>
+  <h3>一个完整例子：T701 RAG 检索</h3>
+  <div class="code"><span class="cmt"># tasks/T701/spec.yaml（节选）</span>
+id: T701
+level: L2
+title: 知识库检索-质保查询
+description: |
+  在 kb/ 知识库中检索云帆服务器 FS-200 的整机质保月数，
+  将答案（只含数字）写入 answer.txt
+fixtures: kb/
+checkpoints:
+  - id: c1
+    verifier: file_exists
+    target: answer.txt
+    weight: 0.4
+  - id: c2
+    verifier: content_contains
+    target: answer.txt
+    expect: "36"
+    weight: 0.6</div>
+  <p>T701 的知识库里有 5 份文档，其中「内部通知」里其他产品（X2）也标了 36 个月——Agent 必须用完整查询「云帆服务器 FS-200 整机质保」才能命中正确文档，单搜「质保」会被干扰项误导。这就是 RAG 评测的设计巧思。</p>
 </section>
 
-<!-- ===== 6 看结果 ===== -->
+<!-- ===== 6 结果与轨迹 ===== -->
 <section id="s6">
   <div class="sec-head">
     <span class="sec-no">06</span>
-    <h2>查看结果与报告</h2>
+    <h2>查看结果与轨迹回放</h2>
   </div>
-  <p class="sec-lead">评测的价值在于可解释：每个结论都能一路下钻到原始证据。</p>
+  <p class="sec-lead">评测的价值在于可解释：每个结论都能一路下钻到原始证据，轨迹回放让你看到 Agent 的「思考过程」。</p>
 
-  <h3>五个视图各看什么</h3>
+  <h3>七个视图各看什么</h3>
   <div class="tbl-scroll">
     <table>
       <thead>
         <tr><th>视图</th><th>用途</th><th>重点看什么</th></tr>
       </thead>
       <tbody>
-        <tr><td class="mono">工作台</td><td>发起评测</td><td>任务 / 后端 / 模型 / 超时 / 采样设置</td></tr>
-        <tr><td class="mono">任务管理</td><td>浏览与新建任务</td><td>新建任务表单、校验点编辑器</td></tr>
-        <tr><td class="mono">运行历史</td><td>查看所有历史运行</td><td>按任务 / 后端 / 状态筛选，点击下钻</td></tr>
-        <tr><td class="mono">运行详情</td><td>单次运行的完整证据</td><td>verdict 判定、步骤轨迹、产物文件预览</td></tr>
-        <tr><td class="mono">对比</td><td>Agent × 任务横向对比</td><td>得分矩阵 + 采样统计（N / mean / best / σ）</td></tr>
+        <tr><td class="mono">工作台</td><td>发起评测</td><td>任务 / 后端 / 模型 / 超时 / 采样设置 + 预计成本</td></tr>
+        <tr><td class="mono">任务管理</td><td>浏览与新建任务</td><td>23 任务列表 + 新建任务表单 + 每任务预计成本（含口径提示）</td></tr>
+        <tr><td class="mono">运行历史</td><td>查看所有历史运行</td><td>分页浏览，按任务 / 后端 / 状态筛选，实际成本列，点击下钻</td></tr>
+        <tr><td class="mono">运行详情</td><td>单次运行的完整证据</td><td>判定结果 + <span class="accent">轨迹回放时间线</span> + 步骤轨迹 + 产物文件预览</td></tr>
+        <tr><td class="mono">对比</td><td>Agent × 任务横向对比</td><td>得分矩阵 + 采样统计（N / mean / best / σ / pass_rate）</td></tr>
         <tr><td class="mono">报告</td><td>生成可分享的 HTML 报告</td><td>聚合全部 run 的汇总报告，可离线打开</td></tr>
         <tr><td class="mono">设置</td><td>查看环境信息</td><td>目录 / 版本 / 环境变量说明</td></tr>
       </tbody>
     </table>
   </div>
+
+  <h3>轨迹回放：全链路时间线</h3>
+  <p>运行详情页的「轨迹回放」面板，按时间顺序（绝对时间 + 相对首节点耗时）展示一次评测的完整链路，四类节点用不同颜色区分：</p>
+  <div class="timeline">
+    <div class="tl-node intent"><div class="dot"></div><div class="t">输入意图</div><div class="d">任务描述（intent 节点），标记为「开始」</div></div>
+    <div class="tl-node retrieval"><div class="dot"></div><div class="t">知识 / 检索</div><div class="d">search_kb BM25 命中、read_file、list_dir 返回的知识片段</div></div>
+    <div class="tl-node llm"><div class="dot"></div><div class="t">模型生成</div><div class="d">每步 LLM 输出：minimal-react 记录 model/tokens；dsh 解析出 reasoning/工具决策/final</div></div>
+    <div class="tl-node tool"><div class="dot"></div><div class="t">工具执行</div><div class="d">工具调用与观察结果：write_file、run_command 等</div></div>
+  </div>
+  <p>支持按类型过滤（全部 / 意图 / 知识 / 模型 / 工具）与长文本展开/收起。时间显示为「HH:MM:SS +Xs」（绝对时间 + 相对首节点耗时），看模型思考与工具执行的节奏一目了然。</p>
+
+  <h3>黑盒后端也能看到模型层</h3>
+  <div class="note"><b>deepseek-harness 的轨迹还原：</b>V2.4 起，dsh 运行结束后会解析隔离 DSH_HOME 下的 <span class="mono">session.jsonl.zstd</span>（zstandard 模块 → zstd CLI 回退），提取模型 reasoning、工具决策、最终输出（llm 节点）与工具执行（tool 节点）。实测 dsh T001 还原 54 条 traces（intent 1 + llm 36 + retrieval 7 + tool 10），黑盒后端不再只有单步调用记录。</div>
 
   <h3>如何阅读运行详情</h3>
   <div class="grid g2">
@@ -572,9 +638,9 @@ verifier: deterministic</div>
       <p>每条校验点对应一条判定，带通过状态与说明。所有校验点通过 = 任务通过。</p>
     </div>
     <div class="card">
-      <div class="tag">步骤轨迹 steps</div>
-      <h4>Agent 做了什么</h4>
-      <p>白盒后端记录每一步（调用哪个工具、参数、观察结果）。黑盒后端记录单次调用输出。报告会注明口径。</p>
+      <div class="tag">轨迹回放 traces</div>
+      <h4>Agent 做了什么、想了什么</h4>
+      <p>全链路时间线：输入意图 → 知识检索 → 模型生成 → 工具执行。白盒后端记录完整，黑盒后端（dsh）通过 session 解析还原模型层。</p>
     </div>
     <div class="card">
       <div class="tag">产物预览</div>
@@ -582,24 +648,136 @@ verifier: deterministic</div>
       <p>工作目录里的产物文件可在线预览。仅支持常见文本类型且 ≤ 200KB，并做了路径穿越防护，安全浏览。</p>
     </div>
     <div class="card">
-      <div class="tag">采样统计</div>
-      <h4>多次运行怎么看</h4>
-      <p><span class="mono">N</span> 采样数 · <span class="mono">best</span> 最高分 · <span class="mono">mean</span> 平均分 · <span class="mono">std</span> 标准差（越小越稳）· <span class="mono">pass_rate</span> 通过率。</p>
+      <div class="tag">采样统计 + 成本</div>
+      <h4>多次运行怎么看 + 花了多少</h4>
+      <p><span class="mono">N</span> 采样数 · <span class="mono">best</span> 最高分 · <span class="mono">mean</span> 平均分 · <span class="mono">std</span> 标准差 · <span class="mono">pass_rate</span> 通过率。实际成本用 DeepSeek 余额差分计算。</p>
     </div>
   </div>
 
   <h3>一键生成分享报告</h3>
   <p>在「报告」视图点击生成，或命令行执行 <span class="mono">agent-eval report</span>，会聚合全部运行记录，产出一个自包含的 HTML 报告（<span class="mono">reports/report.html</span>），离线也能打开，适合发给同事或放在评审里。</p>
-
-  <h3>关于语义判分（llm_judge）</h3>
-  <p>像「写周报」这类开放任务，无法用「文件内容匹配」判断质量。此时判定方式选 <span class="mono">llm_judge</span>，框架会让 LLM 按 rubric 打分（满分 100 折算成 0–1），输出 score 和 reasoning（判分理由）。</p>
-  <div class="note warn"><b>注意：</b>llm_judge 需要 API Key；若缺 Key、判分调用失败或没有产物，该条会如实记为不通过，但<span class="accent">不会中断整次评测</span>——这是平台「诚实降级」的设计。</div>
 </section>
 
-<!-- ===== 7 常见问题 ===== -->
+<!-- ===== 7 CI 门禁 ===== -->
 <section id="s7">
   <div class="sec-head">
     <span class="sec-no">07</span>
+    <h2>CI 质量门禁：不达标就阻断合并</h2>
+  </div>
+  <p class="sec-lead">把评测接入 GitHub CI，让 Agent 能力成为上线硬卡口。core 任务包通过率不达标，退出码非 0，分支保护直接阻断合并。</p>
+
+  <h3>完整链路</h3>
+  <div class="pipeline">
+    <div class="pipe"><div class="n">01</div><div class="t">PR 提交</div><div class="d">触发 GitHub Actions workflow</div></div>
+    <div class="pipe-arr">→</div>
+    <div class="pipe"><div class="n">02</div><div class="t">agent-eval ci</div><div class="d">无头运行 core 门禁包</div></div>
+    <div class="pipe-arr">→</div>
+    <div class="pipe"><div class="n">03</div><div class="t">通过率判定</div><div class="d">≥ min_pass_rate ?</div></div>
+    <div class="pipe-arr">→</div>
+    <div class="pipe"><div class="n">04</div><div class="t">PASS / FAIL</div><div class="d">放行合并 or 退出码非0阻断</div></div>
+  </div>
+
+  <h3>agent-eval ci 命令</h3>
+  <div class="code"><span class="cmd"># 跑 core 门禁（12 任务 × 3 采样）</span>
+agent-eval ci --gate core --agent minimal-react \
+  --junit-xml results/junit.xml \
+  --allure-dir results/allure-results
+
+<span class="cmt"># 多 Agent 横向对比（每 Agent 独立跑，全部达标才 PASS）</span>
+agent-eval ci --gate core --agent minimal-react --agent deepseek-harness
+
+<span class="cmt"># 输出：</span>
+<span class="cmt"># JUnit XML（每任务一个 suite，CI 直接解析）</span>
+<span class="cmt"># Allure results（标准测试报告可视化）</span>
+<span class="cmt"># ci-report.json（agent × task 结果矩阵 + 成本）</span>
+<span class="cmt"># 门禁未通过时退出码非 0（阻断合并）</span></div>
+
+  <h3>gate.yaml 配置</h3>
+  <div class="code"><span class="cmt"># ci/gate.yaml</span>
+gate:
+  core:            # 上线卡口：PR 合并前必须通过
+    tasks: [T001, T102, T103, T207, T305, T306, T308, T303, T401, T402, T701, T702]
+    runs: 3                    # 多采样对抗 LLM 非确定性
+    task_pass_ratio: 0.5       # 任务级多数制：3 run 中 ≥2 通过才算该任务通过
+    min_pass_rate: 0.9         # 12 任务允许 1 个未通过
+  full:            # 全量回归：合并后/发布前
+    tasks: "*"     # 全部 23 任务
+    runs: 1
+    min_pass_rate: 0.8</div>
+
+  <h3>门禁判定语义</h3>
+  <div class="grid g2">
+    <div class="card">
+      <div class="tag">第 1 层</div>
+      <h4>任务级多数制</h4>
+      <p>每个任务跑 <span class="mono">runs</span> 次 → 任务通过 = 通过 run 数 / runs ≥ <span class="mono">task_pass_ratio</span>。3 次中至少 2 次通过才算该任务通过，对抗单次运气。</p>
+    </div>
+    <div class="card">
+      <div class="tag">第 2 层</div>
+      <h4>门禁通过率</h4>
+      <p>gate 通过率 = 通过任务数 / 总任务数 ≥ <span class="mono">min_pass_rate</span> → PASS；否则退出码非 0。core 包 12 任务 × 0.9 = 允许 1 个未通过。</p>
+    </div>
+  </div>
+
+  <h3>在 GitHub 仓库启用</h3>
+  <div class="code"><span class="cmt"># .github/workflows/agent-eval-gate.yml（骨架）</span>
+- run: pip install "git+https://github.com/yaoxianda-github/ai-agent-eval.git"
+- run: agent-eval ci --gate core --agent deepseek-harness \
+    --junit-xml results/junit.xml --allure-dir results/allure-results
+- if: failure()
+  uses: actions/upload-artifact@v4
+  with: { name: reports, path: "results/*" }</div>
+  <p>配合分支保护：GitHub 仓库 Settings → Branches → 添加 required check（如 <span class="mono">agent-eval core gate</span>）→ 失败即禁止合并。</p>
+
+  <div class="note"><b>实测数据：</b>core 门禁 12 任务 × 3 采样 = 36 次运行，耗时 251 秒，token 248,722，成本仅 ¥0.06，通过率 0.917（11/12，T207 老任务波动）≥ 0.9 → PASS。端到端验证见演示仓库 <span class="mono">agent-eval-demo</span>（PR 阻断 → 修复 → 放行完整链路）。</div>
+</section>
+
+<!-- ===== 8 成本核算 ===== -->
+<section id="s8">
+  <div class="sec-head">
+    <span class="sec-no">08</span>
+    <h2>成本核算：预计与实际双口径</h2>
+  </div>
+  <p class="sec-lead">用户在选择任务时即可预知成本，运行后得到真实花费——评测不再是黑盒开销。</p>
+
+  <div class="grid g2">
+    <div class="card">
+      <div class="tag">预计成本（事前）</div>
+      <h4>token 成本模型估算</h4>
+      <p>基于任务预期 token 用量估算：prompt ¥1 / 1M tokens、completion ¥2 / 1M tokens。展示位置：任务管理页每任务成本列。列右上角感叹号悬浮/点击可查看计算逻辑。无数据时显示「--」并附说明。</p>
+    </div>
+    <div class="card amber">
+      <div class="tag">实际成本（事后）</div>
+      <h4>DeepSeek 余额差分</h4>
+      <p>运行前后调用 DeepSeek <span class="mono">/user/balance</span> 接口做差分（curl 实现，兼容 urllib SSL 失效），批量差分精度 ¥0.09。黑盒后端 token=0 时兜底不报错。展示位置：运行历史实际成本列 + CI 报告 ci-report.json。</p>
+    </div>
+  </div>
+
+  <h3>为什么用余额差分而不是 token 估算</h3>
+  <p>黑盒后端（deepseek-harness / aider）不暴露 token 用量，只有余额差分能覆盖所有后端的真实成本。而且余额差分是「真金白银」的花费，比 token 估算更可信（token 估算不包含重试、超时、工具调用的额外开销）。</p>
+
+  <h3>成本数据在哪看</h3>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr><th>口径</th><th>位置</th><th>说明</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>预计成本</td><td>任务管理页（每任务成本列）</td><td>token 模型估算，选择任务时即可看到</td></tr>
+        <tr><td>实际成本</td><td>运行历史页（实际成本列）</td><td>余额差分，每次运行的真实花费</td></tr>
+        <tr><td>实际成本</td><td>运行详情页</td><td>单次运行的成本明细</td></tr>
+        <tr><td>批量成本</td><td>CI 报告 ci-report.json</td><td>整轮门禁的总成本，含 agent × task 矩阵</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note"><b>成本控制建议：</b>先小步验证（单任务、runs=1），确认任务设计合理后再放大采样（runs=3）。core 门禁 36 次运行仅 ¥0.06，成本可控。换更贵的模型前，先看预计成本评估预算。</div>
+</section>
+
+<!-- ===== 9 常见问题 ===== -->
+<section id="s9">
+  <div class="sec-head">
+    <span class="sec-no">09</span>
     <h2>常见问题与排障</h2>
   </div>
   <p class="sec-lead">按「现象 → 原因 → 处理」整理最常见的问题。更详细日志可查看结果目录下的 run.json。</p>
@@ -611,13 +789,18 @@ verifier: deterministic</div>
       <tbody>
         <tr>
           <td>运行报「缺少 LLM API Key」</td>
-          <td>未配置 DEEPSEEK_API_KEY / LLM_API_KEY</td>
-          <td>执行 <span class="mono">setx DEEPSEEK_API_KEY "sk-..."</span> 后重开终端，再启动工作台。</td>
+          <td>未配置 DEEPSEEK_API_KEY</td>
+          <td>macOS：<span class="mono">echo 'export DEEPSEEK_API_KEY="sk-..."' >> ~/.zshrc && source ~/.zshrc</span>；Windows：<span class="mono">setx DEEPSEEK_API_KEY "sk-..."</span>，重开终端再启动工作台。</td>
+        </tr>
+        <tr>
+          <td>deepseek-harness 报 403 / 预扣失败</td>
+          <td>使用了 ~/.dsh 个人旧凭据</td>
+          <td>平台使用隔离 DSH_HOME（<span class="mono">~/.cache/agent-eval/dsh-home</span>），凭据只来自环境变量。确认 <span class="mono">DEEPSEEK_API_KEY</span> 有效且未过期。不要手动配置 ~/.dsh。</td>
         </tr>
         <tr>
           <td>运行报「未知后端」</td>
           <td>后端名称拼写错误或未安装</td>
-          <td>在下拉框里选存在的后端；aider 需额外 <span class="mono">pip install -e ".[aider]"</span>。</td>
+          <td>在下拉框里选存在的后端；aider 需额外 <span class="mono">pip install -e ".[aider]"</span>；deepseek-harness 需 Node ≥ 22。</td>
         </tr>
         <tr>
           <td>运行报「未知任务」</td>
@@ -625,35 +808,55 @@ verifier: deterministic</div>
           <td>在任务管理确认；任务目录需在 tasks/ 且在 manifest.yaml 中登记。</td>
         </tr>
         <tr>
-          <td>8080/8000 端口被占用</td>
+          <td>8000 端口被占用 / 地址已在使用</td>
           <td>已有进程监听该端口</td>
-          <td>换端口：<span class="mono">agent-eval workbench --port 8081</span>。</td>
+          <td>macOS 释放端口：<span class="mono">lsof -ti tcp:8000 | xargs kill -9</span>，再重启工作台。或换端口：<span class="mono">agent-eval workbench --port 8080</span>。</td>
         </tr>
         <tr>
-          <td>产物预览失败</td>
-          <td>类型不在白名单，或文件 &gt; 200KB</td>
-          <td>预览仅支持 md/txt/csv/json/log/py/yaml/yml/xml/html/svg 且 ≤ 200KB；大文件请本地打开。</td>
+          <td>工作台刷新后报「not found」</td>
+          <td>SPA 路由刷新问题</td>
+          <td>从首页（http://127.0.0.1:8000/）重新进入，通过左侧导航切换页面，不要直接刷新子路由。</td>
+        </tr>
+        <tr>
+          <td>运行详情执行轨迹显示乱码</td>
+          <td>命令输出编码非 UTF-8（如 GBK）</td>
+          <td>V2.x 已修复：命令沙箱做输出编码探测，GBK 自动转 UTF-8。升级到最新版本即可。</td>
+        </tr>
+        <tr>
+          <td>产物文件读取报 500</td>
+          <td>路径穿越或相对/绝对路径混用</td>
+          <td>V2.x 已修复：产物预览相对 results_dir 做路径安全校验。升级到最新版本即可。</td>
+        </tr>
+        <tr>
+          <td>任务管理预计成本显示「--」</td>
+          <td>该任务无成本估算数据</td>
+          <td>属正常现象。部分任务（如 llm_judge 开放任务）成本模型暂未覆盖，显示「--」并附说明。运行后可看实际成本。</td>
         </tr>
         <tr>
           <td>结果一直 pending / running</td>
           <td>Agent 卡住或任务耗时长</td>
-          <td>等待超时强杀（任务默认超时）；或检查网络 / Key 是否有效。</td>
+          <td>等待超时强杀（任务默认超时）；或检查网络 / Key 是否有效。dsh 后端首次运行需下载依赖，可能较慢。</td>
         </tr>
         <tr>
           <td>多次运行结果不稳定</td>
           <td>Agent 本身有随机性</td>
-          <td>属正常现象。加大采样次数（runs）看 best / mean / std，不要用单次下结论。</td>
+          <td>属正常现象。加大采样次数（runs）看 best / mean / std / pass_rate，不要用单次下结论。core 门禁用 task_pass_ratio 0.5 多数制对抗随机性。</td>
+        </tr>
+        <tr>
+          <td>CI 门禁失败但本地跑通过</td>
+          <td>CI 环境与本地不同（模型/Key/网络）</td>
+          <td>检查 CI 的 DEEPSEEK_API_KEY secret 是否配置；CI 用 deepseek-harness 后端需确认 Node 版本；下载 CI artifact（results/*）查看具体失败任务的 run.json。</td>
         </tr>
       </tbody>
     </table>
   </div>
-  <div class="note"><b>结果都存在哪：</b>每次运行的结果在 <span class="mono">results/runs/&lt;run_id&gt;/</span>（含 run.json、workspace 工作目录），SQLite 只是历史索引，原始证据始终是文件。</div>
+  <div class="note"><b>结果都存在哪：</b>每次运行的结果在 <span class="mono">results/runs/&lt;run_id&gt;/</span>（含 run.json、workspace 工作目录、traces 轨迹数据），SQLite 只是历史索引，原始证据始终是文件。</div>
 </section>
 
-<!-- ===== 8 术语表 ===== -->
-<section id="s8">
+<!-- ===== 10 术语表 ===== -->
+<section id="s10">
   <div class="sec-head">
-    <span class="sec-no">08</span>
+    <span class="sec-no">10</span>
     <h2>术语速查表</h2>
   </div>
   <p class="sec-lead">遇到不认识的词，回这里查。</p>
@@ -664,20 +867,30 @@ verifier: deterministic</div>
       </thead>
       <tbody>
         <tr><td class="mono">Task 任务</td><td>一套考题：指令 + 初始文件 + 批改清单</td></tr>
-        <tr><td class="mono">Backend 后端</td><td>被测 Agent，如 minimal-react（白盒）/ aider（黑盒）</td></tr>
-        <tr><td class="mono">Checkpoint 校验点</td><td>批改清单里的一条判定规则（5 种类型）</td></tr>
+        <tr><td class="mono">Backend 后端</td><td>被测 Agent，如 minimal-react（白盒）/ deepseek-harness（黑盒）/ aider（黑盒）</td></tr>
+        <tr><td class="mono">Checkpoint 校验点</td><td>批改清单里的一条判定规则（5 种确定性类型 + llm_judge）</td></tr>
         <tr><td class="mono">Verdict 判定</td><td>单个校验点的结果：passed + 依据</td></tr>
         <tr><td class="mono">Score 得分</td><td>权重 × 校验点通过率</td></tr>
         <tr><td class="mono">Run 一次运行</td><td>一次完整的「任务 + Agent」评测</td></tr>
         <tr><td class="mono">Runs 采样次数</td><td>同一任务重复运行次数（1–20），用于对抗随机性</td></tr>
-        <tr><td class="mono">Fixtures 初始文件</td><td>运行前复制进干净工作目录的输入文件</td></tr>
+        <tr><td class="mono">Traces 轨迹</td><td>运行全链路记录：输入意图 → 知识检索 → 模型生成 → 工具执行</td></tr>
+        <tr><td class="mono">search_kb</td><td>RAG 检索工具，在 kb/ 知识库做 BM25 检索，返回命中片段+来源行号+得分</td></tr>
+        <tr><td class="mono">Gate 门禁</td><td>CI 质量卡口：core/full 任务包通过率不达标则退出码非 0，阻断合并</td></tr>
+        <tr><td class="mono">gate.yaml</td><td>门禁配置文件，定义 core/full 包的任务列表、runs、task_pass_ratio、min_pass_rate</td></tr>
+        <tr><td class="mono">agent-eval ci</td><td>无头 CI 命令，输出 JUnit XML + Allure + ci-report.json，门禁未通过退出码非 0</td></tr>
+        <tr><td class="mono">预计成本</td><td>任务级 token 成本模型估算（prompt ¥1/1M、completion ¥2/1M）</td></tr>
+        <tr><td class="mono">实际成本</td><td>DeepSeek 余额差分（运行前后 /user/balance 差值），批量精度 ¥0.09</td></tr>
+        <tr><td class="mono">DSH_HOME</td><td>deepseek-harness 隔离运行目录（~/.cache/agent-eval/dsh-home），避免个人凭据污染</td></tr>
+        <tr><td class="mono">session.jsonl.zstd</td><td>dsh 运行的 session 记录文件，解析后可还原模型 reasoning/工具决策/final</td></tr>
+        <tr><td class="mono">Fixtures 初始文件</td><td>运行前复制进干净工作目录的输入文件（含 kb/ 知识库）</td></tr>
         <tr><td class="mono">Workspace 工作目录</td><td>Agent 本次运行的沙箱目录，产物在其中</td></tr>
         <tr><td class="mono">Spec 任务卡</td><td>tasks/&lt;id&gt;/spec.yaml，任务契约文件</td></tr>
-        <tr><td class="mono">Manifest 清单</td><td>tasks/manifest.yaml，登记任务包包含哪些任务</td></tr>
-        <tr><td class="mono">run.json</td><td>一次运行的完整结果文件（权威记录）</td></tr>
+        <tr><td class="mono">Manifest 清单</td><td>tasks/manifest.yaml，登记任务包包含哪些任务（当前 23 个）</td></tr>
+        <tr><td class="mono">run.json</td><td>一次运行的完整结果文件（权威记录，含 traces 字段）</td></tr>
         <tr><td class="mono">Rubric 评分标准</td><td>llm_judge 语义判分时的评分细则</td></tr>
         <tr><td class="mono">LLM-as-a-Judge</td><td>用 LLM 对开放任务产物做语义打分</td></tr>
         <tr><td class="mono">deterministic 判定</td><td>确定性校验点判定（文件/内容/命令）</td></tr>
+        <tr><td class="mono">BM25</td><td>信息检索经典评分算法（k1=1.5, b=0.75），search_kb 使用的检索算法</td></tr>
       </tbody>
     </table>
   </div>
@@ -690,9 +903,9 @@ verifier: deterministic</div>
   <div class="footer-inner">
     <div>
       <h3>现在，打开工作台试试看</h3>
-      <p>第一次评测建议：T601 + minimal-react + 采样 1 次。跑通之后，再尝试采样 3 次看统计。</p>
+      <p>第一次评测建议：T001 + minimal-react + 采样 1 次。跑通之后，再尝试 T701 体验 RAG 检索，或采样 3 次看统计。进阶可接入 CI 门禁。</p>
     </div>
-    <p>ai-agent-eval · V2.2 · <span class="mono">github.com/yaoxianda-github/ai-agent-eval</span></p>
+    <p>ai-agent-eval · V2.5 · <span class="mono">github.com/yaoxianda-github/ai-agent-eval</span></p>
   </div>
 </footer>
 
