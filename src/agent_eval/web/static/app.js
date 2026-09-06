@@ -540,9 +540,27 @@
     if (t.args) return strOf(t.args);
     return "";
   }
+  function tlPad(n) { return n < 10 ? "0" + n : String(n); }
+  // 时间戳 → 可读时间（HH:MM:SS）+ 相对首个有真实时间节点的耗时（+Xs）
+  function fmtTs(ts, baseTs) {
+    if (ts == null || ts <= 0) return "";
+    var d = new Date(ts * 1000);
+    var abs = tlPad(d.getHours()) + ":" + tlPad(d.getMinutes()) + ":" + tlPad(d.getSeconds());
+    if (baseTs != null && ts >= baseTs) {
+      var rel = ts - baseTs;
+      return abs + "  +" + (rel < 60 ? rel.toFixed(1) : Math.round(rel)) + "s";
+    }
+    return abs;
+  }
   function traceTimeline(traces) {
     if (!traces || !traces.length) {
       return '<div class="empty">该 run 无轨迹回放数据（旧版本运行），重新运行任务可生成</div>';
+    }
+    // 基准时间：第一个有真实 epoch 秒时间戳的节点（intent 占位 ts=0 排除）
+    var baseTs = null;
+    for (var bi = 0; bi < traces.length; bi++) {
+      var bts = traces[bi] && traces[bi].ts;
+      if (bts && bts > 1e8) { baseTs = bts; break; }
     }
     var chips = [];
     var keys = ["all", "intent", "retrieval", "llm", "tool"];
@@ -561,7 +579,7 @@
       var meta = TL_META[kind] || TL_META.tool;
       var body = tlBody(kind, t);
       var extra = tlExtra(kind, t);
-      var tsTxt = t.ts ? (Math.round(t.ts * 1000) + "ms") : "";
+      var tsTxt = kind === "intent" ? "开始" : fmtTs(t.ts, baseTs);
       var hasMore = body.length > 240;
       var bodyHtml = hasMore
         ? '<div class="tl-body" data-full="' + esc(body) + '">' + esc(clip(body, 240)) +
