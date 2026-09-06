@@ -1,0 +1,80 @@
+# agent-eval CI 接入示例（GitHub Actions）
+#
+# 放到【被测应用仓库】的 .github/workflows/agent-eval.yml 使用。
+# 前提：
+#   1. 被测仓库安装本评测工具（pip install git+https://github.com/yaoxianda-github/ai-agent-eval.git 或 vendored）
+#   2. 仓库包含 tasks/ 任务包（或通过 AGENT_EVAL_TASKS_DIR 指向）
+#   3. GitHub Secrets 配置 DEEPSEEK_API_KEY
+#
+# 合并阻断：agent-eval ci 门禁失败退出码 1 -> job 失败 -> 在 GitHub 仓库
+# Settings > Branches > 为 main 添加 branch protection rule，
+# 勾选 Require status checks 并选择本 job 名称（agent-eval / gate）即可自动阻断不合规合并。
+
+name: agent-eval gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  checks: write      # test-reporter 写入 check
+  pull-requests: write
+  issues: write
+
+jobs:
+  gate:
+    name: agent-eval core gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: 安装 agent-eval
+        run: |
+          pip install --upgrade pip
+          pip install -e ./ai-agent-eval   # 或 pip install git+https://github.com/yaoxianda-github/ai-agent-eval.git
+
+      - name: 运行核心门禁（无头模式）
+        id: gate
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          # LLM_INPUT_CNY_PER_M / LLM_OUTPUT_CNY_PER_M 可按实际账单覆盖默认定价
+        run: |
+          agent-eval ci --gate core \
+            --junit-xml results/junit.xml \
+            --allure-dir results/allure-results \
+            --report-json results/ci-report.json
+        # 非 0 退出码 -> job 失败 -> required check 阻断合并
+
+      - name: 发布 JUnit 报告到 PR 评论
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: agent-eval core gate (JUnit)
+          path: results/junit.xml
+          reporter: java-junit
+
+      - name: 生成 Allure 报告
+        if: always()
+        uses: simple-elf/allure-report-action@v1.9
+        with:
+          allure_results: results/allure-results
+          allure_history: allure-history
+          keep_reports: 20
+
+      - name: 上传门禁汇总（供后续分析）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-eval-report
+          path: |
+            results/junit.xml
+            results/ci-report.json
+            results/allure-results/
+          if-no-files-found: ignore

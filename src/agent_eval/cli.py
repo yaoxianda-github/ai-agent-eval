@@ -116,6 +116,39 @@ def _print_record(record) -> None:
     typer.echo(f"detail: {record.workspace}" if record.workspace else "detail: （工作目录已清理）")
 
 
+@app.command("ci")
+def ci(
+    gate: str = typer.Option("core", "--gate", help="门禁名称（core / full，见 ci/gate.yaml）"),
+    agent: str = typer.Option("minimal-react", "--agent", help="被测后端 Agent 名称"),
+    model: str = typer.Option("deepseek-chat", "--model", help="LLM 模型名"),
+    runs: Optional[int] = typer.Option(None, "--runs", min=1, max=20, help="覆盖 gate 配置的采样次数"),
+    config: str = typer.Option("ci/gate.yaml", "--config", help="门禁配置文件路径"),
+    junit_xml: str = typer.Option("results/junit.xml", "--junit-xml", help="JUnit XML 输出路径"),
+    allure_dir: str = typer.Option("results/allure-results", "--allure-dir", help="Allure results 输出目录"),
+    report_json: str = typer.Option("results/ci-report.json", "--report-json", help="门禁汇总 JSON 输出路径"),
+    results_dir: str = typer.Option("results/runs", "--results-dir", help="run.json 落盘目录"),
+) -> None:
+    """无头运行 CI 质量门禁（M1）。
+
+    按 ci/gate.yaml 的 gate 配置执行评测，输出 JUnit XML + Allure results，
+    门禁未通过时退出码非 0（配合 GitHub Actions required check 阻断合并）。
+    """
+    from agent_eval.ci import run_gate_cli
+
+    try:
+        ok = run_gate_cli(
+            gate, agent=agent, model=model, runs_override=runs,
+            config_path=config, junit_xml=junit_xml, allure_dir=allure_dir,
+            report_json=report_json, results_dir=results_dir,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        typer.echo(f"错误: {e}")
+        raise typer.Exit(code=2)
+    if not ok:
+        typer.echo(f"\ngate={gate} 未通过，退出码 1（CI 将阻断合并）")
+        raise typer.Exit(code=1)
+
+
 @app.command("report")
 def report(
     out: str = typer.Option("reports/report.html", "--out", "-o", help="输出 HTML 报告路径"),
