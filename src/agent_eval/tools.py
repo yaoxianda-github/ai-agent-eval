@@ -81,9 +81,11 @@ def _run_command(ws: Path, args: dict) -> tuple[bool, str]:
     return r.ok, f"exit={r.exit_code}\n{out}"
 
 
-# ---------- RAG 检索工具（V2.4：评测集真实检索环节） ----------
+# ---------- RAG 检索工具（V2.4：评测集真实检索环节；V2.5：BM25 混合检索） ----------
 
 _KB_EXTS = {".md", ".txt", ".csv"}
+_BM25_K1 = 1.5
+_BM25_B = 0.75
 
 
 def _extract_keywords(query: str) -> list[str]:
@@ -97,12 +99,51 @@ def _extract_keywords(query: str) -> list[str]:
     return kws
 
 
-def _search_kb(ws: Path, args: dict) -> tuple[bool, str]:
-    """在知识库 kb/ 下做关键词检索（RAG 检索环节的评测实现）。
+def _bm25_tokens(text: str) -> list[str]:
+    """BM25 词项：英文/数字词（≥3 字符，小写）+ 中文连续串 2-gram。"""
+    import re
 
-    检索范围：kb/ 下所有 .md/.txt/.csv 文件。按 ~6 行一个片段打分
-    （英文词命中×2、中文词组命中×1），返回 Top-N 片段，附来源定位
-    `[kb/xxx.md:起-止行]`，供轨迹回放"知识/检索"节点展示命中的知识片段。
+    tokens: list[str] = []
+    for w in re.findall(r"[A-Za-z0-9_]{3,}", text):
+        tokens.append(w.lower())
+    for seg in re.findall(r"[\u4e00-\u9fa5]+", text):
+        if len(seg) >= 2:
+            tokens.extend(seg[i : i + 2] for i in range(len(seg) - 1))
+        else:
+            tokens.append(seg)
+    return tokens
+
+
+def _bm25_scores(query_tokens: list[str], chunks: list[dict]) -> list[tuple[float, dict]]:
+    """对片段列表计算 BM25 得分，返回 (score, chunk) 降序。"""
+    import math
+
+    n = len(chunks)
+    avgdl = sum(c["dl"] for c in chunks) / max(n, 1)
+    df = {t: sum(1 for c in chunks if t in c["toks"]) for t in set(query_tokens)}
+    scored: list[tuple[float, dict]] = []
+    for c in chunks:
+        score = 0.0
+        for t in query_tokens:
+            f = c["toks"].count(t)
+            if not f:
+                continue
+            idf = math.log(1.0 + (n - df[t] + 0.5) / (df[t] + 0.5))
+            denom = f + _BM25_K1 * (1.0 - _BM25_B + _BM25_B * c["dl"] / avgdl)
+            score += idf * (f * (_BM25_K1 + 1.0)) / max(denom, 1e-9)
+        if score > 0:
+            scored.append((score, c))
+    scored.sort(key=lambda x: -x[0])
+    return scored
+
+
+def _search_kb(ws: Path, args: dict) -> tuple[bool, str]:
+    """在知识库 kb/ 下做 BM25 检索（RAG 检索环节的评测实现）。
+
+    检索范围：kb/ 下所有 .md/.txt/.csv 文件。按 ~6 行一个片段，对查询
+    （英文/数字词 + 中文 2-gram）计算 BM25（k1=1.5, b=0.75），返回 Top-N
+    片段，附来源定位 `[kb/xxx.md:起-止行]` 与得分，供轨迹回放"知识/检索"
+    节点展示命中的知识片段。
     """
     query = str(args.get("query", "")).strip()
     top_k = max(1, min(int(args.get("top_k", 3)), 5))
@@ -111,9 +152,9 @@ def _search_kb(ws: Path, args: dict) -> tuple[bool, str]:
     kb = ws / "kb"
     if not kb.is_dir():
         return False, "知识库 kb/ 不存在：本任务没有可检索的知识库（fixtures 未提供 kb/）"
-    kws = _extract_keywords(query)
-    if not kws:
-        return False, f"无法从查询提取检索关键词: {query!r}"
+    q_tokens = _bm25_tokens(query)
+    if not q_tokens:
+        return False, f"无法从查询提取检索词项: {query!r}"
 
     files = sorted(
         p for p in kb.rglob("*")
@@ -122,7 +163,7 @@ def _search_kb(ws: Path, args: dict) -> tuple[bool, str]:
     if not files:
         return False, "知识库 kb/ 下没有可检索的文档（.md/.txt/.csv）"
 
-    scored: list[tuple[float, str, int, int, str]] = []
+    chunks: list[dict] = []
     for p in files:
         try:
             text = p.read_text(encoding="utf-8", errors="replace")
@@ -130,24 +171,25 @@ def _search_kb(ws: Path, args: dict) -> tuple[bool, str]:
             continue
         lines = text.splitlines()
         for start in range(0, len(lines), 6):
-            chunk = lines[start : start + 6]
-            block = "\n".join(chunk)
-            score = 0.0
-            for kw in kws:
-                cnt = block.count(kw)
-                if cnt:
-                    score += cnt * (2.0 if kw.isascii() else 1.0)
-            if score > 0:
-                scored.append((score, str(p.relative_to(ws)), start + 1, start + len(chunk), block))
+            block = "\n".join(lines[start : start + 6])
+            toks = _bm25_tokens(block)
+            chunks.append(
+                {
+                    "rel": str(p.relative_to(ws)),
+                    "start": start + 1,
+                    "end": start + len(lines[start : start + 6]),
+                    "text": block,
+                    "toks": toks,
+                    "dl": len(toks),
+                }
+            )
 
+    scored = _bm25_scores(q_tokens, chunks)
     if not scored:
-        return False, f"知识库中未检索到与「{query}」相关的内容（关键词: {', '.join(kws)}）"
+        return False, f"知识库中未检索到与「{query}」相关的内容"
 
-    scored.sort(key=lambda x: -x[0])
     out = []
-    for score, rel, s, e, block in scored[:top_k]:
-        rel = rel.replace("kb/", "kb/", 1)
-        head = f"[{rel}:{s}-{e}] (得分 {score:.1f})"
-        snippet = block[:600]
-        out.append(f"{head}\n{snippet}")
+    for score, c in scored[:top_k]:
+        head = f"[{c['rel']}:{c['start']}-{c['end']}] (得分 {score:.2f})"
+        out.append(f"{head}\n{c['text'][:600]}")
     return True, "\n\n".join(out)

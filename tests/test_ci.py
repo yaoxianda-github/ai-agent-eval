@@ -151,8 +151,10 @@ def test_load_gate_config_real(tmp_path):
     assert core["runs"] == 3
     assert core["task_pass_ratio"] == 0.5
     assert core["min_pass_rate"] == 0.9
-    assert len(core["tasks"]) == 10
+    # V2.5：core 扩至 12 任务（新增 RAG 检索 T701/T702，采样稳定后纳入卡口）
+    assert len(core["tasks"]) == 12
     assert "T001" in core["tasks"]
+    assert "T701" in core["tasks"] and "T702" in core["tasks"]
 
 
 # ---------- JUnit XML ----------
