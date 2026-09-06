@@ -29,6 +29,7 @@ class RunRecord:
     task_level: str
     status: str
     steps: list[dict] = field(default_factory=list)
+    traces: list[dict] = field(default_factory=list)
     duration_s: float = 0.0
     metrics: dict = field(default_factory=dict)
     verdicts: list[dict] = field(default_factory=list)
@@ -98,6 +99,32 @@ def run_one(
             usage["completion_tokens"] += u.get("completion_tokens", 0) or 0
     metrics["usage"] = usage
 
+    # V2.4：全链路回放轨迹（输入意图 → 检索/工具 → 模型生成）
+    # 后端自报 traces（如 minimal-react 的 llm/tool 节点）优先；否则由 steps 兜底合成
+    traces: list[dict] = []
+    if result.traces:
+        traces = list(result.traces)
+    else:
+        for s in result.steps:
+            traces.append(
+                {
+                    "kind": "tool",
+                    "category": (
+                        "retrieval"
+                        if (s.get("action") in ("read_file", "list_dir", "search", "query"))
+                        else "tool"
+                    ),
+                    "ts": s.get("ts", 0.0),
+                    "tool": s.get("action"),
+                    "args": s.get("args"),
+                    "observation": s.get("observation"),
+                }
+            )
+    traces.insert(
+        0, {"kind": "intent", "ts": 0.0, "content": task.description, "task_id": task.id}
+    )
+    traces.sort(key=lambda t: t.get("ts", 0.0))
+
     record = RunRecord(
         run_id=run_id,
         agent_id=agent_id,
@@ -106,6 +133,7 @@ def run_one(
         task_level=task.level,
         status=result.status,
         steps=result.steps,
+        traces=traces,
         duration_s=duration,
         metrics=metrics,
         verdicts=verdicts,

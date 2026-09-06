@@ -59,6 +59,31 @@ tr.clickable:hover { background: rgba(31,58,95,0.04); }
   display: inline-block; background: #FDEBEC; color: #C0392B;
   border-radius: 4px; padding: 1px 6px; font-size: 11px; cursor: help;
 }
+/* ---- 轨迹回放时间线 ---- */
+.tl-note { color: #9AA0A6; font-size: 11px; font-weight: 400; margin-left: 8px; }
+.tl-filter { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.tl-chip {
+  border: 1px solid #E4E3DD; background: #fff; color: #555;
+  border-radius: 12px; padding: 2px 10px; font-size: 12px; cursor: pointer;
+}
+.tl-chip.active { background: #1A1B1C; color: #fff; border-color: #1A1B1C; }
+.tl-list { display: flex; flex-direction: column; gap: 8px; }
+.tl-item { display: flex; gap: 8px; align-items: stretch; }
+.tl-line { display: flex; flex-direction: column; align-items: center; width: 52px; flex: 0 0 52px; position: relative; }
+.tl-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; flex: 0 0 10px; }
+.tl-line::after { content: ""; width: 1px; background: #E4E3DD; flex: 1 1 auto; margin: 4px 0; }
+.tl-item:last-child .tl-line::after { display: none; }
+.tl-time { font-size: 10px; color: #9AA0A6; margin-top: 2px; }
+.tl-card {
+  flex: 1 1 auto; min-width: 0; background: rgba(0,0,0,0.025);
+  border: 1px solid rgba(0,0,0,0.08); border-radius: 10px;
+  padding: 8px 12px; font-size: 12.5px; box-sizing: border-box;
+}
+.tl-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.tl-badge { color: #fff; border-radius: 4px; padding: 1px 7px; font-size: 11px; font-weight: 600; }
+.tl-extra { background: rgba(0,0,0,0.05); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+.tl-body { white-space: pre-wrap; word-break: break-all; color: #1A1B1C; font-size: 12.5px; }
+.tl-more { border: none; background: none; color: #6B7280; font-size: 12px; cursor: pointer; padding: 2px 0 0 6px; text-decoration: underline; }
 pre.code {
   background: #1F2937; color: #E5E7EB; padding: 14px; border-radius: 10px;
   font-size: 12px; overflow: auto; max-height: 420px; line-height: 1.5;

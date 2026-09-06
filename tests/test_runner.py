@@ -89,3 +89,45 @@ def test_run_one_timeout_s_from_spec(tmp_path, make_task, monkeypatch):
     run_one(task, "fake", results_dir=tmp_path / "r")
 
     assert captured.get("timeout_s") == 777  # 后端默认超时来自 spec
+
+
+class TraceBackend(FakeBackend):
+    """带全链路 traces 的后端（模拟 minimal-react 自报 llm/tool 节点）。"""
+
+    def run(self, task, workspace):
+        super().run(task, workspace)
+        return BackendResult(
+            status="completed",
+            steps=[{"step": 1, "action": "write_file"}],
+            duration_s=0.1,
+            traces=[
+                {"kind": "llm", "ts": 1.0, "model": "deepseek-chat", "input": "任务", "output": '{"tool":"write_file"}'},
+                {"kind": "tool", "category": "tool", "ts": 2.0, "tool": "write_file", "args": {}, "observation": "done"},
+            ],
+        )
+
+
+def test_run_one_traces_synthesized_from_steps(tmp_path, make_task, monkeypatch):
+    """后端无 traces（旧后端）→ runner 由 steps 兜底合成（intent + tool 节点）。"""
+    monkeypatch.setattr("agent_eval.runner.get_backend", lambda *a, **k: FakeBackend(**k))
+    task = _make_task_with_checkpoint(make_task)
+    rec = run_one(task, "fake", results_dir=tmp_path / "r" / "runs")
+
+    kinds = [t["kind"] for t in rec.traces]
+    assert kinds == ["intent", "tool"]
+    assert rec.traces[0]["content"] == task.description
+    assert rec.traces[1]["tool"] == "write_file"
+    # 落盘
+    data = json.loads((tmp_path / "r" / "runs" / rec.run_id / "run.json").read_text(encoding="utf-8"))
+    assert data["traces"][0]["kind"] == "intent"
+
+
+def test_run_one_traces_passthrough_from_backend(tmp_path, make_task, monkeypatch):
+    """后端自报 traces（minimal-react）→ 原样透传并前置 intent。"""
+    monkeypatch.setattr("agent_eval.runner.get_backend", lambda *a, **k: TraceBackend(**k))
+    task = _make_task_with_checkpoint(make_task)
+    rec = run_one(task, "fake", results_dir=tmp_path / "r" / "runs")
+
+    assert [t["kind"] for t in rec.traces] == ["intent", "llm", "tool"]
+    assert rec.traces[1]["output"] == '{"tool":"write_file"}'
+    assert rec.traces[2]["category"] == "tool"

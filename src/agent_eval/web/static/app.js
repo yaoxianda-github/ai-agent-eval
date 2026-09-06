@@ -498,12 +498,115 @@
         "</div>" +
         (r.error ? '<div class="err-banner">' + esc(r.error) + "</div>" : "") +
         '<div class="card"><h3>判定结果（' + v.length + " 个校验点）</h3>" + (vRows || '<div class="empty">无判定</div>') + "</div>" +
+        '<div class="card"><h3>轨迹回放 <span class="tl-note">输入意图 → 知识/检索 → 模型生成 → 工具执行</span></h3>' + traceTimeline(r.traces) + "</div>" +
         '<div class="card"><h3>执行轨迹（' + (r.steps || []).length + " 步）</h3>" + steps + "</div>" +
         '<div class="card"><h3>产物文件</h3><div id="file-list"><div class="empty">加载中…</div></div></div>' +
         '<div class="card" id="file-view" style="display:none;"><h3>文件预览</h3><pre class="code" id="file-content"></pre></div>'
       );
       loadFiles(runId);
     }).catch(function (e) { renderErr(e.message); });
+  }
+
+  // ---------- 轨迹回放：全链路时间线 ----------
+  var TL_META = {
+    intent:    { label: "输入意图", color: "#9BBBF4", badge: "意图" },
+    retrieval: { label: "知识/检索", color: "#94D8C3", badge: "知识" },
+    llm:       { label: "模型生成", color: "#C9A7E8", badge: "模型" },
+    tool:      { label: "工具执行", color: "#F4B393", badge: "工具" }
+  };
+  function tlKind(t) {
+    if (t.kind === "intent") return "intent";
+    if (t.kind === "llm") return "llm";
+    if (t.kind === "tool" && t.category === "retrieval") return "retrieval";
+    return "tool";
+  }
+  function tlTitle(kind, t, i) {
+    if (kind === "intent") return "任务意图";
+    if (kind === "llm") return "模型生成 · " + (t.model || "llm");
+    return (t.tool || t.action || "步骤" + (i + 1));
+  }
+  function tlBody(kind, t) {
+    if (kind === "intent") return t.content || "";
+    if (kind === "llm") {
+      var out = t.output || t.response || "";
+      var inp = t.input ? "输入：\n" + t.input + "\n\n" : "";
+      var tk = t.tokens ? "\n\n[tokens " + (t.tokens.prompt_tokens || 0) + "/" + (t.tokens.completion_tokens || 0) + "]" : "";
+      return inp + out + tk;
+    }
+    return t.observation || "";
+  }
+  function tlExtra(kind, t) {
+    if (kind === "llm" && t.input) return "输入已记录";
+    if (t.args) return strOf(t.args);
+    return "";
+  }
+  function traceTimeline(traces) {
+    if (!traces || !traces.length) {
+      return '<div class="empty">该 run 无轨迹回放数据（旧版本运行），重新运行任务可生成</div>';
+    }
+    var chips = [];
+    var keys = ["all", "intent", "retrieval", "llm", "tool"];
+    for (var k = 0; k < keys.length; k++) {
+      var key = keys[k];
+      var label = key === "all" ? "全部" : TL_META[key].badge;
+      chips.push(
+        '<button class="tl-chip' + (key === "all" ? " active" : "") + '" data-f="' + key + '" onclick="tlFilter(this)">' +
+        label + "</button>"
+      );
+    }
+    var items = [];
+    for (var i = 0; i < traces.length; i++) {
+      var t = traces[i] || {};
+      var kind = tlKind(t);
+      var meta = TL_META[kind] || TL_META.tool;
+      var body = tlBody(kind, t);
+      var extra = tlExtra(kind, t);
+      var tsTxt = t.ts ? (Math.round(t.ts * 1000) + "ms") : "";
+      var hasMore = body.length > 240;
+      var bodyHtml = hasMore
+        ? '<div class="tl-body" data-full="' + esc(body) + '">' + esc(clip(body, 240)) +
+          '<button class="tl-more" onclick="tlToggle(this)">展开</button></div>'
+        : '<div class="tl-body">' + esc(body) + "</div>";
+      items.push(
+        '<div class="tl-item" data-kind="' + kind + '">' +
+          '<div class="tl-line"><span class="tl-dot" style="background:' + meta.color + ';"></span>' +
+          '<span class="tl-time">' + esc(tsTxt) + "</span></div>" +
+          '<div class="tl-card" style="border-left:3px solid ' + meta.color + ';">' +
+            '<div class="tl-head"><span class="tl-badge" style="background:' + meta.color + ';">' + meta.badge + "</span>" +
+            "<b>" + esc(tlTitle(kind, t, i)) + "</b>" +
+            (extra ? ' <code class="tl-extra">' + esc(clip(extra, 80)) + "</code>" : "") +
+            "</div>" +
+            (body ? bodyHtml : '<div class="muted">（无文本内容）</div>') +
+          "</div>" +
+        "</div>"
+      );
+    }
+    return (
+      '<div class="tl-filter">' + chips.join("") + "</div>" +
+      '<div class="tl-list">' + items.join("") + "</div>"
+    );
+  }
+  function tlFilter(btn) {
+    var list = btn.parentNode.nextElementSibling;
+    if (!list) return;
+    var f = btn.getAttribute("data-f");
+    var chips = btn.parentNode.querySelectorAll(".tl-chip");
+    for (var i = 0; i < chips.length; i++) chips[i].classList.remove("active");
+    btn.classList.add("active");
+    var items = list.querySelectorAll(".tl-item");
+    for (var j = 0; j < items.length; j++) {
+      items[j].style.display = (f === "all" || items[j].getAttribute("data-kind") === f) ? "" : "none";
+    }
+  }
+  function tlToggle(btn) {
+    var body = btn.parentNode;
+    if (body.classList.contains("open")) {
+      body.classList.remove("open");
+      body.innerHTML = esc(clip(body.getAttribute("data-full"), 240)) + '<button class="tl-more" onclick="tlToggle(this)">展开</button>';
+    } else {
+      body.classList.add("open");
+      body.innerHTML = esc(body.getAttribute("data-full")) + '<button class="tl-more" onclick="tlToggle(this)">收起</button>';
+    }
   }
 
   function loadFiles(runId) {
@@ -651,5 +754,8 @@
   // ---------- 启动 ----------
   loadMeta().catch(function () {});
   window.addEventListener("hashchange", router);
+  // 轨迹回放时间线：inline onclick 需要全局可达（IIFE 作用域内不可达）
+  window.tlFilter = tlFilter;
+  window.tlToggle = tlToggle;
   router();
 })();

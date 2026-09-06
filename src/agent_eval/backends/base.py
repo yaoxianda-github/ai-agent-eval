@@ -26,6 +26,7 @@ class BackendResult:
     stdout: str = ""
     error: str = ""
     usage: dict | None = None
+    traces: list[dict] = field(default_factory=list)
 
 
 class Backend(ABC):

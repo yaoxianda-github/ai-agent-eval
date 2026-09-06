@@ -180,12 +180,26 @@ ai-agent-eval/
 | 工作台 | 选任务/后端/模型/超时/采样次数 → 启动运行 → 轮询进度 → 结果 + 多 run 统计 |
 | 任务管理 | 现有任务列表 + 新建任务表单（动态校验点编辑器，生成 spec.yaml + fixtures 骨架 + 更新 manifest） |
 | 运行历史 | SQLite 索引，按任务/后端/状态筛选，点击下钻 |
-| 运行详情 | 判定结果 + 步骤轨迹 + 产物文件预览（含路径穿越防护） |
+| 运行详情 | 判定结果 + 轨迹回放时间线 + 步骤轨迹 + 产物文件预览（含路径穿越防护） |
 | 对比 | Agent × 任务得分矩阵 + 采样统计（N/mean/best/σ）+ 任务通过率 |
 | 报告 | 复用引擎 reporter 生成自包含 HTML，iframe 内嵌查看 |
 | 设置 | 目录/版本 + 环境变量说明 |
 
 启动：`pip install -e ".[web]"` → `python -m agent_eval.web --port 8000` → 打开 http://127.0.0.1:8000
+
+### 轨迹回放（V2.4）
+
+运行详情页新增**轨迹回放**时间线面板，按时间顺序展示一次评测的全链路：
+
+1. **输入意图**：任务描述（intent 节点）
+2. **知识/检索**：读取/检索类工具（read_file / list_dir / search / query）返回的知识片段（retrieval 节点）
+3. **模型生成**：每步 LLM 输出（minimal-react 后端记录 model / input / output / tokens；llm 节点）
+4. **工具执行**：工具调用与观察结果（tool 节点）
+
+支持按类型过滤（全部/意图/知识/模型/工具）与长文本展开/收起。数据来源：
+
+- **本地观测层**：`run.json` 新增 `traces` 字段，由 runner 统一生成（后端自报 traces 优先，旧后端由 steps 兜底合成；历史 run 在 API 读取时自动合成，无需迁移）。
+- **Langfuse（可选）**：`AGENT_EVAL_TRACE=langfuse` 时 LLM 调用仍同步到云端，本地 traces 独立完整，二者互不依赖。黑盒后端（deepseek-harness）仅有工具级节点，模型中间输出不可见属预期限制。
 
 ## 路线图
 

@@ -91,6 +91,34 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"run 不存在: {run_id}")
         rec = json.loads(p.read_text(encoding="utf-8"))
         rec["steps"] = [_clean_surrogates(s) for s in (rec.get("steps") or [])]
+        # 轨迹回放：V2.4 起 run.json 带 traces；旧数据由 steps 兜底合成
+        if not rec.get("traces"):
+            task_desc = ""
+            try:
+                task_desc = _task_map().get(rec.get("task_id", ""), TaskSpec(
+                    id="", level="", title="", description="", input_files=[]
+                )).description
+            except Exception:  # noqa: BLE001 - 取不到任务描述不影响回放
+                pass
+            synthesized = [
+                {
+                    "kind": "tool",
+                    "category": (
+                        "retrieval"
+                        if (s.get("action") in ("read_file", "list_dir", "search", "query"))
+                        else "tool"
+                    ),
+                    "ts": s.get("ts", 0.0),
+                    "tool": s.get("action"),
+                    "args": s.get("args"),
+                    "observation": s.get("observation"),
+                }
+                for s in (rec.get("steps") or [])
+            ]
+            synthesized.insert(
+                0, {"kind": "intent", "ts": 0.0, "content": task_desc, "task_id": rec.get("task_id")}
+            )
+            rec["traces"] = [_clean_surrogates(t) for t in synthesized]
         return rec
 
     def _workspace(run_id: str) -> Path:

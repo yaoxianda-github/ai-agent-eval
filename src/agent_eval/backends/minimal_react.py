@@ -96,6 +96,17 @@ class MinimalReactBackend(Backend):
         )
         # LLM token 用量累计（CI 成本核算）
         self._usage: dict = {"prompt_tokens": 0, "completion_tokens": 0}
+        # 全链路回放轨迹（kind: llm / tool；runner 再补 intent 节点）
+        self._traces: list[dict] = []
+
+    @staticmethod
+    def _msg_input(messages: list[dict]) -> str:
+        """摘要最近的 user 输入（意图/观察），用于回放面板展示。"""
+        for m in reversed(messages):
+            if m.get("role") == "user":
+                c = str(m.get("content", ""))
+                return c[:300] + ("…" if len(c) > 300 else "")
+        return ""
 
     def _ask(self, messages: list[dict]) -> tuple[dict | None, str]:
         """调用 LLM 并解析 action；单步失败自动重试。返回 (action, raw)；action 为 None 表示重试耗尽。"""
@@ -123,6 +134,24 @@ class MinimalReactBackend(Backend):
                     usage=usage,
                     tags=["minimal-react"],
                 )
+                # 本地回放轨迹：模型生成（Langfuse 之外，离线可用的全链路记录）
+                self._traces.append(
+                    {
+                        "kind": "llm",
+                        "ts": round(time.time(), 3),
+                        "model": self.model,
+                        "input": self._msg_input(messages),
+                        "output": raw,
+                        "tokens": (
+                            {
+                                "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+                                "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
+                            }
+                            if usage is not None
+                            else None
+                        ),
+                    }
+                )
                 action = _extract_json(raw)
                 return action, raw
             except Exception as e:  # noqa: BLE001 - 需区分可恢复/不可恢复
@@ -148,8 +177,8 @@ class MinimalReactBackend(Backend):
                 steps=[],
                 error="缺少 LLM API Key，请设置环境变量 DEEPSEEK_API_KEY",
                 usage=self._usage or None,
-            )
-
+                traces=self._traces,
+        )
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -171,7 +200,8 @@ class MinimalReactBackend(Backend):
                     duration_s=round(time.time() - start, 3),
                     error=f"整体超时（>{self.timeout_s}s）",
                     usage=self._usage or None,
-                )
+                traces=self._traces,
+        )
             action, raw = self._ask(messages)
             if action is None:
                 steps.append(
@@ -183,14 +213,28 @@ class MinimalReactBackend(Backend):
                     duration_s=round(time.time() - start, 3),
                     error=raw,
                     usage=self._usage or None,
-                )
-
+                traces=self._traces,
+        )
             tool = action.get("tool")
             args = action.get("args") or {}
             ts = round(time.time(), 3)
             ok, observation = run_tool(tool, args, workspace)
             steps.append(
                 {"step": i, "action": tool, "args": args, "observation": observation, "ts": ts}
+            )
+            # 回放轨迹：工具执行节点（读取/检索类工具标记为 knowledge 分类）
+            category = (
+                "retrieval" if tool in ("read_file", "list_dir", "search", "query") else "tool"
+            )
+            self._traces.append(
+                {
+                    "kind": "tool",
+                    "category": category,
+                    "ts": ts,
+                    "tool": tool,
+                    "args": args,
+                    "observation": observation,
+                }
             )
 
             if tool == "finish":
@@ -199,8 +243,8 @@ class MinimalReactBackend(Backend):
                     steps=steps,
                     duration_s=round(time.time() - start, 3),
                     usage=self._usage or None,
+                    traces=self._traces,
                 )
-
             messages.append({"role": "assistant", "content": raw})
             messages.append({"role": "user", "content": f"观察：{observation}"})
 
@@ -210,4 +254,5 @@ class MinimalReactBackend(Backend):
             duration_s=round(time.time() - start, 3),
             error=f"达到最大步数 {self.max_steps}",
             usage=self._usage or None,
+                traces=self._traces,
         )
