@@ -130,6 +130,35 @@ def test_cmd_scripts_prefix_runs_project_script(make_task, tmp_path):
     assert v["c1"]["passed"] is True
 
 
+# ---------- scripts 目录定位（CI 兼容） ----------
+
+def test_find_scripts_dir_env_override(tmp_path, monkeypatch):
+    from agent_eval.verifiers import find_scripts_dir
+    d = tmp_path / "custom-scripts"
+    d.mkdir()
+    monkeypatch.setenv("AGENT_EVAL_SCRIPTS", str(d))
+    assert find_scripts_dir() == d
+
+
+def test_find_scripts_dir_cwd_priority(tmp_path, monkeypatch):
+    # pip 安装场景：cwd 下 scripts/ 应优先于包默认位置
+    from agent_eval.verifiers import find_scripts_dir
+    (tmp_path / "scripts").mkdir()
+    monkeypatch.delenv("AGENT_EVAL_SCRIPTS", raising=False)
+    monkeypatch.chdir(tmp_path)
+    assert find_scripts_dir() == tmp_path / "scripts"
+
+
+def test_find_scripts_dir_fallback_repo(tmp_path, monkeypatch):
+    # 源码树：无 env、cwd 无 scripts -> 回退包默认
+    from agent_eval.verifiers import REPO_ROOT, find_scripts_dir
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.delenv("AGENT_EVAL_SCRIPTS", raising=False)
+    monkeypatch.chdir(empty)
+    assert find_scripts_dir() == REPO_ROOT / "scripts"
+
+
 # ---------- 未知类型 ----------
 
 def test_unknown_type_reports_fail(make_task, tmp_path):

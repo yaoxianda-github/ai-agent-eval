@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import subprocess
@@ -16,7 +17,24 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPTS_DIR = REPO_ROOT / "scripts"
+
+
+def find_scripts_dir() -> Path:
+    """定位校验脚本目录：优先 AGENT_EVAL_SCRIPTS 环境变量，其次 cwd/scripts，最后包默认。
+
+    pip 安装后 REPO_ROOT 指向 site-packages 上层，包内不含 scripts/，
+    因此 CI 场景须依赖 cwd（被测仓库根）或环境变量显式指定。
+    """
+    env = os.environ.get("AGENT_EVAL_SCRIPTS")
+    if env:
+        return Path(env)
+    cwd = Path.cwd() / "scripts"
+    if cwd.is_dir():
+        return cwd
+    return REPO_ROOT / "scripts"
+
+
+_SCRIPTS_DIR = find_scripts_dir()
 
 
 def run_checkpoints(task, workspace: Path) -> list[dict]:
