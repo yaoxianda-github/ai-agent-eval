@@ -138,3 +138,39 @@ pre.code {
 .btn.small { padding: 5px 12px; font-size: 12px; border-radius: 6px; }
 .pager { display: flex; align-items: center; gap: 14px; justify-content: flex-end; margin-top: 14px; }
 .pager-info { font-size: 12px; color: #6B7280; }
+
+/* ---------- 多 Agent 对比矩阵（V2.7） ---------- */
+.matrix-toolbar { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.agent-pick { display: flex; gap: 8px; flex-wrap: wrap; }
+.agent-pick label {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px;
+  border: 1px solid #D8D6CF; border-radius: 20px; font-size: 12.5px; cursor: pointer; background: #fff;
+}
+.agent-pick label.on { border-color: #1F3A5F; background: rgba(31,58,95,0.07); color: #1F3A5F; font-weight: 600; }
+.plan-badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; vertical-align: middle; margin-left: 8px; }
+.plan-badge.community { background: #E8E7E1; color: #6B7280; }
+.plan-badge.pro { background: linear-gradient(135deg,#1F3A5F,#2E7D7A); color: #fff; }
+.plan-note { background: #FFF4DB; color: #8a5a00; border-radius: 8px; padding: 8px 12px; font-size: 12px; margin-bottom: 12px; }
+.batch-progress { height: 8px; border-radius: 4px; background: rgba(0,0,0,0.07); overflow: hidden; margin: 10px 0; }
+.batch-progress > i { display: block; height: 100%; background: #1F3A5F; transition: width .3s; }
+.matrix-scroll { overflow-x: auto; }
+table.matrix { min-width: 100%; border-spacing: 0; }
+table.matrix th, table.matrix td { text-align: center; white-space: nowrap; }
+table.matrix td.ag-head, table.matrix th.ag-head { text-align: left; font-weight: 700; position: sticky; left: 0; background: #fff; z-index: 2; }
+table.matrix th { position: sticky; top: 0; z-index: 1; }
+.mx-cell { cursor: pointer; font-weight: 600; position: relative; min-width: 62px; }
+.mx-cell:hover { outline: 2px solid #1F3A5F; outline-offset: -2px; }
+.mx-cell.sel { outline: 2px solid #1F3A5F; outline-offset: -2px; }
+.mx-cell .v { font-size: 13px; }
+.mx-cell .r { display: block; font-size: 10.5px; font-weight: 400; opacity: .85; }
+.mx-cell.empty { color: #C4C2BA; font-weight: 400; cursor: default; background: #FAFAF7; }
+.mx-cell.empty:hover { outline: none; }
+.mx-concl { display: flex; flex-direction: column; gap: 6px; }
+.mx-concl .line { font-size: 13px; padding-left: 22px; position: relative; }
+.mx-concl .line::before { content: "▸"; position: absolute; left: 4px; color: #1F3A5F; }
+.mx-drill { font-size: 12.5px; }
+.mx-drill table { font-size: 12.5px; }
+.mx-drill td, .mx-drill th { padding: 6px 10px; }
+.totals-table td.num, .totals-table th.num { text-align: right; }
+.lock-tag { font-size: 11px; color: #9AA0A6; }
+

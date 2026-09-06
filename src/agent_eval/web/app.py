@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import threading
 import uuid
@@ -23,14 +25,16 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import Body, FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from agent_eval import license as license_mod
 from agent_eval.backends import _BACKENDS, list_backends
 from agent_eval.log import get_logger, setup_logging
 from agent_eval.reporter import load_runs, render_html, summarize
 from agent_eval.runner import default_results_dir, run_one
 from agent_eval.spec import find_tasks_dir, load_task_pack
+from agent_eval.stats import summarize_scores
 from agent_eval.traces import tool_category
 from agent_eval.web.store import RunStore
 from agent_eval.web.taskgen import generate_task_pack
@@ -176,6 +180,205 @@ def create_app(
                 }
                 continue
             running.pop(rid, None)
+
+    # ---------- 多 Agent 对比批次（V2.7） ----------
+    def _resolve_scope_tasks(scope: str, task_ids: list[str] | None) -> list[str]:
+        """把任务集选择（core/full 或显式 id 列表）解析为有序任务 id。"""
+        tasks = _task_map()
+        if task_ids:
+            ids = [str(t) for t in task_ids]
+        elif scope == "core":
+            from agent_eval.ci import load_gate_config
+
+            g = load_gate_config()["gates"]["core"]
+            raw = g["tasks"]
+            ids = sorted(tasks) if raw in ("*", ["*"]) else [str(t) for t in raw]
+        else:  # full / all：全量
+            ids = sorted(tasks)
+        missing = [t for t in ids if t not in tasks]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"存在未知任务: {missing}")
+        return ids
+
+    def _run_cost_cny(rec: dict, price: dict) -> tuple[float, int, int]:
+        """从 run.json 的 usage 算 (成本元, prompt_tokens, completion_tokens)。"""
+        usage = (rec.get("metrics") or {}).get("usage") or {}
+        pt = int(usage.get("prompt_tokens") or 0)
+        ct = int(usage.get("completion_tokens") or 0)
+        cost = pt / 1e6 * price["input_cny_per_m"] + ct / 1e6 * price["output_cny_per_m"]
+        return round(cost, 4), pt, ct
+
+    def _build_matrix(batch: dict) -> dict:
+        """按批次聚合 run.json，产出彩色矩阵 + agent 汇总 + 自动结论。"""
+        from agent_eval.costing import pricing_for
+
+        price = pricing_for()
+        tasks = _task_map()
+        agents: list[str] = list(batch["agents"])
+        task_ids: list[str] = list(batch["task_ids"])
+        grid: dict[tuple[str, str], list[dict]] = {
+            (a, t): [] for a in agents for t in task_ids
+        }
+        for rid in store.list_run_ids_by_batch(batch["batch_id"]):
+            p = results_dir / rid / "run.json"
+            if not p.exists():
+                continue
+            try:
+                rec = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            key = (rec.get("agent_id", ""), rec.get("task_id", ""))
+            if key not in grid:
+                continue
+            cost, pt, ct = _run_cost_cny(rec, price)
+            grid[key].append(
+                {
+                    "run_id": rid,
+                    "score": float((rec.get("metrics") or {}).get("score", 0.0)),
+                    "pass_rate": float((rec.get("metrics") or {}).get("pass_rate", 0.0)),
+                    "status": rec.get("status", ""),
+                    "duration_s": float(rec.get("duration_s", 0.0)),
+                    "cost_cny": cost,
+                    "prompt_tokens": pt,
+                    "completion_tokens": ct,
+                }
+            )
+
+        cells: dict[str, dict] = {}
+        for (a, t), lst in grid.items():
+            scores = [x["score"] for x in lst]
+            st = summarize_scores(scores)
+            weight = float(getattr(tasks.get(t), "weight", 1.0) or 1.0)
+            cells[f"{a}|{t}"] = {
+                "n": len(lst),
+                "runs": sorted(lst, key=lambda x: x["run_id"]),
+                "best": st["best"],
+                "mean": st["mean"],
+                "std": st["std"],
+                "pass_rate": st["pass_rate"],
+                "cost_cny": round(sum(x["cost_cny"] for x in lst), 4),
+                "duration_s": round(
+                    sum(x["duration_s"] for x in lst) / len(lst), 2
+                ) if lst else 0.0,
+                "weight": weight,
+            }
+
+        totals: dict[str, dict] = {}
+        for a in agents:
+            weighted_num = wsum = cost = dur = 0.0
+            passed = 0
+            stds: list[float] = []
+            covered = 0
+            for t in task_ids:
+                c = cells[f"{a}|{t}"]
+                if c["n"] == 0:
+                    continue
+                covered += 1
+                weighted_num += c["best"] * c["weight"]
+                wsum += c["weight"]
+                if c["pass_rate"] >= 0.999:
+                    passed += 1
+                cost += c["cost_cny"]
+                dur += sum(x["duration_s"] for x in c["runs"])
+                stds.append(c["std"])
+            totals[a] = {
+                "weighted_score": round(weighted_num / wsum, 3) if wsum else 0.0,
+                "task_pass_rate": round(passed / len(task_ids), 3) if task_ids else 0.0,
+                "tasks_passed": passed,
+                "tasks_total": len(task_ids),
+                "covered": covered,
+                "cost_cny": round(cost, 4),
+                "duration_s": round(dur, 1),
+                "avg_std": round(sum(stds) / len(stds), 3) if stds else 0.0,
+            }
+
+        return {
+            "agents": agents,
+            "tasks": task_ids,
+            "cells": cells,
+            "totals": totals,
+            "conclusion": _matrix_conclusion(totals),
+        }
+
+    def _matrix_conclusion(totals: dict[str, dict]) -> list[str]:
+        """根据 agent 汇总自动生成对比结论。"""
+        rows = [(a, t) for a, t in totals.items() if t["covered"]]
+        if not rows:
+            return []
+        notes: list[str] = []
+        by_score = sorted(rows, key=lambda x: x[1]["weighted_score"], reverse=True)
+        top_a, top = by_score[0]
+        notes.append(
+            f"{top_a} 加权总分最高 {top['weighted_score']}，任务通过 {top['tasks_passed']}/{top['tasks_total']}"
+        )
+        if len(by_score) > 1:
+            gap = round(top["weighted_score"] - by_score[1][1]["weighted_score"], 3)
+            if gap > 0:
+                notes.append(f"领先第二名 {by_score[1][0]} {gap} 分")
+            elif gap == 0:
+                notes.append(f"与 {by_score[1][0]} 并列第一")
+        # 成本只在"有 token 计费"的 agent 之间比较；外部黑盒后端 usage 为 0 不计入
+        paid = sorted(
+            [(a, t) for a, t in rows if t["cost_cny"] > 0],
+            key=lambda x: x[1]["cost_cny"],
+        )
+        if paid:
+            cheap_a, cheap = paid[0]
+            line = f"{cheap_a} 计费成本最低 ¥{cheap['cost_cny']}"
+            if len(paid) > 1:
+                pricey_a, pricey = paid[-1]
+                ratio = round(pricey["cost_cny"] / max(cheap["cost_cny"], 1e-9), 1)
+                if pricey_a != cheap_a and ratio > 1:
+                    line += f"，{pricey_a} 为其 {ratio} 倍"
+            zero_agents = [a for a, t in rows if t["cost_cny"] == 0]
+            if zero_agents:
+                line += f"（{'、'.join(zero_agents)} 为外部后端，未计 token 成本）"
+            notes.append(line)
+        by_std = sorted(rows, key=lambda x: x[1]["avg_std"])
+        stable_a, stable = by_std[0]
+        notes.append(f"{stable_a} 平均波动 σ={stable['avg_std']}（越小越稳定）")
+        return notes
+
+    def _execute_batch(batch_id: str, agents: list[str], task_ids: list[str],
+                       runs: int, model: str) -> None:
+        plan = [(a, t, i) for a in agents for t in task_ids for i in range(runs)]
+        total = len(plan)
+        done = 0
+        logger.info("对比批次开始 | batch=%s agents=%s tasks=%d runs=%d 共%d次",
+                    batch_id, agents, len(task_ids), runs, total)
+        for agent_id, task_id, _i in plan:
+            rid = uuid.uuid4().hex[:12]
+            try:
+                task = _task_map()[task_id]
+                config: dict = {"agent": {}}
+                if model:
+                    config["agent"]["model"] = model
+                rec = run_one(
+                    task, agent_id, config=config,
+                    results_dir=results_dir, run_id=rid,
+                )
+                store.insert_run(rec.to_dict(), batch_id=batch_id)
+            except Exception as e:  # noqa: BLE001 - 单次失败不中断批次
+                logger.error("批次内运行失败 | batch=%s %s/%s: %s",
+                             batch_id, agent_id, task_id, e, exc_info=True)
+            done += 1
+            store.update_batch(batch_id, done_runs=done)
+        batch = store.get_batch(batch_id)
+        matrix = _build_matrix(batch) if batch else {}
+        store.update_batch(
+            batch_id, status="done",
+            finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            summary=matrix,
+        )
+        logger.info("对比批次完成 | batch=%s", batch_id)
+        # 社区版只保留最近 N 个批次（Pro retain=0 不限）
+        ent = license_mod.get_entitlements()
+        retain = int(ent.get("retain_batches", 1) or 0)
+        if retain:
+            older = store.list_batches(500)[retain:]
+            for ob in older:
+                if ob["batch_id"] != batch_id:
+                    store.delete_batch(ob["batch_id"])
 
     # ---------- 元信息 / 任务 / 后端 ----------
     @app.get("/api/meta")
@@ -330,6 +533,127 @@ def create_app(
             "name": target.name,
             "content": target.read_text(encoding="utf-8", errors="replace"),
         }
+
+    # ---------- 多 Agent 对比批次 / 矩阵（V2.7） ----------
+    @app.get("/api/license")
+    def api_license() -> dict:
+        return license_mod.get_entitlements(refresh=True)
+
+    @app.post("/api/batches")
+    def create_batch(payload: dict = Body(...)) -> dict:
+        agents = [str(a) for a in payload.get("agents", []) if a]
+        if not agents:
+            raise HTTPException(status_code=400, detail="请至少选择一个 Agent")
+        # 去重且保持顺序
+        seen: set[str] = set()
+        agents = [a for a in agents if not (a in seen or seen.add(a))]
+        valid = list_backends()
+        bad = [a for a in agents if a not in valid]
+        if bad:
+            raise HTTPException(status_code=400, detail=f"未知后端: {bad}（可用 {valid}）")
+        # license 档位卡口：社区版限制对比 Agent 数
+        ok, reason = license_mod.can(len(agents))
+        if not ok:
+            raise HTTPException(status_code=403, detail=reason)
+
+        scope = str(payload.get("scope", "core"))
+        task_ids = _resolve_scope_tasks(scope, payload.get("task_ids") or None)
+        if not task_ids:
+            raise HTTPException(status_code=400, detail="任务集为空")
+        runs = max(1, min(int(payload.get("runs", 1)), 10))
+        model = str(payload.get("model", "deepseek-chat"))
+        label = str(payload.get("label", "")).strip() or f"{scope} × {len(agents)}agent × runs{runs}"
+
+        batch_id = uuid.uuid4().hex[:12]
+        total = len(agents) * len(task_ids) * runs
+        store.insert_batch(
+            {
+                "batch_id": batch_id,
+                "label": label,
+                "agents": agents,
+                "task_ids": task_ids,
+                "scope": scope,
+                "runs": runs,
+                "status": "running",
+                "total_runs": total,
+                "done_runs": 0,
+                "summary": {},
+            }
+        )
+        t = threading.Thread(
+            target=_execute_batch,
+            args=(batch_id, agents, task_ids, runs, model),
+            daemon=True,
+        )
+        t.start()
+        logger.info("对比批次已创建 | batch=%s label=%s total=%d", batch_id, label, total)
+        return {"batch_id": batch_id, "total_runs": total}
+
+    @app.get("/api/batches")
+    def list_batches() -> dict:
+        rows = store.list_batches(100)
+        # 列表不带大 summary，只给元信息与进度
+        for r in rows:
+            r.pop("summary", None)
+        return {"batches": rows}
+
+    @app.get("/api/batches/{batch_id}")
+    def get_batch(batch_id: str) -> dict:
+        b = store.get_batch(batch_id)
+        if not b:
+            raise HTTPException(status_code=404, detail="批次不存在")
+        # running 时实时聚合已完成部分，done 时用落库 summary
+        if b["status"] != "done":
+            b["summary"] = _build_matrix(b)
+        return b
+
+    @app.get("/api/matrix")
+    def get_matrix(batch_id: str = Query(...)) -> dict:
+        b = store.get_batch(batch_id)
+        if not b:
+            raise HTTPException(status_code=404, detail="批次不存在")
+        if b["status"] == "done" and b.get("summary"):
+            return b["summary"]
+        return _build_matrix(b)
+
+    @app.get("/api/matrix/export")
+    def export_matrix(batch_id: str = Query(...)) -> Response:
+        ent = license_mod.get_entitlements()
+        if not ent.get("export_csv"):
+            raise HTTPException(status_code=403, detail="CSV 导出为 Pro 功能，导入 License 后解锁")
+        b = store.get_batch(batch_id)
+        if not b:
+            raise HTTPException(status_code=404, detail="批次不存在")
+        m = b["summary"] if b["status"] == "done" and b.get("summary") else _build_matrix(b)
+        buf = io.StringIO()
+        buf.write("﻿")  # UTF-8 BOM，Excel 打开中文不乱码
+        w = csv.writer(buf)
+        agents, tasks, cells, totals = m["agents"], m["tasks"], m["cells"], m["totals"]
+        header = ["Agent"] + tasks + ["加权总分", "任务通过率", "总成本(元)", "总耗时(s)", "平均波动σ"]
+        w.writerow(header)
+        for a in agents:
+            row = [a]
+            for t in tasks:
+                c = cells.get(f"{a}|{t}")
+                row.append(
+                    f"{c['best']} (mean {c['mean']}, σ {c['std']}, {round(c['pass_rate']*100)}%)"
+                    if c and c["n"] else "-"
+                )
+            tt = totals.get(a, {})
+            row += [
+                tt.get("weighted_score", 0),
+                f"{round(tt.get('task_pass_rate', 0)*100)}%",
+                tt.get("cost_cny", 0),
+                tt.get("duration_s", 0),
+                tt.get("avg_std", 0),
+            ]
+            w.writerow(row)
+        fname = f"matrix-{batch_id}.csv"
+        return Response(
+            content=buf.getvalue(),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
 
     # ---------- 汇总 / 报告 ----------
     @app.get("/api/summary")

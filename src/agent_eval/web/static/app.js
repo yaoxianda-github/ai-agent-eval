@@ -52,6 +52,7 @@
   var histLimit = 20;    // 每页条数
   var backendsCache = null;
   var pollTimer = null;
+  var mxState = { license: null, current: null, matrix: null, sel: null, timer: null };
 
   function loadMeta() {
     return api("/api/meta").then(function (m) {
@@ -662,50 +663,263 @@
   }
 
   // ---------- 视图：对比 ----------
+  // ---------- 视图：多 Agent 对比矩阵（V2.7） ----------
   function viewCompare() {
-    api("/api/summary").then(function (s) {
-      if (!s.total_runs) {
-        renderHTML('<h2 class="page-title">对比</h2><div class="empty">暂无运行数据，先去工作台跑一次评测。</div>');
-        return;
-      }
-      var agents = s.agents || [];
-      var tasks = s.tasks || [];
-      var head = tasks.map(function (t) { return "<th>" + esc(t) + "</th>"; }).join("");
-      var matrix = agents.map(function (a) {
-        var cells = (s.agent_rows[a] || []).map(function (row) {
-          var cls = row.pass_rate >= 0.999 ? "ok" : (row.pass_rate >= 0.5 ? "half" : "bad");
-          return '<td class="matrix-cell ' + cls + '">' + esc(row.score) + "<br><span class='sub'>" +
-            Math.round(row.pass_rate * 100) + "%</span></td>";
-        }).join("");
-        return "<tr><td style='font-weight:600;'>" + esc(a) + "</td>" + cells + "</tr>";
-      }).join("");
-      var sHead = tasks.map(function (t) { return "<th>" + esc(t) + "</th>"; }).join("");
-      var sRows = agents.map(function (a) {
-        var cells = tasks.map(function (t) {
-          var st = s.sample_stats[a + "|" + t];
-          return st ? '<td class="matrix-cell sub">N=' + st.n + "<br>mean " + st.mean + " · best " + st.best + " · σ " + st.std + "</td>" : "<td class='matrix-cell sub'>—</td>";
-        }).join("");
-        return "<tr><td style='font-weight:600;'>" + esc(a) + "</td>" + cells + "</tr>";
-      }).join("");
-      renderHTML(
-        '<h2 class="page-title">Agent × 任务 对比</h2>' +
-        '<div class="card"><h3>得分矩阵（取各组合最好成绩，颜色=通过率）</h3>' +
-          '<table><tr><th>后端</th>' + head + "</tr>" + matrix + "</table></div>" +
-        '<div class="card"><h3>采样统计（对抗非确定性）</h3>' +
-          '<table><tr><th>后端</th>' + sHead + "</tr>" + sRows + "</table></div>" +
-        '<div class="card"><h3>任务通过率（全部 run 平均）</h3>' +
-          tasks.map(function (t) {
-            var rate = s.task_pass[t] || 0;
-            var color = rate >= 0.999 ? "#52C41A" : (rate >= 0.5 ? "#FAAD14" : "#EA6668");
-            return '<div style="display:flex;align-items:center;gap:12px;margin:8px 0;">' +
-              '<div style="flex:0 0 60px;">' + esc(t) + "</div>" +
-              '<div style="flex:1;height:8px;border-radius:4px;background:rgba(0,0,0,0.06);">' +
-              '<div style="height:8px;border-radius:4px;width:' + Math.max(2, Math.round(rate * 100)) + "%;background:" + color + ';"></div></div>' +
-              '<div style="flex:0 0 50px;text-align:right;font-size:12px;">' + Math.round(rate * 100) + "%</div></div>";
-          }).join("") +
-        "</div>"
-      );
+    if (mxState.timer) { clearInterval(mxState.timer); mxState.timer = null; }
+    mxState.current = null; mxState.matrix = null; mxState.sel = null;
+    Promise.all([
+      api("/api/license"),
+      loadBackends(),
+      api("/api/batches")
+    ]).then(function (rs) {
+      mxState.license = rs[0];
+      var batches = rs[2].batches || [];
+      renderCompareShell(batches);
+      if (batches.length) loadBatch(batches[0].batch_id);
     }).catch(function (e) { renderErr(e.message); });
+  }
+
+  function renderCompareShell(batches) {
+    var ent = mxState.license || {};
+    var isPro = ent.plan === "pro";
+    var cap = ent.max_compare_agents || 2;
+    // 默认勾选顺序：稳定可用的内置后端优先，其余按原顺序
+    var PREF = ["minimal-react", "deepseek-harness", "aider"];
+    var ordered = (backendsCache || []).slice().sort(function (x, y) {
+      var ix = PREF.indexOf(x.id), iy = PREF.indexOf(y.id);
+      return (ix < 0 ? 99 : ix) - (iy < 0 ? 99 : iy);
+    });
+    var agentChips = ordered.map(function (b, i) {
+      // 社区版默认勾前 cap 个；Pro 默认全选
+      var checked = isPro ? "checked" : (i < cap ? "checked" : "");
+      return '<label data-agent="' + esc(b.id) + '"><input type="checkbox" class="mx-agent" value="' +
+        esc(b.id) + '" ' + checked + '> ' + esc(b.id) + '</label>';
+    }).join("");
+    var histOpts = batches.map(function (b) {
+      return '<option value="' + esc(b.batch_id) + '">' + esc(b.label) +
+        "（" + esc(b.status) + " · " + fmtTime(b.created_at) + "）</option>";
+    }).join("");
+    var planBadge = isPro
+      ? '<span class="plan-badge pro">PRO</span>'
+      : '<span class="plan-badge community">社区版</span>';
+    var planNote = isPro ? "" : (
+      '<div class="plan-note">社区版对比矩阵最多选 ' + cap + ' 个 Agent、不保留历史批次、' +
+      '隐藏成本/稳定性列、不支持 CSV 导出；导入 Pro License 解锁。</div>'
+    );
+    renderHTML(
+      '<h2 class="page-title">多 Agent 对比矩阵' + planBadge + '</h2>' +
+      planNote +
+      '<div class="card"><h3>发起对比</h3>' +
+        '<div class="matrix-toolbar">' +
+          '<div class="field" style="flex:2 1 320px;"><label>选择 Agent（同任务集横向对比）</label>' +
+            '<div class="agent-pick" id="mx-agents">' + agentChips + '</div></div>' +
+          '<div class="field" style="flex:0 0 150px;"><label>任务集</label>' +
+            '<select id="mx-scope"><option value="core">core 核心卡口包</option>' +
+            '<option value="full">full 全量任务</option></select></div>' +
+          '<div class="field" style="flex:0 0 110px;"><label>每格 runs</label>' +
+            '<input id="mx-runs" type="number" value="1" min="1" max="10"></div>' +
+          '<div class="field" style="flex:0 0 auto;"><button class="btn" id="mx-start">开始对比</button></div>' +
+        '</div>' +
+        (batches.length ?
+          '<div style="margin-top:12px;"><label class="muted">历史批次：</label> ' +
+          '<select id="mx-hist" style="max-width:420px;padding:6px 10px;border:1px solid #D8D6CF;border-radius:8px;">' +
+          histOpts + '</select></div>' : "") +
+      '</div>' +
+      '<div id="mx-result"></div>'
+    );
+    // 选中态样式
+    document.querySelectorAll("#mx-agents label").forEach(function (lab) {
+      var cb = lab.querySelector("input");
+      if (cb.checked) lab.classList.add("on");
+      cb.onchange = function () {
+        var picked = pickedAgents();
+        if (!isPro && cb.checked && picked.length > cap) {
+          cb.checked = false;
+          alert("社区版最多选择 " + cap + " 个 Agent 对比，导入 Pro License 后可不限数量。");
+          return;
+        }
+        lab.classList.toggle("on", cb.checked);
+      };
+    });
+    el("mx-start").onclick = startBatch;
+    if (el("mx-hist")) el("mx-hist").onchange = function () { loadBatch(this.value); };
+  }
+
+  function pickedAgents() {
+    return Array.prototype.slice.call(document.querySelectorAll(".mx-agent:checked"))
+      .map(function (c) { return c.value; });
+  }
+
+  function startBatch() {
+    var agents = pickedAgents();
+    if (!agents.length) { alert("请至少选择一个 Agent"); return; }
+    var scope = el("mx-scope").value;
+    var runs = Math.max(1, Math.min(10, parseInt(el("mx-runs").value || "1", 10)));
+    var btn = el("mx-start");
+    btn.disabled = true; btn.textContent = "已提交…";
+    api("/api/batches", { method: "POST", body: { agents: agents, scope: scope, runs: runs } })
+      .then(function (r) {
+        btn.disabled = false; btn.textContent = "开始对比";
+        pollBatch(r.batch_id);
+      })
+      .catch(function (e) {
+        btn.disabled = false; btn.textContent = "开始对比";
+        alert("发起失败：" + e.message);
+      });
+  }
+
+  function loadBatch(bid) {
+    if (mxState.timer) { clearInterval(mxState.timer); mxState.timer = null; }
+    api("/api/batches/" + bid).then(function (b) {
+      mxState.current = b;
+      if (b.status === "done") {
+        mxState.matrix = b.summary || null;
+        mxState.sel = null;
+        renderBatchResult();
+      } else {
+        pollBatch(bid);
+      }
+    }).catch(function (e) { renderErr(e.message); });
+  }
+
+  function pollBatch(bid) {
+    if (mxState.timer) clearInterval(mxState.timer);
+    function tick() {
+      api("/api/batches/" + bid).then(function (b) {
+        mxState.current = b;
+        if (b.status === "done") {
+          clearInterval(mxState.timer); mxState.timer = null;
+          mxState.matrix = b.summary || null;
+          // 刷新历史下拉
+          api("/api/batches").then(function (d) {
+            var cur = el("mx-hist");
+            if (cur) {
+              var opts = d.batches.map(function (x) {
+                return '<option value="' + esc(x.batch_id) + '">' + esc(x.label) +
+                  "（" + esc(x.status) + " · " + fmtTime(x.created_at) + "）</option>";
+              }).join("");
+              cur.innerHTML = opts; cur.value = bid;
+            }
+          });
+          renderBatchResult();
+        } else {
+          renderProgress(b);
+        }
+      }).catch(function () { /* 轮询偶发失败忽略，下轮重试 */ });
+    }
+    tick();
+    mxState.timer = setInterval(tick, 1500);
+  }
+
+  function renderProgress(b) {
+    var total = b.total_runs || 0, done = b.done_runs || 0;
+    var pct = total ? Math.round(done / total * 100) : 0;
+    el("mx-result").innerHTML =
+      '<div class="card"><h3>对比进行中 <span class="muted">' + esc(b.label) + '</span></h3>' +
+      '<div class="batch-progress"><i style="width:' + pct + '%"></i></div>' +
+      '<div class="muted">已完成 ' + done + " / " + total + " 次运行（" + pct + '%）· Agent：' +
+        (b.agents || []).map(esc).join("、") + '</div></div>';
+  }
+
+  function pctClass(rate) { return rate >= 0.999 ? "ok" : (rate >= 0.5 ? "half" : "bad"); }
+  function pctText(rate) { return Math.round((rate || 0) * 100) + "%"; }
+
+  function renderBatchResult() {
+    var b = mxState.current, m = mxState.matrix;
+    if (!m) { el("mx-result").innerHTML = '<div class="empty">该批次暂无结果数据。</div>'; return; }
+    var ent = mxState.license || {};
+    var showCost = ent.show_cost_stability !== false;
+    var canExport = !!ent.export_csv;
+    var agents = m.agents || [], tasks = m.tasks || [], cells = m.cells || {}, totals = m.totals || {};
+
+    var head = '<tr><th class="ag-head">Agent ＼ 任务</th>' +
+      tasks.map(function (t) { return "<th>" + esc(t) + "</th>"; }).join("") + "</tr>";
+    var rows = agents.map(function (a) {
+      var tds = tasks.map(function (t) {
+        var c = cells[a + "|" + t];
+        if (!c || !c.n) return '<td class="mx-cell empty">—</td>';
+        var sub = showCost ? ("<span class='r'>" + pctText(c.pass_rate) + " · σ" + c.std + "</span>")
+                           : ("<span class='r'>" + pctText(c.pass_rate) + "</span>");
+        return '<td class="mx-cell ' + pctClass(c.pass_rate) + '" data-agent="' + esc(a) +
+          '" data-task="' + esc(t) + '"><span class="v">' + c.best + "</span>" + sub + "</td>";
+      }).join("");
+      return "<tr><td class='ag-head'>" + esc(a) + "</td>" + tds + "</tr>";
+    }).join("");
+
+    var concl = (m.conclusion || []).filter(function (l) {
+      // 社区版收费墙：结论里同样隐藏成本与稳定性（σ/波动）信息
+      if (!showCost && /成本|¥|波动|σ/.test(l)) return false;
+      return true;
+    }).map(function (l) { return '<div class="line">' + esc(l) + "</div>"; }).join("");
+
+    var totHead = showCost
+      ? "<tr><th>Agent</th><th class='num'>加权总分</th><th class='num'>任务通过</th><th class='num'>总成本</th><th class='num'>总耗时</th><th class='num'>平均波动σ</th></tr>"
+      : "<tr><th>Agent</th><th class='num'>加权总分</th><th class='num'>任务通过</th><th class='num'>总耗时</th></tr>";
+    var totRows = agents.map(function (a) {
+      var t = totals[a] || {};
+      var base = "<tr><td>" + esc(a) + "</td>" +
+        "<td class='num'><b>" + t.weighted_score + "</b></td>" +
+        "<td class='num'>" + (t.tasks_passed || 0) + "/" + (t.tasks_total || 0) +
+        "（" + pctText(t.task_pass_rate) + "）</td>";
+      if (showCost) {
+        base += "<td class='num'>¥" + t.cost_cny + "</td>" +
+                "<td class='num'>" + fmtDur(t.duration_s) + "</td>" +
+                "<td class='num'>" + t.avg_std + "</td></tr>";
+      } else {
+        base += "<td class='num'>" + fmtDur(t.duration_s) + "</td></tr>";
+      }
+      return base;
+    }).join("");
+
+    var exportBtn = canExport
+      ? '<button class="btn small" id="mx-export">导出 CSV</button>'
+      : '<button class="btn small secondary" disabled title="Pro 功能">导出 CSV 🔒</button> <span class="lock-tag">Pro 功能</span>';
+
+    el("mx-result").innerHTML =
+      '<div class="card"><h3>对比结论 <span class="muted">' + esc(b.label) + " · runs=" + (b.runs || 1) +
+        " · " + fmtTime(b.finished_at || b.created_at) + '</span></h3><div class="mx-concl">' + concl + "</div></div>" +
+      '<div class="card"><h3>得分矩阵 <span class="muted">格内=最好成绩，颜色=通过率；点击单元格下钻每次运行</span></h3>' +
+        '<div class="matrix-scroll"><table class="matrix">' + head + rows + "</table></div>" +
+        '<div style="margin-top:12px;">' + exportBtn + "</div></div>" +
+      '<div class="card totals-card"><h3>Agent 汇总</h3>' +
+        '<table class="totals-table">' + totHead + totRows + "</table></div>" +
+      '<div class="card mx-drill" id="mx-drill"><h3>单元格下钻</h3>' +
+        '<div class="muted">点击上方矩阵中的单元格，查看该 Agent 在该任务上的每次运行。</div></div>';
+
+    document.querySelectorAll(".mx-cell[data-agent]").forEach(function (td) {
+      td.onclick = function () {
+        document.querySelectorAll(".mx-cell.sel").forEach(function (x) { x.classList.remove("sel"); });
+        td.classList.add("sel");
+        renderDrill(td.getAttribute("data-agent"), td.getAttribute("data-task"));
+      };
+    });
+    if (el("mx-export")) el("mx-export").onclick = function () {
+      window.open("/api/matrix/export?batch_id=" + encodeURIComponent(b.batch_id), "_blank");
+    };
+  }
+
+  function renderDrill(agent, task) {
+    var m = mxState.matrix, ent = mxState.license || {};
+    var showCost = ent.show_cost_stability !== false;
+    var c = (m.cells || {})[agent + "|" + task];
+    var box = el("mx-drill");
+    if (!c || !c.n) { box.innerHTML = "<h3>单元格下钻</h3><div class='empty'>无运行记录</div>"; return; }
+    var st = { best: c.best, mean: c.mean, std: c.std, pass_rate: c.pass_rate };
+    var head = showCost
+      ? "<tr><th>run</th><th>状态</th><th>得分</th><th>通过率</th><th>耗时</th><th>成本</th><th></th></tr>"
+      : "<tr><th>run</th><th>状态</th><th>得分</th><th>通过率</th><th>耗时</th><th></th></tr>";
+    var rows = c.runs.map(function (r) {
+      var line = "<tr><td>" + esc(r.run_id) + "</td><td>" + esc(r.status) + "</td><td>" + r.score +
+        "</td><td>" + pctText(r.pass_rate) + "</td><td>" + fmtDur(r.duration_s) + "</td>";
+      if (showCost) line += "<td>¥" + r.cost_cny + "</td>";
+      line += '<td><a href="#/run/' + esc(r.run_id) + '">轨迹详情 →</a></td></tr>';
+      return line;
+    }).join("");
+    box.innerHTML =
+      "<h3>单元格下钻 · " + esc(agent) + " × " + esc(task) +
+      ' <span class="muted">N=' + c.n + " · best " + st.best + " · mean " + st.mean +
+      " · σ " + st.std + " · 通过率 " + pctText(st.pass_rate) + "</span></h3>" +
+      "<table>" + head + rows + "</table>";
   }
 
   // ---------- 视图：报告 ----------
@@ -755,6 +969,8 @@
     var h = location.hash || "#/dashboard";
     var parts = h.replace(/^#\//, "").split("/");
     var name = parts[0] || "dashboard";
+    // 离开对比矩阵视图时停止批次轮询，避免后台空转
+    if (name !== "compare" && mxState.timer) { clearInterval(mxState.timer); mxState.timer = null; }
     var nav = document.querySelectorAll(".nav a");
     nav.forEach(function (a) {
       a.classList.toggle("active", a.getAttribute("data-view") === name);

@@ -21,6 +21,7 @@
 * **黑盒后端模型层（V2.4）**：deepseek-harness 结束后解析 dsh session，还原模型 reasoning / 工具决策 / 最终输出，黑盒不再"黑"
 * **CI 质量门禁（V2.3/M1）**：`agent-eval ci` 无头运行，输出 JUnit XML + Allure + 汇总 JSON，core 包通过率不达标退出码非 0——GitHub 分支保护 required check 直接阻断合并
 * **多 Agent 横向对比门禁（V2.3）**：gate 配置 `agents:` 列表，每 Agent 独立跑同一任务集，全部达标才 PASS，报告输出 agent × task 结果矩阵
+* **多 Agent 对比矩阵（V2.7，Open Core 首个 Pro 能力）**：工作台一键发起「N 个 Agent × 任务集 × runs」对比批次，实时进度、彩色得分矩阵（点击下钻到每次 run 与轨迹）、加权总分/通过率/真实成本/耗时/稳定性 σ 汇总、自动结论与 CSV 导出；社区版限 2 Agent、隐藏成本稳定性列、禁导出，导入 License 解锁 Pro
 * **真实成本核算（V2.3）**：任务级预计成本（token 成本模型）+ 运行实际成本（DeepSeek 余额差分，批量精度 ¥0.09），工作台与 CI 报告均展示
 * **LLM-as-a-Judge 语义判分（V2.2）**：`verifier: llm_judge` 的开放任务由 LLM 按 rubric 判分，verdict 附带 score 与 reasoning
 * **可选 Langfuse 分析层（V2.2）**：默认零依赖 no-op；设置 `AGENT_EVAL_TRACE=langfuse` + 凭据后自动记录每次 LLM 调用
@@ -151,7 +152,7 @@ gate:
 | 任务管理 | 23 任务列表 + 新建任务表单（动态校验点编辑器）+ 每任务预计成本（含成本口径提示） |
 | 运行历史 | SQLite 索引，分页浏览，按任务/后端/状态筛选，实际成本列 |
 | 运行详情 | 判定结果 + **轨迹回放时间线** + 步骤轨迹 + 产物文件预览（含路径穿越防护） |
-| 对比 | Agent × 任务得分矩阵 + 采样统计（N/mean/best/σ）+ 任务通过率 |
+| 对比矩阵 | 发起「N Agent × 任务集 × runs」对比批次，实时进度 + 彩色得分矩阵（下钻每次 run/轨迹）+ 加权总分/通过率/成本/耗时/σ 汇总 + 自动结论 + CSV 导出（V2.7） |
 | 报告 | 复用引擎 reporter 生成自包含 HTML，iframe 内嵌查看 |
 | 设置 | 目录/版本 + 环境变量说明 |
 
@@ -172,6 +173,38 @@ gate:
 - **RAG 真实检索**：`search_kb` 做 BM25 检索（k1=1.5, b=0.75；英文/数字词 + 中文 2-gram），返回命中片段 + 来源行号 + 得分——时间线的"知识"节点即真实检索命中的知识片段
 - **dsh 黑盒模型层**：解析隔离 DSH_HOME 下 `session.jsonl.zstd`（zstandard 模块 → zstd CLI 回退），提取模型 reasoning / 工具决策 / 最终输出
 - **Langfuse（可选）**：`AGENT_EVAL_TRACE=langfuse` 时 LLM 调用同步云端，与本地 traces 独立完整、互不依赖
+
+### 多 Agent 对比矩阵与 License（V2.7，Open Core）
+
+「对比矩阵」页一次发起多个 Agent 跑同一任务集（core 卡口包或 full 全量，每格可重复 runs 对抗非确定性），后台逐格执行并实时显示进度；完成后输出：
+
+- **彩色得分矩阵**：行=Agent、列=任务，格内为最好成绩 + 通过率（颜色：绿≥100%、黄≥50%、红<50%），点击任意格下钻该组合的每次 run，并可直达轨迹详情
+- **Agent 汇总**：按任务权重加权总分、任务通过率、真实 token 成本、总耗时、平均波动 σ（稳定性）
+- **自动结论**：谁总分领先/并列、成本对比、谁最稳定
+- **CSV 导出**：矩阵 + 汇总一键导出（带 BOM，Excel 直接打开中文不乱码）
+
+功能分档（feature flag，标准库 HMAC 签名，无第三方依赖）：
+
+| 能力 | 社区版（默认） | Pro |
+| --- | --- | --- |
+| 对比 Agent 数 | ≤ 2 | 不限 |
+| 历史批次保留 | 仅最近 1 个 | 全部 |
+| 成本 / 稳定性 σ 列 | 隐藏 | 显示 |
+| CSV 导出 | 禁用 | 允许 |
+
+签发并启用 Pro License（本地/私有化）：
+
+```bash
+# 1) 签发（正式发售请用 AGENT_EVAL_LICENSE_SECRET 覆盖内置演示密钥）
+python -m agent_eval.license issue --plan pro --days 365
+
+# 2) 三选一启用（优先级从高到低）
+export AGENT_EVAL_LICENSE="<token>"            # 环境变量直接给 token
+export AGENT_EVAL_LICENSE_FILE=/path/key.file  # 或指定文件
+# 或把 token 写入项目根 license.key（已在 .gitignore，不会误提交）
+```
+
+档位由后端接口强校验（前端限制仅为体验优化，绕过前端仍会被 403 拒绝）。当前档位见 `GET /api/license` 与页面右上角徽章。
 
 ## 目录结构
 
@@ -219,4 +252,6 @@ ai-agent-eval/
 * ✅ V2.3（M1）：CI 质量门禁（ci 命令 / JUnit / Allure / gate 判定 / 合并阻断）· 成本核算（预计 + 余额差分）· 多 Agent 对比门禁 · 端到端演示仓库
 * ✅ V2.4：轨迹回放面板（全链路时间线）· RAG 真实检索环节（search_kb + T701/T702）· dsh 黑盒模型层
 * ✅ V2.5：search_kb 升级 BM25 · T701/T702 纳入 core 卡口（12 任务）
-* 🔜 下一步：桌面端黑盒采集器 · 插件注册表 · Docker 沙箱隔离 · pip 发布 · 混合检索/向量检索增强
+* ✅ V2.6：统一日志体系（控制台 + 文件双输出、按 10MB 时间戳切割归档、每次运行独立 run.log）
+* ✅ V2.7：商业化功能 A——多 Agent 对比矩阵（批次模型 + 彩色矩阵 + 下钻 + 汇总 + 导出）· License 收费墙（Open Core）
+* 🔜 下一步：团队回归看板（功能 B）· 桌面端黑盒采集器 · 插件注册表 · Docker 沙箱隔离 · pip 发布 · 混合检索/向量检索增强
