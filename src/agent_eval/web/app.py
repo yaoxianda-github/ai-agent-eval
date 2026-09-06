@@ -276,9 +276,10 @@ def create_app(
     @app.get("/api/runs/{run_id}/file")
     def read_run_file(run_id: str, path: str = Query(...)) -> dict:
         ws = _workspace(run_id)
+        ws_abs = ws.resolve()
         target = (ws / path).resolve()
         try:
-            target.relative_to(ws.resolve())
+            rel = target.relative_to(ws_abs)
         except ValueError:
             raise HTTPException(status_code=400, detail="路径越界")
         if not target.is_file():
@@ -288,7 +289,7 @@ def create_app(
         if target.stat().st_size > _MAX_FILE_BYTES:
             raise HTTPException(status_code=400, detail="文件过大，仅支持预览 <=200KB")
         return {
-            "path": str(target.relative_to(ws)).replace("\\", "/"),
+            "path": str(rel).replace("\\", "/"),
             "name": target.name,
             "content": target.read_text(encoding="utf-8", errors="replace"),
         }

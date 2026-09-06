@@ -323,3 +323,35 @@ def test_task_generate_llm_judge_rubric(tmp_path, monkeypatch):
     t = next(x for x in tasks if x["id"] == "T602")
     assert t["verifier"] == "llm_judge"
     assert "内容完整性" in t["rubric"]
+
+
+def test_read_file_with_relative_results_dir(tmp_path, monkeypatch):
+    """生产形态回归：results_dir 为相对路径时（工作台默认），产物文件读取不 500。
+
+    历史 bug：read_run_file 返回行用未 resolve 的 ws（相对）对绝对 target 做
+    relative_to → ValueError → 500；绝对路径测试环境掩盖了该问题。
+    """
+    monkeypatch.chdir(tmp_path)  # 模拟工作台在项目根启动
+    monkeypatch.setattr(
+        "agent_eval.runner.get_backend", lambda name, **kw: FakeBackend(**kw)
+    )
+    from agent_eval.web.app import create_app
+
+    tasks_dir = _make_tasks_dir(tmp_path)
+    results_dir = Path("results/runs")  # 相对路径（default_results_dir 形态）
+    app = create_app(
+        tasks_dir=tasks_dir,
+        results_dir=results_dir,
+        report_dir=Path("reports"),
+        db_path=Path("results/run_history.db"),
+    )
+    c = TestClient(app)
+    run_id = wait_done(
+        c,
+        c.post("/api/runs", json={"task_id": "T600", "agent_id": "minimal-react"}).json()["last_run_id"],
+    )["run_id"]
+    files = c.get(f"/api/runs/{run_id}/files").json()["files"]
+    assert any(f["path"] == "output/ok.txt" for f in files)
+    r = c.get(f"/api/runs/{run_id}/file?path=output/ok.txt")
+    assert r.status_code == 200, r.text
+    assert "done" in r.json()["content"]
