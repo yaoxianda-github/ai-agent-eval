@@ -170,11 +170,11 @@ def test_write_junit_xml(tmp_path):
             "checkpoints": {"c1": {"passed": 3, "total": 3}, "c2": {"passed": 2, "total": 3}},
         }
     ]
-    out = write_junit_xml("core", task_results, tasks, tmp_path / "junit.xml")
+    out = write_junit_xml("core", [("minimal-react", task_results)], tasks, tmp_path / "junit.xml")
     root = ET.parse(out).getroot()
     suite = root.find("testsuite")
     assert suite is not None
-    assert suite.get("name") == "core"
+    assert suite.get("name") == "core·minimal-react"
     assert suite.get("tests") == "2"  # checkpoint 级 testcase
     assert suite.get("failures") == "2"  # task 失败 -> 全部 checkpoint 记为失败
     names = [tc.get("name") for tc in suite.findall("testcase")]
@@ -195,7 +195,7 @@ def test_write_junit_xml_passed_task_no_failure(tmp_path):
             "checkpoints": {"c1": {"passed": 3, "total": 3}},
         }
     ]
-    out = write_junit_xml("core", task_results, tasks, tmp_path / "junit.xml")
+    out = write_junit_xml("core", [("minimal-react", task_results)], tasks, tmp_path / "junit.xml")
     root = ET.parse(out).getroot()
     suite = root.find("testsuite")
     assert suite.get("failures") == "0"
@@ -219,7 +219,7 @@ def test_write_allure_results(tmp_path):
         },
     ]
     d = write_allure_results(
-        "core", task_results, tasks,
+        "core", [("minimal-react", task_results)], tasks,
         {"gate": "core", "agent": "minimal-react", "model": "deepseek-chat"},
         tmp_path / "allure",
     )
@@ -230,7 +230,7 @@ def test_write_allure_results(tmp_path):
         r = json.loads(f.read_text(encoding="utf-8"))
         statuses.append(r["status"])
         labels = {x["name"]: x["value"] for x in r["labels"]}
-        assert labels["suite"] == "core"
+        assert labels["suite"] == "core·minimal-react"
         assert labels["agent"] == "minimal-react"
     assert sorted(statuses) == ["failed", "passed"]
     env = (d / "environment.properties").read_text(encoding="utf-8")
@@ -312,3 +312,71 @@ def test_run_gate_balance_diff(tmp_path, monkeypatch):
     # 黑盒后端 token=0 → token 计价为 0，差分补上真实成本
     assert result["cost_cny"] == 0.0
     assert result["balance_cost_cny"] > 0
+
+
+def test_run_gate_multi_agent_matrix(tmp_path):
+    """gate 配置 agents 列表 → 每 agent 独立跑任务集，全部达标 gate 才 PASS。"""
+    cfg = tmp_path / "gate.yaml"
+    cfg.write_text(
+        "gate:\n"
+        "  compare:\n"
+        "    tasks: [T001, T305]\n"
+        "    runs: 2\n"
+        "    task_pass_ratio: 0.5\n"
+        "    min_pass_rate: 0.5\n"
+        "    agents: [minimal-react, deepseek-harness]\n",
+        encoding="utf-8",
+    )
+
+    def fake_run_one(task, agent, config=None, results_dir=None, **kw):
+        # minimal-react：T305 全挂；deepseek-harness：全过
+        fail = agent == "minimal-react" and task.id == "T305"
+        return make_record(
+            task_id=task.id, passed_flags=(not fail,),
+            usage={"prompt_tokens": 10, "completion_tokens": 5},
+        )
+
+    result = run_gate(
+        "compare", agent="ignored", model="deepseek-chat",
+        config_path=cfg, results_dir=tmp_path / "runs", run_one_impl=fake_run_one,
+        track_balance=False,
+    )
+    assert result["agents"] == ["minimal-react", "deepseek-harness"]
+    assert result["agent"] == "multi-agent"
+    assert len(result["agent_results"]) == 2
+    by_agent = {ar["agent"]: ar for ar in result["agent_results"]}
+    assert by_agent["minimal-react"]["pass_rate"] == 0.5   # T001 过、T305 挂
+    assert by_agent["deepseek-harness"]["pass_rate"] == 1.0
+    assert by_agent["minimal-react"]["passed"] is True     # 0.5 >= 0.5 各自达标
+    assert result["passed"] is True                        # 全部达标
+    assert result["pass_rate"] == 0.5                      # 取最小值
+    # 任务矩阵：同一任务在两个 agent 下各自记录
+    assert result["task_results"] == by_agent["minimal-react"]["task_results"]
+
+
+def test_run_gate_multi_agent_fail_if_any(tmp_path):
+    """任一 agent 未达标 → gate FAIL（保守卡口语义）。"""
+    cfg = tmp_path / "gate.yaml"
+    cfg.write_text(
+        "gate:\n"
+        "  compare:\n"
+        "    tasks: [T001]\n"
+        "    runs: 1\n"
+        "    task_pass_ratio: 0.5\n"
+        "    min_pass_rate: 0.9\n"
+        "    agents: [minimal-react, deepseek-harness]\n",
+        encoding="utf-8",
+    )
+
+    def fake_run_one(task, agent, config=None, results_dir=None, **kw):
+        fail = agent == "minimal-react"
+        return make_record(task_id=task.id, passed_flags=(not fail,), usage=None)
+
+    result = run_gate(
+        "compare", agent="x", model="deepseek-chat",
+        config_path=cfg, results_dir=tmp_path / "runs", run_one_impl=fake_run_one,
+        track_balance=False,
+    )
+    assert result["agent_results"][0]["passed"] is False  # minimal-react 0/1
+    assert result["agent_results"][1]["passed"] is True   # deepseek-harness 1/1
+    assert result["passed"] is False                      # 任一失败 → gate FAIL

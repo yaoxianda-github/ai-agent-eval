@@ -206,3 +206,44 @@ core:  [T001, T102, T103, T207, T305, T306, T308, T303, T401, T402]  # runs=3, t
 | 演示 README（验证记录） | https://github.com/yaoxianda-github/agent-eval-demo/blob/main/README.md |
 | 主仓库 | https://github.com/yaoxianda-github/ai-agent-eval |
 | M1 提交 | `f8116a5`（ci 命令）、`8968352`（scripts 目录定位修复） |
+
+## 10. 多 agent 横向对比 gate（方向②落地）
+
+> 用户三方向之一"多 agent 横向对比 gate"已实现：gate 定义可携带 `agents` 列表，
+> 每个 agent 独立跑同一任务集并各自判定，**全部 agent 达标 gate 才算 PASS**（保守卡口）。
+
+### 10.1 配置
+
+```yaml
+# ci/gate.yaml
+gate:
+  compare:                    # 可选对比 gate（正式 core 卡口不受影响）
+    tasks: [T001, T102, T305]
+    runs: 2
+    task_pass_ratio: 0.5
+    min_pass_rate: 0.8
+    agents: [minimal-react, deepseek-harness]   # 多 agent 横向对比
+```
+
+未配置 `agents` 时行为与旧版完全一致（单 agent，由 `--agent` 指定），向后兼容。
+
+### 10.2 运行与报告
+
+```bash
+agent-eval ci --gate compare --config ci/gate.yaml --report-json results/compare.json
+```
+
+- 终端：每个 agent 一张任务表 + 各自通过率判定，最后一行给出 gate 总判定；
+- `report-json`：顶层 `agents` 列表 + `agent_results` 矩阵（每 agent 含 pass_rate/passed/
+  duration_s/cost_cny/balance_cost_cny/task_results），`passed` = 全部 agent 达标；
+- JUnit/Allure：每个 agent 一个 suite（`gate·agent`），checkpoint 级 testcase 的
+  classname 带 agent 前缀，可直接喂 GitHub test-reporter / Allure 看板做横向对比。
+
+### 10.3 实测（2026-09-06，本地 2 任务 × 1 run）
+
+| agent | T305 | T308 | pass_rate | 判定 | 耗时 |
+|---|---|---|---|---|---|
+| minimal-react | 1/1 | 1/1 | 1.0 | PASS | 10.65s |
+| deepseek-harness | 1/1 | 1/1 | 1.0 | PASS | 16.12s |
+
+gate 判定：`minimal-react / deepseek-harness 全部达标 -> PASS`（`/tmp/ci-report-compare.json`）。
