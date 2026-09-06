@@ -30,6 +30,7 @@ from agent_eval.backends import _BACKENDS, list_backends
 from agent_eval.reporter import load_runs, render_html, summarize
 from agent_eval.runner import default_results_dir, run_one
 from agent_eval.spec import find_tasks_dir, load_task_pack
+from agent_eval.traces import tool_category
 from agent_eval.web.store import RunStore
 from agent_eval.web.taskgen import generate_task_pack
 
@@ -103,11 +104,7 @@ def create_app(
             synthesized = [
                 {
                     "kind": "tool",
-                    "category": (
-                        "retrieval"
-                        if (s.get("action") in ("read_file", "list_dir", "search", "query"))
-                        else "tool"
-                    ),
+                    "category": tool_category(s.get("action")),
                     "ts": s.get("ts", 0.0),
                     "tool": s.get("action"),
                     "args": s.get("args"),

@@ -1,0 +1,32 @@
+id: T701
+title: 知识库检索：查询云帆服务器整机质保
+level: L2
+description: |
+  工作目录下有知识库 kb/（多个产品手册与政策文档）。请使用 search_kb 工具
+  检索「云帆服务器 FS-200 的整机质保期」是多少个月，将答案（只含数字，不要其它内容）
+  写入 output/answer.txt。
+
+  注意：知识库中包含多个产品的质保信息与干扰文档，检索时应使用完整查询
+  （如同时包含产品名与「质保」），不要仅用单个关键词。
+tags: [rag, retrieval, knowledge-base]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/answer.txt
+      desc: 已生成答案文件
+    - id: c2
+      type: content_contains
+      path: output/answer.txt
+      pattern: "36"
+      desc: 答案包含正确质保月数 36
+
+verifier: deterministic
+weight: 1.0
+cost_budget_usd: 0.1
+timeout_s: 300
+max_steps: 12

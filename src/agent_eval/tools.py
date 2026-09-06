@@ -18,6 +18,7 @@ def run_tool(tool: str, args: dict, workspace: Path) -> tuple[bool, str]:
         "read_file": _read_file,
         "write_file": _write_file,
         "run_command": _run_command,
+        "search_kb": _search_kb,
         "finish": lambda ws, a: (True, "任务结束"),
     }
     fn = handlers.get(tool)
@@ -78,3 +79,75 @@ def _run_command(ws: Path, args: dict) -> tuple[bool, str]:
     out = r.stdout + (("\n" + r.stderr) if r.stderr else "")
     out = out[:4000]
     return r.ok, f"exit={r.exit_code}\n{out}"
+
+
+# ---------- RAG 检索工具（V2.4：评测集真实检索环节） ----------
+
+_KB_EXTS = {".md", ".txt", ".csv"}
+
+
+def _extract_keywords(query: str) -> list[str]:
+    """从查询中提取检索关键词：2+ 连续中文字符、英文单词（≥3 字母）。"""
+    import re
+
+    kws: list[str] = []
+    for seg in re.findall(r"[\u4e00-\u9fa5]+|[A-Za-z0-9_]{3,}", query):
+        if len(seg) >= 2:
+            kws.append(seg)
+    return kws
+
+
+def _search_kb(ws: Path, args: dict) -> tuple[bool, str]:
+    """在知识库 kb/ 下做关键词检索（RAG 检索环节的评测实现）。
+
+    检索范围：kb/ 下所有 .md/.txt/.csv 文件。按 ~6 行一个片段打分
+    （英文词命中×2、中文词组命中×1），返回 Top-N 片段，附来源定位
+    `[kb/xxx.md:起-止行]`，供轨迹回放"知识/检索"节点展示命中的知识片段。
+    """
+    query = str(args.get("query", "")).strip()
+    top_k = max(1, min(int(args.get("top_k", 3)), 5))
+    if not query:
+        return False, "缺少 query 参数"
+    kb = ws / "kb"
+    if not kb.is_dir():
+        return False, "知识库 kb/ 不存在：本任务没有可检索的知识库（fixtures 未提供 kb/）"
+    kws = _extract_keywords(query)
+    if not kws:
+        return False, f"无法从查询提取检索关键词: {query!r}"
+
+    files = sorted(
+        p for p in kb.rglob("*")
+        if p.is_file() and p.suffix.lower() in _KB_EXTS
+    )
+    if not files:
+        return False, "知识库 kb/ 下没有可检索的文档（.md/.txt/.csv）"
+
+    scored: list[tuple[float, str, int, int, str]] = []
+    for p in files:
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        lines = text.splitlines()
+        for start in range(0, len(lines), 6):
+            chunk = lines[start : start + 6]
+            block = "\n".join(chunk)
+            score = 0.0
+            for kw in kws:
+                cnt = block.count(kw)
+                if cnt:
+                    score += cnt * (2.0 if kw.isascii() else 1.0)
+            if score > 0:
+                scored.append((score, str(p.relative_to(ws)), start + 1, start + len(chunk), block))
+
+    if not scored:
+        return False, f"知识库中未检索到与「{query}」相关的内容（关键词: {', '.join(kws)}）"
+
+    scored.sort(key=lambda x: -x[0])
+    out = []
+    for score, rel, s, e, block in scored[:top_k]:
+        rel = rel.replace("kb/", "kb/", 1)
+        head = f"[{rel}:{s}-{e}] (得分 {score:.1f})"
+        snippet = block[:600]
+        out.append(f"{head}\n{snippet}")
+    return True, "\n\n".join(out)

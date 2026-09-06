@@ -9,7 +9,9 @@ DeepSeek Harness（https://github.com/deepseek-ai/deepseek-harness）是 DeepSee
 - 工作目录 = 启动 dsh 时所在目录（即评测 workspace）
 - 最终答案打印到 stdout；模型 reasoning 走 stderr
 - 退出码 0 = 任务完成；1 = 中止 / 错误
-- 与 aider 一样属于"黑盒单次调用"型后端：轨迹记为一次 dsh 调用的输出，报告需注明口径
+- 轨迹：除 dsh 单步调用外，V2.4 起解析隔离 DSH_HOME 下的 session.jsonl.zstd，
+  提取模型 reasoning / 工具决策（llm 节点）与工具执行结果（tool 节点），
+  为黑盒后端补齐"模型生成"层回放数据
 
 依赖：Node.js + dsh（npm install -g @deepseek-ai/dsh，或回退 npx @deepseek-ai/dsh）
 API Key：环境变量 DEEPSEEK_API_KEY / LLM_API_KEY（headless 默认模型走 DeepSeek）。
@@ -17,6 +19,7 @@ API Key：环境变量 DEEPSEEK_API_KEY / LLM_API_KEY（headless 默认模型走
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -24,6 +27,7 @@ import time
 from pathlib import Path
 
 from agent_eval.backends.base import Backend, BackendResult
+from agent_eval.traces import tool_category
 
 _DEFAULT_DSH_CANDIDATES = (
     "/usr/local/bin/dsh",
@@ -77,6 +81,128 @@ def _ensure_headless_profile(dsh_home: Path, cmd: str) -> None:
     )
 
 
+# ---------- dsh session 解析（V2.4：黑盒后端补模型层回放数据） ----------
+
+def _session_dir_for(workspace: Path, dsh_home: Path) -> Path | None:
+    """按 workspace 绝对路径的编码目录名定位本次 dsh session 目录。
+
+    dsh 把 session 存在 <DSH_HOME>/sessions/<"--" + abs_path.replace("/","-") + "--">/
+    下，同一 workspace 多次运行会产生多个 session-<uuid> 子目录，取最新一个。
+    """
+    encoded = "--" + str(workspace.resolve()).lstrip("/").replace("/", "-") + "--"
+    d = dsh_home / "sessions" / encoded
+    if not d.is_dir():
+        return None
+    subs = sorted(
+        (p for p in d.iterdir() if p.is_dir() and p.name.startswith("session-")),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return subs[0] if subs else None
+
+
+def _decompress_zstd(path: Path) -> bytes | None:
+    """解压 .zstd：优先 python zstandard 模块，回退 zstd CLI；都不可用返回 None。"""
+    try:
+        import zstandard as zstd
+
+        with open(path, "rb") as f:
+            return b"".join(zstd.ZstdDecompressor().stream_reader(f).read())
+    except Exception:  # noqa: BLE001 - 模块缺失/解压失败都回退 CLI
+        pass
+    zc = shutil.which("zstd")
+    if zc:
+        try:
+            r = subprocess.run([zc, "-dc", str(path)], capture_output=True, timeout=30)
+            return r.stdout if r.returncode == 0 else None
+        except Exception:  # noqa: BLE001
+            return None
+    return None
+
+
+def parse_dsh_session(path: Path) -> list[dict]:
+    """解析 session.jsonl.zstd → 回放 traces（llm / tool 节点）。
+
+    - assistant/message.content 块：
+      reasoning → llm 节点（phase=reasoning）；tool-call → llm 节点（phase=decision，
+      输出为模型生成的工具参数）；text → llm 节点（phase=final）
+    - tool/result → tool 节点（含 callId 与观察结果；retrieval 分类沿用统一规则）
+    解析失败（无解压器/格式变化/文件损坏）返回 []，不影响评测本身。
+    """
+    raw = _decompress_zstd(path)
+    if not raw:
+        return []
+    traces: list[dict] = []
+    last_user = ""
+    model = ""
+    call_names: dict[str, str] = {}
+    try:
+        text = raw.decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001
+        return []
+    for line in text.splitlines():
+        try:
+            o = json.loads(line)
+        except Exception:  # noqa: BLE001
+            continue
+        t = o.get("type")
+        data = o.get("data") or {}
+        ts = round((o.get("time") or 0) / 1000.0, 3)
+        try:
+            if t == "user/message":
+                last_user = "".join(
+                    c.get("text", "") for c in (data.get("content") or []) if c.get("type") == "text"
+                )[:300]
+            elif t == "tool/call":
+                call_names[data.get("callId") or ""] = data.get("name") or ""
+            elif t == "assistant/message":
+                msg = data.get("message") or {}
+                src = msg.get("source") or {}
+                model = src.get("model") or model
+                for c in (msg.get("content") or []):
+                    ct = c.get("type")
+                    text_c = c.get("text") or ""
+                    if ct == "reasoning" and text_c.strip():
+                        traces.append(
+                            {"kind": "llm", "ts": ts, "model": model, "input": last_user,
+                             "output": text_c, "phase": "reasoning"}
+                        )
+                    elif ct == "tool-call":
+                        traces.append(
+                            {"kind": "llm", "ts": ts, "model": model, "input": last_user,
+                             "output": c.get("arguments") or "", "tool": c.get("name") or "",
+                             "phase": "decision"}
+                        )
+                    elif ct == "text" and text_c.strip():
+                        traces.append(
+                            {"kind": "llm", "ts": ts, "model": model, "input": last_user,
+                             "output": text_c, "phase": "final"}
+                        )
+            elif t == "tool/result":
+                msg = data.get("message") or {}
+                src = msg.get("source") or {}
+                tool_name = call_names.get(src.get("callId") or "", "")
+                args = src.get("arguments") or {}
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:  # noqa: BLE001
+                        args = {"raw": args}
+                obs = ""
+                for c in (msg.get("content") or []):
+                    if c.get("type") == "tool-result":
+                        obs = "".join(
+                            x.get("text", "") for x in (c.get("content") or []) if x.get("type") == "text"
+                        )
+                traces.append(
+                    {"kind": "tool", "category": tool_category(tool_name), "ts": ts,
+                     "tool": tool_name or "tool", "args": args, "observation": obs}
+                )
+        except Exception:  # noqa: BLE001 - 单条事件解析失败不影响其余
+            continue
+    return traces
+
+
 class DeepseekHarnessBackend(Backend):
     name = "deepseek-harness"
     version = "0.1.0"
@@ -100,6 +226,23 @@ class DeepseekHarnessBackend(Backend):
         self.timeout_s = timeout_s
         self.cmd = cmd or _find_dsh_cmd()
         self.dsh_home = Path(dsh_home) if dsh_home else _default_dsh_home()
+
+    def _traces_from_session(self, workspace: Path) -> list[dict]:
+        """解析本次运行的 dsh session（隔离 DSH_HOME）→ 回放 traces。
+
+        黑盒后端补"模型生成"层：reasoning / 工具决策（llm 节点）+ 工具执行（tool 节点）。
+        解析失败（无 session/zstd/格式变化）返回 []，不影响评测。
+        """
+        try:
+            sdir = _session_dir_for(workspace, self.dsh_home)
+            if not sdir:
+                return []
+            sfile = sdir / "session.jsonl.zstd"
+            if not sfile.is_file():
+                return []
+            return parse_dsh_session(sfile)
+        except Exception:  # noqa: BLE001 - 回放数据非关键路径
+            return []
 
     def run(self, task, workspace) -> BackendResult:
         if not self.cmd:
@@ -152,6 +295,7 @@ class DeepseekHarnessBackend(Backend):
                         "ts": round(time.time(), 3),
                     }
                 ],
+                traces=self._traces_from_session(workspace),
                 duration_s=round(time.time() - start, 3),
                 error=f"dsh 超时（>{self.timeout_s}s）。输出尾部：{partial[:400]}",
             )
@@ -172,6 +316,7 @@ class DeepseekHarnessBackend(Backend):
         return BackendResult(
             status="completed" if ok else "error",
             steps=steps,
+            traces=self._traces_from_session(workspace),
             duration_s=round(time.time() - start, 3),
             stdout=(out or "").strip(),
             error="" if ok else f"dsh 退出码 {rc}：{(err or out or '')[-300:]}",

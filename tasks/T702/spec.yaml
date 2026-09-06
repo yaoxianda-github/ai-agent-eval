@@ -1,0 +1,38 @@
+id: T702
+title: 知识库检索：质保与售后支持两段归纳
+level: L3
+description: |
+  工作目录下有知识库 kb/（多个产品手册与政策文档）。请使用 search_kb 工具
+  检索云帆服务器 FS-200 的以下两项信息，并把答案写入 output/answer.txt（每行一项）：
+
+  第 1 行：整机质保月数（只含数字）
+  第 2 行：是否提供 7×24 小时售后支持（写「支持」或「不支持」，不要其它内容）
+
+  注意：知识库包含多个产品与政策文档，检索时请使用能区分目标产品的查询词。
+tags: [rag, retrieval, knowledge-base, multi-hop]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/answer.txt
+      desc: 已生成答案文件
+    - id: c2
+      type: content_contains
+      path: output/answer.txt
+      pattern: "36"
+      desc: 第 1 行质保月数正确
+    - id: c3
+      type: content_contains
+      path: output/answer.txt
+      pattern: "支持"
+      desc: 第 2 行售后支持判断正确
+
+verifier: deterministic
+weight: 1.2
+cost_budget_usd: 0.12
+timeout_s: 300
+max_steps: 14

@@ -20,6 +20,7 @@ import time
 from agent_eval.backends.base import Backend, BackendResult
 from agent_eval.observability import trace_llm_call
 from agent_eval.tools import run_tool
+from agent_eval.traces import tool_category
 
 SYSTEM_PROMPT = """你是一个在沙箱工作目录里执行任务的自主 Agent。
 每执行一步，输出且只输出一个 JSON 对象，不要输出任何其他文字：
@@ -29,6 +30,7 @@ SYSTEM_PROMPT = """你是一个在沙箱工作目录里执行任务的自主 Age
 - list_dir:  args {"path": "相对路径"} —— 列出目录内容
 - read_file: args {"path": "相对路径"} —— 读取文件内容
 - write_file: args {"path": "相对路径", "content": "内容"} —— 写文件
+- search_kb: args {"query": "检索问题", "top_k": 3} —— 在知识库 kb/ 中检索相关片段（RAG 检索），返回命中的文档片段及来源
 - run_command: args {"command": "shell 命令", "timeout": 30} —— 运行命令
 - finish: args {"summary": "任务完成说明"} —— 任务完成，结束循环
 
@@ -223,13 +225,10 @@ class MinimalReactBackend(Backend):
                 {"step": i, "action": tool, "args": args, "observation": observation, "ts": ts}
             )
             # 回放轨迹：工具执行节点（读取/检索类工具标记为 knowledge 分类）
-            category = (
-                "retrieval" if tool in ("read_file", "list_dir", "search", "query") else "tool"
-            )
             self._traces.append(
                 {
                     "kind": "tool",
-                    "category": category,
+                    "category": tool_category(tool),
                     "ts": ts,
                     "tool": tool,
                     "args": args,

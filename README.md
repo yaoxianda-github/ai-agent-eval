@@ -132,7 +132,7 @@ ai-agent-eval/
 
 │   ├── reporter.py       # 自包含 HTML 报告
 
-│   ├── tools.py          # ReAct 工具集（路径安全限制在工作目录内）
+│   ├── tools.py          # ReAct 工具集（路径安全限制在工作目录内；含 search_kb 检索）
 
 │   ├── stats.py          # 多 run 采样统计（best/mean/std/pass_rate）
 
@@ -199,7 +199,9 @@ ai-agent-eval/
 支持按类型过滤（全部/意图/知识/模型/工具）与长文本展开/收起。数据来源：
 
 - **本地观测层**：`run.json` 新增 `traces` 字段，由 runner 统一生成（后端自报 traces 优先，旧后端由 steps 兜底合成；历史 run 在 API 读取时自动合成，无需迁移）。
-- **Langfuse（可选）**：`AGENT_EVAL_TRACE=langfuse` 时 LLM 调用仍同步到云端，本地 traces 独立完整，二者互不依赖。黑盒后端（deepseek-harness）仅有工具级节点，模型中间输出不可见属预期限制。
+- **RAG 真实检索环节（V2.4）**：工具集新增 `search_kb`（在 `kb/` 知识库做关键词检索，返回命中片段与来源行号）。评测任务 T701/T702 提供多文档知识库与干扰项，要求 Agent 用完整查询检索并作答——时间线的"知识/检索"节点即真实检索命中的知识片段。
+- **dsh 黑盒模型层（V2.4）**：deepseek-harness 后端结束后解析隔离 DSH_HOME 下的 `session.jsonl.zstd`，提取模型 reasoning / 工具决策 / 最终输出（llm 节点）与工具执行（tool 节点），黑盒后端不再只有单步 dsh 节点。
+- **Langfuse（可选）**：`AGENT_EVAL_TRACE=langfuse` 时 LLM 调用仍同步到云端，本地 traces 独立完整，二者互不依赖。
 
 ## 路线图
 

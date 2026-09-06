@@ -17,6 +17,7 @@ from agent_eval.backends import get_backend
 from agent_eval.judge import judge_llm
 from agent_eval.scoring import score_task
 from agent_eval.spec import TaskSpec
+from agent_eval.traces import tool_category
 from agent_eval.verifiers import run_checkpoints
 
 
@@ -109,11 +110,7 @@ def run_one(
             traces.append(
                 {
                     "kind": "tool",
-                    "category": (
-                        "retrieval"
-                        if (s.get("action") in ("read_file", "list_dir", "search", "query"))
-                        else "tool"
-                    ),
+                    "category": tool_category(s.get("action")),
                     "ts": s.get("ts", 0.0),
                     "tool": s.get("action"),
                     "args": s.get("args"),
