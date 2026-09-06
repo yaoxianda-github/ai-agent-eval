@@ -9,7 +9,12 @@ from typing import Optional
 
 import typer
 
+from agent_eval.log import setup_logging
+
 app = typer.Typer(help="通用 AI Agent 评测框架")
+
+# CLI 入口统一初始化日志（控制台 + results/logs/ 文件）；幂等，重复调用安全
+setup_logging()
 
 
 @app.command("list-tasks")

@@ -27,12 +27,15 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent_eval.backends import _BACKENDS, list_backends
+from agent_eval.log import get_logger, setup_logging
 from agent_eval.reporter import load_runs, render_html, summarize
 from agent_eval.runner import default_results_dir, run_one
 from agent_eval.spec import find_tasks_dir, load_task_pack
 from agent_eval.traces import tool_category
 from agent_eval.web.store import RunStore
 from agent_eval.web.taskgen import generate_task_pack
+
+logger = get_logger(__name__)
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _READABLE_EXTS = {
@@ -67,11 +70,13 @@ def create_app(
     report_dir: Path | None = None,
     db_path: Path | None = None,
 ) -> FastAPI:
+    setup_logging()
     tasks_dir = Path(tasks_dir) if tasks_dir else find_tasks_dir()
     results_dir = Path(results_dir) if results_dir else default_results_dir()
     report_dir = Path(report_dir) if report_dir else Path("reports")
 
     app = FastAPI(title="AI Agent 评测工作台", version=_app_version())
+    logger.info("工作台启动 | tasks_dir=%s results_dir=%s version=%s", tasks_dir, results_dir, _app_version())
 
     db_path = db_path if db_path is not None else results_dir.parent / "run_history.db"
     store = RunStore(db_path)
@@ -141,11 +146,13 @@ def create_app(
         try:
             task = _task_map()[task_id]
         except KeyError:
+            logger.error("运行失败: 未知任务 %s (run_ids=%s)", task_id, run_ids)
             for rid in run_ids:
                 running[rid] = {"status": "error", "error": f"未知任务: {task_id}"}
             return
         for rid in run_ids:
             running[rid] = {"status": "running", "task_id": task_id, "agent_id": agent_id}
+            logger.info("运行开始 | run_id=%s task=%s agent=%s", rid, task_id, agent_id)
             try:
                 rec = run_one(
                     task,
@@ -155,7 +162,12 @@ def create_app(
                     run_id=rid,
                 )
                 store.insert_run(rec.to_dict())
+                logger.info(
+                    "运行完成 | run_id=%s status=%s score=%.3f duration=%.1fs",
+                    rid, rec.status, rec.metrics.get("score", 0), rec.duration_s,
+                )
             except Exception as e:  # noqa: BLE001 - 单个 run 失败不中断整批
+                logger.error("运行异常 | run_id=%s | %s: %s", rid, type(e).__name__, e, exc_info=True)
                 running[rid] = {
                     "status": "error",
                     "error": f"{type(e).__name__}: {e}",
@@ -357,10 +369,19 @@ def create_app(
 
     # ---------- 静态页 ----------
     @app.middleware("http")
-    async def _no_cache_static(request, call_next):
-        # 本地评测工作台：静态资源不缓存，前端改动即时生效
+    async def _request_logging(request, call_next):
+        import time as _time
+        start = _time.time()
         response = await call_next(request)
-        if request.url.path.startswith("/static/"):
+        duration_ms = int((_time.time() - start) * 1000)
+        path = request.url.path
+        # 静态资源和轮询接口降级为 debug，避免日志刷屏
+        if path.startswith("/static/") or path == "/api/runs" and request.method == "GET":
+            logger.debug("%s %s -> %s (%dms)", request.method, path, response.status_code, duration_ms)
+        else:
+            logger.info("%s %s -> %s (%dms)", request.method, path, response.status_code, duration_ms)
+        # 本地评测工作台：静态资源不缓存，前端改动即时生效
+        if path.startswith("/static/"):
             response.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
         return response
 

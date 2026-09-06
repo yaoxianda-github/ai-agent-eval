@@ -21,7 +21,10 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from agent_eval.log import get_logger
 from agent_eval.spec import TaskSpec, find_tasks_dir, load_task_pack
+
+logger = get_logger(__name__)
 
 DEFAULT_CONFIG = "ci/gate.yaml"
 DEFAULT_JUNIT_XML = "results/junit.xml"
@@ -336,8 +339,14 @@ def run_gate(
     runs = runs_override or g["runs"]
     price = pricing_for()
 
+    logger.info(
+        "CI 门禁开始 | gate=%s agents=%s tasks=%d runs=%d task_pass_ratio=%.2f min_pass_rate=%.2f",
+        gate_name, agents, len(task_ids), runs, g["task_pass_ratio"], g["min_pass_rate"],
+    )
+
     def _run_one_agent(ag: str) -> dict:
         """单个 agent 在 gate 任务集上执行与判定（含余额差分）。"""
+        logger.info("门禁 agent 开始 | agent=%s tasks=%d runs=%d", ag, len(task_ids), runs)
         bal_start = fetch_balance_cny() if track_balance else None
         a_start = time.time()
         a_task_results: list[dict] = []
@@ -357,6 +366,11 @@ def run_gate(
             tr = judge_task(records, g["task_pass_ratio"])
             tr["expected_runs"] = runs
             a_task_results.append(tr)
+            logger.info(
+                "  任务 %s | %s (%d/%d run通过)",
+                tid, "PASS" if tr["task_passed"] else "FAIL",
+                tr.get("passed_runs", 0), runs,
+            )
         a_passed, a_rate = judge_gate(a_task_results, g["min_pass_rate"])
         a_cost = round(
             a_tokens["prompt_tokens"] / 1e6 * price["input_cny_per_m"]
@@ -367,6 +381,12 @@ def run_gate(
         a_bal_cost = None
         if bal_start is not None and bal_end is not None:
             a_bal_cost = max(round(bal_start - bal_end, 4), 0.0)
+        logger.info(
+            "门禁 agent 完成 | agent=%s passed=%s pass_rate=%.3f duration=%.1fs tokens=%d/%d cost=¥%.4f bal=¥%s",
+            ag, a_passed, a_rate, time.time() - a_start,
+            a_tokens["prompt_tokens"], a_tokens["completion_tokens"], a_cost,
+            f"{a_bal_cost:.4f}" if a_bal_cost is not None else "N/A",
+        )
         return {
             "agent": ag,
             "model": model,
@@ -392,6 +412,13 @@ def run_gate(
     all_passed = all(ar["passed"] for ar in agent_results)
     all_rate = round(min(ar["pass_rate"] for ar in agent_results), 3)
     bal_costs = [ar["balance_cost_cny"] for ar in agent_results]
+    total_duration = time.time() - started
+    logger.info(
+        "CI 门禁完成 | gate=%s %s | pass_rate=%.3f (阈值%.2f) | duration=%.1fs | tokens=%d/%d | agents=%d",
+        gate_name, "PASS" if all_passed else "FAIL",
+        all_rate, g["min_pass_rate"], total_duration,
+        total_tokens["prompt_tokens"], total_tokens["completion_tokens"], len(agents),
+    )
     return {
         "gate": gate_name,
         "agent": agents[0] if len(agents) == 1 else "multi-agent",

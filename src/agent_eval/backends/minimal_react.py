@@ -18,9 +18,12 @@ import os
 import time
 
 from agent_eval.backends.base import Backend, BackendResult
+from agent_eval.log import get_logger
 from agent_eval.observability import trace_llm_call
 from agent_eval.tools import run_tool
 from agent_eval.traces import tool_category
+
+logger = get_logger(__name__)
 
 SYSTEM_PROMPT = """你是一个在沙箱工作目录里执行任务的自主 Agent。
 每执行一步，输出且只输出一个 JSON 对象，不要输出任何其他文字：
@@ -193,9 +196,11 @@ class MinimalReactBackend(Backend):
         ]
         steps: list[dict] = []
         start = time.time()
+        logger.debug("minimal-react 执行开始 | model=%s max_steps=%d timeout=%ds", self.model, self.max_steps, self.timeout_s)
 
         for i in range(1, self.max_steps + 1):
             if time.time() - start > self.timeout_s:
+                logger.warning("minimal-react 整体超时 (>%ds)，已执行 %d 步", self.timeout_s, i - 1)
                 return BackendResult(
                     status="timeout",
                     steps=steps,
@@ -206,6 +211,7 @@ class MinimalReactBackend(Backend):
         )
             action, raw = self._ask(messages)
             if action is None:
+                logger.error("minimal-react step %d LLM 调用失败: %s", i, raw[:200])
                 steps.append(
                     {"step": i, "action": "llm_error", "args": {}, "observation": raw}
                 )
@@ -220,6 +226,7 @@ class MinimalReactBackend(Backend):
             tool = action.get("tool")
             args = action.get("args") or {}
             ts = round(time.time(), 3)
+            logger.debug("minimal-react step %d | tool=%s args=%s", i, tool, str(args)[:120])
             ok, observation = run_tool(tool, args, workspace)
             steps.append(
                 {"step": i, "action": tool, "args": args, "observation": observation, "ts": ts}
@@ -237,6 +244,7 @@ class MinimalReactBackend(Backend):
             )
 
             if tool == "finish":
+                logger.info("minimal-react 完成 | steps=%d duration=%.1fs tokens=%d/%d", i, time.time() - start, self._usage.get("prompt_tokens", 0), self._usage.get("completion_tokens", 0))
                 return BackendResult(
                     status="completed",
                     steps=steps,
@@ -247,6 +255,7 @@ class MinimalReactBackend(Backend):
             messages.append({"role": "assistant", "content": raw})
             messages.append({"role": "user", "content": f"观察：{observation}"})
 
+        logger.warning("minimal-react 达到最大步数 %d（未 finish）", self.max_steps)
         return BackendResult(
             status="max_steps",
             steps=steps,

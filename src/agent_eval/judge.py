@@ -17,7 +17,10 @@ import os
 import time
 from pathlib import Path
 
+from agent_eval.log import get_logger
 from agent_eval.observability import trace_llm_call
+
+logger = get_logger(__name__)
 
 # 默认评分标准；任务作者可在 spec.yaml 的 rubric 字段自定义
 DEFAULT_RUBRIC = """请从以下四个方面判分（每项 0-25 分，共 100 分）：
@@ -104,6 +107,7 @@ class LLMJudge:
     def judge(self, task, workspace: Path) -> dict:
         """对任务产物执行语义判分，返回 verdict（与确定性校验点同构）。"""
         if self.client is None:
+            logger.warning("llm_judge 跳过: 缺少 LLM API Key (task=%s)", task.id)
             return {
                 "id": "judge",
                 "type": "llm_judge",
@@ -166,6 +170,10 @@ class LLMJudge:
             score = max(0.0, min(1.0, float(data.get("score", 0)) / 100.0))
             passed = bool(data.get("passed", score >= 0.6))
             reasoning = str(data.get("reasoning", ""))[:300]
+            logger.info(
+                "llm_judge 完成 | task=%s score=%.3f passed=%s duration=%dms",
+                task.id, score, passed, duration_ms,
+            )
             return {
                 "id": "judge",
                 "type": "llm_judge",
@@ -176,6 +184,7 @@ class LLMJudge:
                 "usage": dict(self._usage) or None,
             }
         except Exception as e:  # noqa: BLE001 - 判分失败不应中断评测
+            logger.error("llm_judge 调用失败 | task=%s | %s: %s", task.id, type(e).__name__, e)
             return {
                 "id": "judge",
                 "type": "llm_judge",

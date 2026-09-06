@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agent_eval.log import get_logger
 from agent_eval.sandbox import run_command_sandboxed
+
+logger = get_logger(__name__)
 
 
 def run_tool(tool: str, args: dict, workspace: Path) -> tuple[bool, str]:
@@ -23,10 +26,15 @@ def run_tool(tool: str, args: dict, workspace: Path) -> tuple[bool, str]:
     }
     fn = handlers.get(tool)
     if fn is None:
+        logger.warning("未知工具调用: %s", tool)
         return False, f"未知工具: {tool}（可用: {', '.join(handlers)}）"
     try:
-        return fn(workspace, args)
+        ok, obs = fn(workspace, args)
+        if not ok:
+            logger.debug("工具 %s 执行失败: %s", tool, obs[:150])
+        return ok, obs
     except Exception as e:  # noqa: BLE001 - 观察信息要带回给 LLM
+        logger.warning("工具 %s 执行异常: %s: %s", tool, type(e).__name__, e)
         return False, f"工具执行异常: {type(e).__name__}: {e}"
 
 
@@ -186,10 +194,15 @@ def _search_kb(ws: Path, args: dict) -> tuple[bool, str]:
 
     scored = _bm25_scores(q_tokens, chunks)
     if not scored:
+        logger.debug("search_kb 无命中 | query=%r docs=%d chunks=%d", query, len(files), len(chunks))
         return False, f"知识库中未检索到与「{query}」相关的内容"
 
     out = []
     for score, c in scored[:top_k]:
         head = f"[{c['rel']}:{c['start']}-{c['end']}] (得分 {score:.2f})"
         out.append(f"{head}\n{c['text'][:600]}")
+    logger.info(
+        "search_kb 命中 | query=%r top%d best=%.2f docs=%d chunks=%d",
+        query, top_k, scored[0][0], len(files), len(chunks),
+    )
     return True, "\n\n".join(out)

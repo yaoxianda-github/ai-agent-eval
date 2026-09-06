@@ -16,6 +16,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from agent_eval.log import get_logger
+
+logger = get_logger(__name__)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -54,7 +58,9 @@ def _run_checkpoint(cp, workspace: Path) -> dict:
         passed, detail = _check_cmd(cp, workspace)
         detail = f"{cp.desc}：{detail}" if cp.desc else detail
     else:
+        logger.warning("未知校验点类型: %s (id=%s)", name, cp.id)
         return {"id": cp.id, "type": name, "passed": False, "detail": f"未知校验点类型: {name}"}
+    logger.debug("校验点 %s (%s): %s", cp.id, name, "PASS" if passed else "FAIL")
     return {"id": cp.id, "type": name, "passed": passed, "detail": detail}
 
 

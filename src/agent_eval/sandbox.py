@@ -16,6 +16,10 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent_eval.log import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class CommandResult:
@@ -61,6 +65,7 @@ def run_command_sandboxed(
                     proc.communicate(timeout=timeout_s)
                 except subprocess.TimeoutExpired:
                     _terminate(proc)
+                    logger.warning("命令沙箱超时 (>%ss): %s", timeout_s, cmd[:120])
                     return CommandResult(
                         ok=False,
                         exit_code=-1,
@@ -76,6 +81,7 @@ def run_command_sandboxed(
                 stderr=_read_truncated(err_path, max_output_chars),
             )
         except Exception as e:  # noqa: BLE001 - 需要把异常带回调用方
+            logger.error("命令沙箱执行异常: %s: %s | cmd=%s", type(e).__name__, e, cmd[:120])
             return CommandResult(
                 ok=False, exit_code=-1, error=f"命令执行异常: {type(e).__name__}: {e}"
             )

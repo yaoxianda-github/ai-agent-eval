@@ -27,7 +27,10 @@ import time
 from pathlib import Path
 
 from agent_eval.backends.base import Backend, BackendResult
+from agent_eval.log import get_logger
 from agent_eval.traces import tool_category
+
+logger = get_logger(__name__)
 
 _DEFAULT_DSH_CANDIDATES = (
     "/usr/local/bin/dsh",
@@ -262,6 +265,8 @@ class DeepseekHarnessBackend(Backend):
         env.setdefault("DEEPSEEK_API_KEY", self.api_key)
         env["DSH_HOME"] = str(self.dsh_home)
 
+        logger.info("dsh 执行开始 | model=%s timeout=%ds dsh_home=%s", self.model, self.timeout_s, self.dsh_home)
+        logger.debug("dsh 命令: %s", " ".join(cmd[:3]) + " ...")
         start = time.time()
         proc = subprocess.Popen(
             cmd,
@@ -279,6 +284,7 @@ class DeepseekHarnessBackend(Backend):
             rc = proc.returncode
         except subprocess.TimeoutExpired:
             proc.kill()
+            logger.warning("dsh 超时 (>%ds)，已 kill 进程", self.timeout_s)
             try:
                 out, err = proc.communicate(timeout=10)
             except Exception:  # noqa: BLE001
@@ -313,10 +319,17 @@ class DeepseekHarnessBackend(Backend):
         ]
         # 退出码 0 且 stdout 有最终答案 → completed；其余按 error 记录（含 dsh 错误码）
         ok = rc == 0 and (out or "").strip() != ""
+        traces = self._traces_from_session(workspace)
+        logger.info(
+            "dsh 执行完成 | status=%s rc=%d duration=%.1fs traces=%d stdout=%d chars",
+            "completed" if ok else "error", rc, time.time() - start, len(traces), len(out or ""),
+        )
+        if not ok:
+            logger.warning("dsh 未正常完成: 退出码 %d，stderr 尾部: %s", rc, (err or "")[-200:])
         return BackendResult(
             status="completed" if ok else "error",
             steps=steps,
-            traces=self._traces_from_session(workspace),
+            traces=traces,
             duration_s=round(time.time() - start, 3),
             stdout=(out or "").strip(),
             error="" if ok else f"dsh 退出码 {rc}：{(err or out or '')[-300:]}",
