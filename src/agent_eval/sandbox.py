@@ -46,9 +46,9 @@ def run_command_sandboxed(
         out_path = tmp / "stdout.log"
         err_path = tmp / "stderr.log"
         try:
-            with out_path.open("w", encoding="utf-8", errors="replace") as fo, err_path.open(
-                "w", encoding="utf-8", errors="replace"
-            ) as fe:
+            # 二进制写入：保留子进程原始字节，解码延后（避免 GBK 等编码被
+            # 按 UTF-8 硬解成 U+FFFD �，导致轨迹乱码且不可逆）
+            with out_path.open("wb") as fo, err_path.open("wb") as fe:
                 proc = subprocess.Popen(
                     cmd,
                     shell=True,
@@ -123,11 +123,27 @@ def _terminate(proc: subprocess.Popen) -> None:
         pass
 
 
+def _decode_bytes(data: bytes) -> str:
+    """按编码探测回退解码子进程输出：UTF-8 → GBK → Latin-1。
+
+    子进程输出编码不确定（Windows cmd 常为 GBK），直接按 UTF-8 硬解会把
+    中文变成 U+FFFD � 且不可逆。回退顺序保证中文可读、保底不抛异常。
+    """
+    if not data:
+        return ""
+    for enc in ("utf-8", "gbk", "big5", "latin-1"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
 def _read_truncated(path: Path, max_chars: int) -> str:
     if not path.exists():
         return ""
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = _decode_bytes(path.read_bytes())
     except Exception:  # noqa: BLE001
         return ""
     if len(text) > max_chars:

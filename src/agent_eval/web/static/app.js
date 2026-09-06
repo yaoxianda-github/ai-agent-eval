@@ -473,9 +473,17 @@
           " · " + esc(v.detail) + "</div>";
       }).join("");
       var steps = (r.steps || []).map(function (s, i) {
+        var obsTxt = strOf(s.observation);
+        var obsHtml = "";
+        if (obsTxt) {
+          obsHtml = '<div class="muted">→ ' + esc(clip(obsTxt, 160)) + "</div>";
+          if (obsTxt.indexOf("\uFFFD") >= 0) {
+            obsHtml = '<span class="enc-bad" title="该步骤输出含编码损坏字符（历史数据：旧版本按 UTF-8 硬解 GBK 输出所致）；已修复，重新运行任务即可正常显示">编码损坏 ⚠</span> ' + obsHtml;
+          }
+        }
         return '<div class="step-item"><b>#' + (i + 1) + "</b> " + esc(s.action || s.step || "") +
           (s.args ? " <code>" + esc(clip(strOf(s.args), 120)) + "</code>" : "") +
-          (s.observation ? '<div class="muted">→ ' + esc(clip(strOf(s.observation), 160)) + "</div>" : "") +
+          obsHtml +
           "</div>";
       }).join("") || '<div class="muted">（黑盒后端无可视化轨迹）</div>';
       var sc = (r.metrics && r.metrics.score) || 0;

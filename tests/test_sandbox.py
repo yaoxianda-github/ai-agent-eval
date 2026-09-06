@@ -50,3 +50,32 @@ def test_bad_command_reports_error(tmp_path):
     assert r.ok is False
     assert r.exit_code != 0
     assert "boom" in r.stderr
+
+
+def test_gbk_output_decoded_not_mojibake(tmp_path):
+    """GBK 编码的子进程输出应被正确解码，而不是变成 U+FFFD �（历史乱码根因）。"""
+    from agent_eval.sandbox import _decode_bytes
+
+    gbk = "'ls' 不是内部或外部命令，也不是可运行的程序".encode("gbk")
+    assert _decode_bytes(gbk) == "'ls' 不是内部或外部命令，也不是可运行的程序"
+
+    utf8 = "正常中文输出 ✅".encode("utf-8")
+    assert _decode_bytes(utf8) == "正常中文输出 ✅"
+
+    # 未知字节兜底不抛异常且不含孤立代理
+    out = _decode_bytes(b"\xff\xfe\x01\x02")
+    assert isinstance(out, str)
+    assert not any(0xD800 <= ord(c) <= 0xDFFF for c in out)
+
+    # 空输出
+    assert _decode_bytes(b"") == ""
+
+
+def test_command_gbk_stdout_roundtrip(tmp_path):
+    """真实命令路径：stdout 经二进制文件回读，中文不损坏。"""
+    from agent_eval.sandbox import run_command_sandboxed
+
+    r = run_command_sandboxed("echo '你好 hello'", tmp_path)
+    assert r.exit_code == 0
+    assert "你好" in r.stdout
+    assert "\ufffd" not in r.stdout

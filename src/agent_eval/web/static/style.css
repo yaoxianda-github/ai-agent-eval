@@ -55,6 +55,10 @@ tr.clickable:hover { background: rgba(31,58,95,0.04); }
 .verdict-item { padding: 8px 0; border-bottom: 1px dashed #E4E3DD; font-size: 13px; }
 .step-item { padding: 8px 0; border-bottom: 1px dashed #E4E3DD; font-size: 12.5px; }
 .step-item code { background: rgba(0,0,0,0.05); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+.enc-bad {
+  display: inline-block; background: #FDEBEC; color: #C0392B;
+  border-radius: 4px; padding: 1px 6px; font-size: 11px; cursor: help;
+}
 pre.code {
   background: #1F2937; color: #E5E7EB; padding: 14px; border-radius: 10px;
   font-size: 12px; overflow: auto; max-height: 420px; line-height: 1.5;
