@@ -192,7 +192,7 @@ def render_html(summary: dict, generated_at: str) -> str:
 <title>AI Agent 评测报告</title>
 <style>
   body {{ margin:0; font-family:'Segoe UI','PingFang SC',Arial,sans-serif; background:#F4F3EE; color:#1A1B1C; }}
-  .wrap {{ max-width:860px; margin:0 auto; padding:28px 20px 48px; }}
+  .wrap {{ width:100%; box-sizing:border-box; padding:28px 28px 48px; }}
   .hero {{ background:linear-gradient(135deg,#1F3A5F,#2E7D7A); color:#fff; border-radius:16px; padding:22px 24px; }}
   .hero h1 {{ margin:0 0 6px; font-size:22px; }}
   .hero p {{ margin:2px 0; font-size:12.5px; color:rgba(255,255,255,0.82); }}
