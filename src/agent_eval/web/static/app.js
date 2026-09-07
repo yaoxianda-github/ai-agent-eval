@@ -151,7 +151,7 @@
             '<div class="field"><label>Agent 后端</label><select id="f-agent">' + backendOpts + "</select></div>" +
           "</div>" +
           '<div class="form-row">' +
-            '<div class="field"><label>模型（如 deepseek-chat）</label><input id="f-model" value="deepseek-chat"></div>' +
+            '<div class="field"><label>模型（按后端自动填充）</label><input id="f-model" value=""></div>' +
             '<div class="field"><label>超时（秒，留空用任务默认）</label><input id="f-timeout" type="number" placeholder="300"></div>' +
             '<div class="field"><label>采样次数 --runs</label><input id="f-runs" type="number" value="1" min="1" max="20"></div>' +
           "</div>" +
@@ -161,11 +161,17 @@
         '<div id="run-result"></div>'
       );
       el("f-task").onchange = updateCost;
-      el("f-agent").onchange = updateCost;
+      el("f-agent").onchange = onAgentChange;
       el("f-runs").oninput = updateCost;
-      updateCost();
+      onAgentChange();  // 初始化模型默认值
       el("btn-run").onclick = startRun;
     }).catch(function (e) { renderErr(e.message); });
+  }
+
+  function onAgentChange() {
+    var b = backendsCache.find(function (x) { return x.id === el("f-agent").value; });
+    if (b && b.default_model) el("f-model").value = b.default_model;
+    updateCost();
   }
 
   function startRun() {

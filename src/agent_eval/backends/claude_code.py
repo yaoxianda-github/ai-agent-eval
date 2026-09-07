@@ -179,6 +179,7 @@ def _parse_messages(data: dict) -> tuple[list[dict], list[dict]]:
 class ClaudeCodeBackend(Backend):
     name = "claude-code"
     version = "0.1.0"
+    default_model = "claude-opus-4-8"
 
     def __init__(
         self,
@@ -189,7 +190,7 @@ class ClaudeCodeBackend(Backend):
         allowed_tools: str | None = None,
         max_budget_usd: float = _DEFAULT_MAX_BUDGET_USD,
     ) -> None:
-        # 模型选择优先级：显式传入的 claude 模型 > AGENT_EVAL_CLAUDE_MODEL > 默认 claude-sonnet-4-5
+        # 模型选择优先级：显式传入的 claude 模型 > AGENT_EVAL_CLAUDE_MODEL > 后端 default_model
         # runner 可能传入全局默认 deepseek-chat（对 claude-code 无效），需自动回退
         env_model = os.environ.get("AGENT_EVAL_CLAUDE_MODEL")
         if model and model.startswith("claude"):
@@ -197,7 +198,7 @@ class ClaudeCodeBackend(Backend):
         elif env_model:
             self.model = env_model
         else:
-            self.model = "claude-sonnet-4-5"
+            self.model = self.default_model
         if model and not model.startswith("claude"):
             logger.info("claude-code 忽略非 claude 模型 '%s'，使用 %s", model, self.model)
         # --bare 模式严格只认 ANTHROPIC_API_KEY；兼容 ANTHROPIC_AUTH_TOKEN 兜底

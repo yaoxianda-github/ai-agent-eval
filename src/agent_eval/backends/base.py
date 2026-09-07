@@ -32,6 +32,8 @@ class BackendResult:
 class Backend(ABC):
     name: str = "base"
     version: str = "dev"
+    # 该后端的推荐默认模型（工作台选后端时自动填入，runner 未指定 model 时生效）
+    default_model: str = "deepseek-chat"
 
     @abstractmethod
     def run(self, task, workspace: Path) -> BackendResult:

@@ -425,7 +425,8 @@ def create_app(
     def api_backends() -> dict:
         return {
             "backends": [
-                {"id": n, "version": getattr(cls, "version", "dev")}
+                {"id": n, "version": getattr(cls, "version", "dev"),
+                 "default_model": getattr(cls, "default_model", "deepseek-chat")}
                 for n, cls in sorted(_BACKENDS.items())
             ]
         }

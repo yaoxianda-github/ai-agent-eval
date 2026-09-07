@@ -36,6 +36,11 @@ DEFAULT_PRICING = {
         "input_cny_per_m": 108.0,
         "output_cny_per_m": 540.0,
     },
+    "claude-opus-4-8": {
+        # 暂按 Opus 4.5 同价（$15/$75 per M × 汇率7.2），官方定价待校准
+        "input_cny_per_m": 108.0,
+        "output_cny_per_m": 540.0,
+    },
 }
 
 # 无实测数据时的分级估算（prompt, completion），基于 minimal-react 全量实测归纳
