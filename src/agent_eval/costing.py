@@ -22,11 +22,20 @@ DEFAULT_RESULTS_DIR = Path("results") / "runs"
 BENCHMARK_PATH = Path("results") / "cost_benchmark.json"
 
 # 默认定价（每百万 token，人民币；官方 api-docs.deepseek.com deepseek-chat 口径）
+# Anthropic 模型按官方美元定价 × 汇率 7.2 换算（Sonnet 4.5 $3/$15，Opus 4.5 $15/$75 per M）
 DEFAULT_PRICING = {
     "deepseek-chat": {
         "input_cny_per_m": 2.0,
         "output_cny_per_m": 3.0,
-    }
+    },
+    "claude-sonnet-4-5": {
+        "input_cny_per_m": 21.6,
+        "output_cny_per_m": 108.0,
+    },
+    "claude-opus-4-5": {
+        "input_cny_per_m": 108.0,
+        "output_cny_per_m": 540.0,
+    },
 }
 
 # 无实测数据时的分级估算（prompt, completion），基于 minimal-react 全量实测归纳
