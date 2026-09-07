@@ -28,6 +28,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -181,14 +182,24 @@ class ClaudeCodeBackend(Backend):
 
     def __init__(
         self,
-        model: str = "claude-sonnet-4-5",
+        model: str | None = None,
         api_key: str | None = None,
         timeout_s: int = 300,
         cmd: str | None = None,
         allowed_tools: str | None = None,
         max_budget_usd: float = _DEFAULT_MAX_BUDGET_USD,
     ) -> None:
-        self.model = model
+        # 模型选择优先级：显式传入的 claude 模型 > AGENT_EVAL_CLAUDE_MODEL > 默认 claude-sonnet-4-5
+        # runner 可能传入全局默认 deepseek-chat（对 claude-code 无效），需自动回退
+        env_model = os.environ.get("AGENT_EVAL_CLAUDE_MODEL")
+        if model and model.startswith("claude"):
+            self.model = model
+        elif env_model:
+            self.model = env_model
+        else:
+            self.model = "claude-sonnet-4-5"
+        if model and not model.startswith("claude"):
+            logger.info("claude-code 忽略非 claude 模型 '%s'，使用 %s", model, self.model)
         # --bare 模式严格只认 ANTHROPIC_API_KEY；兼容 ANTHROPIC_AUTH_TOKEN 兜底
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get(
             "ANTHROPIC_AUTH_TOKEN"
@@ -225,88 +236,104 @@ class ClaudeCodeBackend(Backend):
         env = os.environ.copy()
         env["ANTHROPIC_API_KEY"] = self.api_key
         env.setdefault("CLAUDE_CODE_TELEMETRY_DISABLED", "1")
-        # 隔离配置目录，避免污染用户 ~/.claude（历史/skills/配置）
-        claude_home = Path(
-            os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
-        ) / "agent-eval" / "claude-home"
-        claude_home.mkdir(parents=True, exist_ok=True)
-        env["CLAUDE_CONFIG_DIR"] = str(claude_home)
+        # 认证隔离：实测 claude 即使 --bare 也依赖 ~/.claude 里的状态，
+        # 空/新配置目录（无论 CLAUDE_CONFIG_DIR 还是 HOME）都会返回 403。
+        # 方案：复制用户 ~/.claude 的配置文件到临时 HOME，跳过 sessions/projects/backups
+        # 等历史大目录，既保留认证状态又隔离写入，不污染用户真实配置。
+        tmp_home = Path(tempfile.mkdtemp(prefix="agent-eval-claude-home-"))
+        src = Path.home() / ".claude"
+        if src.is_dir():
+            dst = tmp_home / ".claude"
+            dst.mkdir(parents=True, exist_ok=True)
+            for item in src.iterdir():
+                if item.name in ("sessions", "projects", "backups"):
+                    continue
+                if item.is_dir():
+                    shutil.copytree(item, dst / item.name, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(item, dst / item.name)
+        env["HOME"] = str(tmp_home)
+        env.pop("CLAUDE_CONFIG_DIR", None)  # 绝不能设，否则 403
 
         logger.info(
             "claude-code 执行开始 | model=%s timeout=%ds budget=$%s",
             self.model, self.timeout_s, self.max_budget_usd,
         )
         start = time.time()
-        proc = subprocess.Popen(
-            cmd,
-            cwd=workspace,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            stdin=subprocess.DEVNULL,
-        )
         try:
-            out, err = proc.communicate(timeout=self.timeout_s)
-            rc = proc.returncode
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            logger.warning("claude-code 超时 (>%ds)，已 kill", self.timeout_s)
-            try:
-                out, err = proc.communicate(timeout=10)
-            except Exception:  # noqa: BLE001
-                out, err = "", ""
-            partial = ((out or "") + (("\n" + err) if err else ""))[-2000:]
-            return BackendResult(
-                status="timeout",
-                steps=[
-                    {"step": 1, "action": "claude", "args": {"model": self.model},
-                     "observation": partial, "ts": round(time.time(), 3)}
-                ],
-                duration_s=round(time.time() - start, 3),
-                error=f"claude 超时（>{self.timeout_s}s）。输出尾部：{partial[:400]}",
+            proc = subprocess.Popen(
+                cmd,
+                cwd=workspace,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                stdin=subprocess.DEVNULL,
             )
+            try:
+                out, err = proc.communicate(timeout=self.timeout_s)
+                rc = proc.returncode
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                logger.warning("claude-code 超时 (>%ds)，已 kill", self.timeout_s)
+                try:
+                    out, err = proc.communicate(timeout=10)
+                except Exception:  # noqa: BLE001
+                    out, err = "", ""
+                partial = ((out or "") + (("\n" + err) if err else ""))[-2000:]
+                return BackendResult(
+                    status="timeout",
+                    steps=[
+                        {"step": 1, "action": "claude", "args": {"model": self.model},
+                         "observation": partial, "ts": round(time.time(), 3)}
+                    ],
+                    duration_s=round(time.time() - start, 3),
+                    error=f"claude 超时（>{self.timeout_s}s）。输出尾部：{partial[:400]}",
+                )
 
-        full = (out or "") + (("\n" + err) if err else "")
-        data = _extract_json(out or "")
-        steps, traces = _parse_messages(data)
-        usage = _parse_usage(data)
-        final = (
-            data.get("message")
-            or data.get("text")
-            or data.get("final_text")
-            or (isinstance(data.get("result"), dict) and data["result"].get("message"))
-            or ""
-        )
-        if not steps:
-            # JSON 无完整对话时降级为单步黑盒（同 aider 口径）
-            steps = [
-                {"step": 1, "action": "claude", "args": {"model": self.model},
-                 "observation": full[-3000:], "ts": round(time.time(), 3)}
-            ]
-        if not traces and final:
-            traces = [
-                {"kind": "llm", "ts": 0, "model": self.model, "input": task.description[:300],
-                 "output": str(final)[:2000], "phase": "final"}
-            ]
+            full = (out or "") + (("\n" + err) if err else "")
+            data = _extract_json(out or "")
+            steps, traces = _parse_messages(data)
+            usage = _parse_usage(data)
+            final = (
+                data.get("message")
+                or data.get("text")
+                or data.get("final_text")
+                or (data.get("result") if isinstance(data.get("result"), str) else "")
+                or (isinstance(data.get("result"), dict) and data["result"].get("message"))
+                or ""
+            )
+            if not steps:
+                # JSON 无完整对话时降级为单步黑盒（同 aider 口径）
+                steps = [
+                    {"step": 1, "action": "claude", "args": {"model": self.model},
+                     "observation": full[-3000:], "ts": round(time.time(), 3)}
+                ]
+            if not traces and final:
+                traces = [
+                    {"kind": "llm", "ts": 0, "model": self.model, "input": task.description[:300],
+                     "output": str(final)[:2000], "phase": "final"}
+                ]
 
-        ok = rc == 0 and bool(data or (out or "").strip())
-        cost_usd = data.get("cost")
-        logger.info(
-            "claude-code 完成 | status=%s rc=%d dur=%.1fs steps=%d traces=%d usage=%s cost=$%s",
-            "completed" if ok else "error", rc, time.time() - start,
-            len(steps), len(traces), usage, cost_usd,
-        )
-        if not ok:
-            logger.warning("claude-code 未正常完成: 退出码 %d，stderr 尾部: %s", rc, (err or "")[-300:])
-        return BackendResult(
-            status="completed" if ok else "error",
-            steps=steps,
-            traces=traces,
-            usage=usage,
-            duration_s=round(time.time() - start, 3),
-            stdout=str(final) if final else (out or "")[-1000:],
-            error="" if ok else f"claude 退出码 {rc}：{(err or out or '')[-400:]}",
-        )
+            ok = rc == 0 and bool(data or (out or "").strip())
+            cost_usd = data.get("total_cost_usd") or data.get("cost")
+            logger.info(
+                "claude-code 完成 | status=%s rc=%d dur=%.1fs steps=%d traces=%d usage=%s cost=$%s",
+                "completed" if ok else "error", rc, time.time() - start,
+                len(steps), len(traces), usage, cost_usd,
+            )
+            if not ok:
+                logger.warning("claude-code 未正常完成: 退出码 %d，stderr 尾部: %s", rc, (err or "")[-300:])
+            return BackendResult(
+                status="completed" if ok else "error",
+                steps=steps,
+                traces=traces,
+                usage=usage,
+                duration_s=round(time.time() - start, 3),
+                stdout=str(final) if final else (out or "")[-1000:],
+                error="" if ok else f"claude 退出码 {rc}：{(err or out or '')[-400:]}",
+            )
+        finally:
+            shutil.rmtree(tmp_home, ignore_errors=True)
