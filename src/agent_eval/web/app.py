@@ -86,6 +86,22 @@ def create_app(
     store = RunStore(db_path)
     store.rebuild(results_dir)
 
+    # 启动时清理僵尸 batch：状态为 running 但创建超过 1 小时（服务中断导致未正常收尾）
+    try:
+        stale = store._conn.execute(
+            "SELECT batch_id, label FROM batches WHERE status='running' "
+            "AND created_at < datetime('now', 'localtime', '-1 hour')"
+        ).fetchall()
+        for bid, label in stale:
+            store._conn.execute(
+                "UPDATE batches SET status='done', finished_at=datetime('now','localtime') "
+                "WHERE batch_id=?", (bid,)
+            )
+            logger.warning("清理僵尸批次 | batch=%s label=%s（运行中断，已标记为 done）", bid, label)
+        store._conn.commit()
+    except Exception as e:  # noqa: BLE001 - 清理失败不影响启动
+        logger.warning("僵尸批次清理跳过: %s", e)
+
     # 运行中 run 的内存态：run_id -> {status, task_id, agent_id, error?}
     running: dict[str, dict] = {}
 
