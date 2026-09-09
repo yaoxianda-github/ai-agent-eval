@@ -264,12 +264,11 @@ class MinimalReactBackend(Backend):
             )
 
             if tool == "finish":
-                # finish 前检查必需输出文件（从 checkpoints 的 file_exists 提取）
+                # finish 前检查必需输出文件（从 task.checkpoints 的 file_exists 提取）
                 required_files = []
-                gt = getattr(task, "ground_truth", None) or {}
-                for cp in gt.get("checkpoints", []):
-                    if cp.get("type") == "file_exists" and cp.get("path"):
-                        required_files.append(cp["path"])
+                for cp in getattr(task, "checkpoints", []):
+                    if getattr(cp, "type", "") == "file_exists" and getattr(cp, "path", ""):
+                        required_files.append(cp.path)
                 missing = [f for f in required_files if not (workspace / f).exists()]
                 if missing and i < self.max_steps:
                     # 不允许 finish，提示 agent 继续生成缺失文件
