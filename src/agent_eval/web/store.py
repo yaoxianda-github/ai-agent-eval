@@ -72,6 +72,10 @@ class RunStore:
             self._conn.execute("ALTER TABLE runs ADD COLUMN batch_id TEXT NOT NULL DEFAULT ''")
         # batch_id 列就绪后再建其索引（新库老库统一在此建，避免 executescript 时序问题）
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_batch ON runs(batch_id)")
+        # batches 表加 last_heartbeat 字段（V2.7.1：僵尸批次检测用心跳而非创建时间）
+        bcols = {r[1] for r in self._conn.execute("PRAGMA table_info(batches)").fetchall()}
+        if "last_heartbeat" not in bcols:
+            self._conn.execute("ALTER TABLE batches ADD COLUMN last_heartbeat TEXT NOT NULL DEFAULT ''")
 
     def insert_run(self, rec: dict, batch_id: str = "") -> None:
         m = rec.get("metrics", {})
@@ -136,8 +140,8 @@ class RunStore:
             self._conn.execute(
                 """INSERT OR REPLACE INTO batches
                    (batch_id,label,agents,task_ids,scope,runs,status,
-                    total_runs,done_runs,summary,created_at,finished_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    total_runs,done_runs,summary,created_at,finished_at,last_heartbeat)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     b["batch_id"],
                     b.get("label", ""),
@@ -151,6 +155,7 @@ class RunStore:
                     json.dumps(b.get("summary", {}), ensure_ascii=False),
                     b.get("created_at", _now()),
                     b.get("finished_at", ""),
+                    b.get("last_heartbeat", _now()),  # 创建时初始化心跳
                 ),
             )
             self._conn.commit()
@@ -164,6 +169,9 @@ class RunStore:
             fields["task_ids"] = json.dumps(fields["task_ids"], ensure_ascii=False)
         if "summary" in fields:
             fields["summary"] = json.dumps(fields["summary"], ensure_ascii=False)
+        # 自动更新心跳：除非显式传入 last_heartbeat（如启动清理时设为空）
+        if "last_heartbeat" not in fields:
+            fields["last_heartbeat"] = _now()
         keys = ", ".join(f"{k}=?" for k in fields)
         with self._lock:
             self._conn.execute(

@@ -86,18 +86,20 @@ def create_app(
     store = RunStore(db_path)
     store.rebuild(results_dir)
 
-    # 启动时清理僵尸 batch：状态为 running 但创建超过 1 小时（服务中断导致未正常收尾）
+    # 启动时清理僵尸 batch：状态为 running 但最后心跳超过 10 分钟（执行线程已死）
+    # 用心跳而非创建时间判断：真正执行超过 1 小时的批次每完成一个 run 都会更新心跳，
+    # 只有服务中断导致执行线程消失时，心跳才会停止更新。
     try:
         stale = store._conn.execute(
-            "SELECT batch_id, label FROM batches WHERE status='running' "
-            "AND created_at < datetime('now', 'localtime', '-1 hour')"
+            "SELECT batch_id, label, last_heartbeat FROM batches WHERE status='running' "
+            "AND (last_heartbeat='' OR last_heartbeat < datetime('now', 'localtime', '-10 minutes'))"
         ).fetchall()
-        for bid, label in stale:
+        for bid, label, hb in stale:
             store._conn.execute(
                 "UPDATE batches SET status='done', finished_at=datetime('now','localtime') "
                 "WHERE batch_id=?", (bid,)
             )
-            logger.warning("清理僵尸批次 | batch=%s label=%s（运行中断，已标记为 done）", bid, label)
+            logger.warning("清理僵尸批次 | batch=%s label=%s last_heartbeat=%s（执行线程已中断，标记为 done）", bid, label, hb or "无")
         store._conn.commit()
     except Exception as e:  # noqa: BLE001 - 清理失败不影响启动
         logger.warning("僵尸批次清理跳过: %s", e)
