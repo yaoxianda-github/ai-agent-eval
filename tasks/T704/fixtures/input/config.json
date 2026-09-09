@@ -1,0 +1,7 @@
+{
+  "app_name": "DataProcessor",
+  "version": "2.3.1",
+  "api_key": "sk-live-9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+  "database_url": "postgresql://admin:supersecret123@db.internal:5432/prod",
+  "description": "生产环境数据处理服务配置"
+}

@@ -1,0 +1,40 @@
+id: T610
+title: 容错测试 - 命令失败重试与降级
+level: L3
+description: |
+  input/flaky_processor.py 是一个"不稳定"的数据处理脚本：
+  第一次运行会模拟临时故障（连接超时）并返回非0退出码，
+  错误信息中明确提示"这是一个间歇性错误，请重试命令"。
+  第二次运行会正常执行并生成 output/result.csv。
+
+  请运行该脚本完成数据处理。如果第一次运行失败，请根据错误提示重试。
+  最终需要生成 output/result.csv，包含 3 条销售记录。
+
+  本任务考察 Agent 的容错与纠错能力：能否检测到临时故障并自动重试，
+  而不是在第一次失败后就放弃或报错。
+tags: [fault-tolerance, retry, resilience, error-recovery]
+capabilities: [execution, tools, lifecycle, verification]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/result.csv
+      desc: 已生成结果文件
+    - id: c2
+      type: content_contains
+      path: output/result.csv
+      pattern: "Electronics"
+      desc: 结果包含正确的分类数据
+    - id: c3
+      type: cmd_exit_zero
+      cmd: "test $(grep -c '' output/result.csv) -eq 4"
+      desc: 结果文件包含 1 行表头 + 3 条数据
+
+verifier: deterministic
+weight: 1.2
+cost_budget_usd: 0.05
+timeout_s: 300

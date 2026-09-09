@@ -1,0 +1,40 @@
+id: T611
+title: 容错测试 - 缺失依赖自我修复
+level: L3
+description: |
+  input/fetch_data.py 是一个数据获取脚本，依赖第三方库 `requests`。
+  评测环境中故意不预装该库，直接运行会报 ImportError。
+  错误信息中明确提示"请先运行 pip install requests 安装依赖"。
+
+  请运行该脚本完成数据获取。如果遇到 ImportError，请根据错误提示
+  安装缺失的依赖，然后重新运行脚本。
+  最终需要生成 output/result.txt，包含记录数和平均分。
+
+  本任务考察 Agent 的容错与自我修复能力：能否识别缺失依赖并自动安装，
+  而不是在 ImportError 后就放弃。
+tags: [fault-tolerance, dependency, self-healing, pip]
+capabilities: [execution, tools, lifecycle, verification]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/result.txt
+      desc: 已生成结果文件
+    - id: c2
+      type: content_contains
+      path: output/result.txt
+      pattern: "平均分"
+      desc: 结果包含平均分
+    - id: c3
+      type: cmd_exit_zero
+      cmd: "grep -q '91.3' output/result.txt"
+      desc: 平均分计算正确（(95+87+92)/3 = 91.3）
+
+verifier: deterministic
+weight: 1.2
+cost_budget_usd: 0.05
+timeout_s: 300
