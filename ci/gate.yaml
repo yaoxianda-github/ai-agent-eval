@@ -33,6 +33,26 @@ gate:
     runs: 1
     min_pass_rate: 0.8
 
+  # Held-out 泛化评估：不参与调优的独立任务集，用于验证版本提升的泛化能力。
+  # HarnessDev 论文指出：可见反馈集与 held-out 集版本变化方向一致率仅 53.1%，
+  # 因此必须用未参与调优的任务做回归，避免过拟合 core 包。
+  # 规则：held-out 任务不得出现在 core gate 中；阈值比 core 宽松（泛化评估）。
+  held-out:
+    tasks:
+      - T204   # L3 文档按类别归档
+      - T205   # L3 图片按 EXIF 时间归档
+      - T307   # L2 逻辑推理谜题
+      - T309   # L4 迷你仓库 Issue 修复
+      - T502   # L5 一周工作周报总结（llm_judge）
+      - T503   # L5 开源项目 README 撰写（llm_judge）
+      - T505   # L5 多文件代码重构：表达式计算器变量功能
+      - T506   # L5 复杂算法：Dijkstra 最短路径规划
+      - T507   # L5 系统调试：Web 服务 3 个 bug 修复
+      - T508   # L5 数据管道：ETL 多源数据清洗聚合
+    runs: 2
+    task_pass_ratio: 0.5     # 2 run 中 ≥1 通过才算该任务通过
+    min_pass_rate: 0.7       # held-out 泛化阈值：10 任务允许 3 个未通过
+
   # 多 agent 横向对比示例（启用后：每个 agent 独立跑同一任务集，全部达标才 PASS）：
   # compare:
   #   tasks: [T001, T102, T305]

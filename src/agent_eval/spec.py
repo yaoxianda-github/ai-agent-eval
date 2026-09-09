@@ -24,6 +24,8 @@ CheckpointType = Literal[
 
 LEVELS = {"L1", "L2", "L3", "L4", "L5"}
 VERIFIERS = {"deterministic", "llm_judge"}
+# HarnessDev 论文归纳的六类 Harness 控制能力
+CAPABILITIES = {"execution", "tools", "context", "state", "lifecycle", "verification"}
 
 
 @dataclass
@@ -51,6 +53,7 @@ class TaskSpec:
     max_steps: Optional[int] = None  # 可选：覆盖后端默认步数上限（如 L4 修复类任务提额）
     tags: list[str] = field(default_factory=list)
     rubric: str = ""  # V2.2：verifier=llm_judge 时的评分标准（任务作者自定义）
+    capabilities: list[str] = field(default_factory=list)  # V2.5：任务考察的 Harness 能力（六类）
     spec_path: Optional[Path] = None
 
     @classmethod
@@ -81,6 +84,7 @@ class TaskSpec:
             max_steps=int(data["max_steps"]) if data.get("max_steps") else None,
             tags=list(data.get("tags", [])),
             rubric=str(data.get("rubric", "")),
+            capabilities=list(data.get("capabilities", [])),
             spec_path=path,
         )
         errors = spec.validate()
@@ -105,6 +109,9 @@ class TaskSpec:
                 errors.append("存在缺少 id 的校验点")
             if cp.type not in CheckpointType.__args__:
                 errors.append(f"校验点 {cp.id} 类型非法: {cp.type}")
+        for cap in self.capabilities:
+            if cap not in CAPABILITIES:
+                errors.append(f"capabilities 包含非法值 '{cap}'，必须为 {sorted(CAPABILITIES)} 之一")
         return errors
 
     def fixtures_dir(self) -> Path:

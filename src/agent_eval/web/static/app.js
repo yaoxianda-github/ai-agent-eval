@@ -505,13 +505,91 @@
         "</div>" +
         (r.error ? '<div class="err-banner">' + esc(r.error) + "</div>" : "") +
         '<div class="card"><h3>判定结果（' + v.length + " 个校验点）</h3>" + (vRows || '<div class="empty">无判定</div>') + "</div>" +
-        '<div class="card"><h3>轨迹回放 <span class="tl-note">输入意图 → 知识/检索 → 模型生成 → 工具执行</span></h3>' + traceTimeline(r.traces) + "</div>" +
+        executionAnalysis(r) +
+        '<div class="card"><h3>轨迹回放 <span class="tl-note">输入意图 → 知识/检索 → 模型生成 → 工具执行</span></h3>' + traceTimeline(r.traces, r) + "</div>" +
         '<div class="card"><h3>执行轨迹（' + (r.steps || []).length + " 步）</h3>" + steps + "</div>" +
         '<div class="card"><h3>产物文件</h3><div id="file-list"><div class="empty">加载中…</div></div></div>' +
         '<div class="card" id="file-view" style="display:none;"><h3>文件预览</h3><pre class="code" id="file-content"></pre></div>'
       );
       loadFiles(runId);
     }).catch(function (e) { renderErr(e.message); });
+  }
+
+  // ---------- 执行分析：组件实际执行率 ----------
+  function executionAnalysis(run) {
+    var traces = run.traces || [];
+    var steps = run.steps || [];
+    // 轨迹事件类型分布
+    var kindDist = {};
+    var phaseDist = {};
+    var toolDist = {};
+    for (var i = 0; i < traces.length; i++) {
+      var t = traces[i] || {};
+      var k = t.kind || "unknown";
+      kindDist[k] = (kindDist[k] || 0) + 1;
+      if (t.phase) { phaseDist[t.phase] = (phaseDist[t.phase] || 0) + 1; }
+      if (t.tool) { toolDist[t.tool] = (toolDist[t.tool] || 0) + 1; }
+    }
+    // 步骤 action 分布
+    var stepDist = {};
+    for (var j = 0; j < steps.length; j++) {
+      var s = steps[j] || {};
+      var a = s.action || "unknown";
+      stepDist[a] = (stepDist[a] || 0) + 1;
+    }
+    // 模型调用统计
+    var llmCount = kindDist["llm"] || 0;
+    var toolCount = kindDist["tool"] || 0;
+    var reasoningCount = phaseDist["reasoning"] || 0;
+    var decisionCount = phaseDist["decision"] || 0;
+    var finalCount = phaseDist["final"] || 0;
+    // token 统计
+    var usage = (run.metrics && run.metrics.usage) || {};
+    var promptTokens = usage.prompt_tokens || 0;
+    var completionTokens = usage.completion_tokens || 0;
+
+    // 工具分布条形图
+    var toolRows = [];
+    var toolKeys = Object.keys(toolDist).sort(function(a, b) { return toolDist[b] - toolDist[a]; });
+    var maxTool = toolKeys.length ? toolDist[toolKeys[0]] : 1;
+    for (var ti = 0; ti < toolKeys.length; ti++) {
+      var tk = toolKeys[ti];
+      var pct = Math.round(toolDist[tk] / maxTool * 100);
+      toolRows.push(
+        '<div class="ea-tool-row">' +
+          '<span class="ea-tool-name">' + esc(tk) + '</span>' +
+          '<div class="ea-tool-bar"><div class="ea-tool-fill" style="width:' + pct + '%;"></div></div>' +
+          '<span class="ea-tool-count">' + toolDist[tk] + '</span>' +
+        '</div>'
+      );
+    }
+
+    return (
+      '<div class="card"><h3>执行分析 <span class="tl-note">组件实际执行率 · 基于真实运行轨迹</span></h3>' +
+        '<div class="ea-grid">' +
+          '<div class="ea-col">' +
+            '<div class="ea-subtitle">调用统计</div>' +
+            '<div class="ea-stats">' +
+              '<div class="ea-stat"><b>' + llmCount + '</b><span>模型调用</span></div>' +
+              '<div class="ea-stat"><b>' + toolCount + '</b><span>工具执行</span></div>' +
+              '<div class="ea-stat"><b>' + steps.length + '</b><span>执行步骤</span></div>' +
+              '<div class="ea-stat"><b>' + (promptTokens + completionTokens) + '</b><span>总 tokens</span></div>' +
+            '</div>' +
+            '<div class="ea-subtitle" style="margin-top:14px;">模型阶段分布</div>' +
+            '<div class="ea-phases">' +
+              (reasoningCount ? '<span class="ea-phase ea-phase-reason">推理 ' + reasoningCount + '</span>' : '') +
+              (decisionCount ? '<span class="ea-phase ea-phase-decision">决策 ' + decisionCount + '</span>' : '') +
+              (finalCount ? '<span class="ea-phase ea-phase-final">最终 ' + finalCount + '</span>' : '') +
+              (!reasoningCount && !decisionCount && !finalCount ? '<span class="muted">无阶段数据</span>' : '') +
+            '</div>' +
+          '</div>' +
+          '<div class="ea-col">' +
+            '<div class="ea-subtitle">工具调用分布</div>' +
+            (toolRows.length ? toolRows.join("") : '<div class="muted">本次运行无工具调用</div>') +
+          '</div>' +
+        '</div>' +
+      '</div>'
+    );
   }
 
   // ---------- 轨迹回放：全链路时间线 ----------
@@ -559,7 +637,101 @@
     }
     return abs;
   }
-  function traceTimeline(traces) {
+  // ---------- 六类 Harness 能力覆盖率统计 ----------
+  // HarnessDev 论文归纳的六类控制能力：Execution/Tools/Context/State/Lifecycle/Verification
+  var CAP_META = {
+    execution:   { label: "执行循环", desc: "Agent Loop 推进次数（模型调用）", color: "#6366F1" },
+    tools:       { label: "工具调用", desc: "工具选择与执行次数", color: "#F59E0B" },
+    context:     { label: "上下文组织", desc: "任务/历史/约束的上下文注入", color: "#10B981" },
+    state:       { label: "状态管理", desc: "进度/checkpoint/失败记录", color: "#EC4899" },
+    lifecycle:   { label: "生命周期", desc: "超时/恢复/异常处理", color: "#8B5CF6" },
+    verification:{ label: "结果验证", desc: "checkpoint 校验与完成判定", color: "#0EA5E9" }
+  };
+  function capabilityCoverage(traces, run) {
+    var stats = {
+      execution: { count: 0, triggered: false },
+      tools: { count: 0, triggered: false },
+      context: { count: 0, triggered: false },
+      state: { count: 0, triggered: false },
+      lifecycle: { count: 0, triggered: false },
+      verification: { count: 0, triggered: false }
+    };
+    for (var i = 0; i < (traces || []).length; i++) {
+      var t = traces[i] || {};
+      if (t.kind === "llm") {
+        stats.execution.count++;
+        stats.execution.triggered = true;
+        if (t.input) { stats.context.count++; stats.context.triggered = true; }
+      }
+      if (t.kind === "tool") {
+        stats.tools.count++;
+        stats.tools.triggered = true;
+      }
+      if (t.kind === "intent") {
+        stats.context.count++;
+        stats.context.triggered = true;
+      }
+      if (t.kind === "state" || t.phase === "checkpoint" || (t.tool && t.tool.indexOf("checkpoint") >= 0)) {
+        stats.state.count++;
+        stats.state.triggered = true;
+      }
+      if (t.kind === "lifecycle" || t.phase === "timeout" || t.phase === "retry" || t.phase === "error") {
+        stats.lifecycle.count++;
+        stats.lifecycle.triggered = true;
+      }
+      if (t.kind === "verification" || t.phase === "verify") {
+        stats.verification.count++;
+        stats.verification.triggered = true;
+      }
+    }
+    // 从 run 元数据补充
+    if (run) {
+      var verdicts = run.verdicts || (run.metrics && run.metrics.verdicts) || [];
+      if (verdicts.length) {
+        stats.verification.count = Math.max(stats.verification.count, verdicts.length);
+        stats.verification.triggered = true;
+      }
+      if (run.status === "timeout" || run.status === "error" || run.error) {
+        stats.lifecycle.count++;
+        stats.lifecycle.triggered = true;
+      }
+    }
+    return stats;
+  }
+  function capabilityBar(stats) {
+    var cells = [];
+    var keys = ["execution", "tools", "context", "state", "lifecycle", "verification"];
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      var meta = CAP_META[k];
+      var s = stats[k];
+      var statusCls = s.triggered ? "cap-ok" : "cap-miss";
+      var statusTxt = s.triggered ? "已触发" : "未触发";
+      var countTxt = s.count > 0 ? s.count + " 次" : "—";
+      cells.push(
+        '<div class="cap-cell ' + statusCls + '" title="' + esc(meta.desc) + '">' +
+          '<div class="cap-dot" style="background:' + (s.triggered ? meta.color : "#CBD5E1") + ';"></div>' +
+          '<div class="cap-info">' +
+            '<div class="cap-label">' + esc(meta.label) + '</div>' +
+            '<div class="cap-count">' + countTxt + ' · ' + statusTxt + '</div>' +
+          '</div>' +
+        '</div>'
+      );
+    }
+    var triggered = keys.filter(function(k) { return stats[k].triggered; }).length;
+    return (
+      '<div class="cap-section">' +
+        '<div class="cap-header">' +
+          '<b>Harness 能力覆盖率</b>' +
+          '<span class="cap-summary">' + triggered + '/6 类能力在本次运行中实际触发</span>' +
+          '<span class="cap-hint" title="基于 HarnessDev 论文的六类控制能力框架，从运行轨迹中自动推断。未触发不代表代码未实现，可能是本次任务未走到对应流程。">ⓘ 判定逻辑</span>' +
+        '</div>' +
+        '<div class="cap-grid">' + cells.join("") + '</div>' +
+      '</div>'
+    );
+  }
+
+  function traceTimeline(traces, run) {
     if (!traces || !traces.length) {
       return '<div class="empty">该 run 无轨迹回放数据（旧版本运行），重新运行任务可生成</div>';
     }
@@ -569,6 +741,7 @@
       var bts = traces[bi] && traces[bi].ts;
       if (bts && bts > 1e8) { baseTs = bts; break; }
     }
+    var capHtml = capabilityBar(capabilityCoverage(traces, run));
     var chips = [];
     var keys = ["all", "intent", "retrieval", "llm", "tool"];
     for (var k = 0; k < keys.length; k++) {
@@ -607,6 +780,7 @@
       );
     }
     return (
+      capHtml +
       '<div class="tl-filter">' + chips.join("") + "</div>" +
       '<div class="tl-list">' + items.join("") + "</div>"
     );
@@ -928,14 +1102,121 @@
       "<table>" + head + rows + "</table>";
   }
 
+  // ---------- 性能-成本散点图（帕累托前沿） ----------
+  function costPerformanceScatter(runs) {
+    // 按 任务+后端 聚合：平均得分、平均 token、运行次数
+    var groups = {};
+    for (var i = 0; i < (runs || []).length; i++) {
+      var r = runs[i] || {};
+      if (r.status !== "completed") continue;
+      var key = (r.task_id || "?") + "|" + (r.agent_id || "?");
+      if (!groups[key]) groups[key] = { task: r.task_id, agent: r.agent_id, scores: [], tokens: [], n: 0 };
+      var g = groups[key];
+      var score = (r.metrics && r.metrics.score) || 0;
+      var usage = (r.metrics && r.metrics.usage) || {};
+      var tokens = (usage.prompt_tokens || 0) + (usage.completion_tokens || 0);
+      g.scores.push(score);
+      g.tokens.push(tokens);
+      g.n++;
+    }
+    var points = [];
+    var keys = Object.keys(groups);
+    for (var j = 0; j < keys.length; j++) {
+      var g = groups[keys[j]];
+      if (g.n < 1) continue;
+      var avgScore = g.scores.reduce(function(a, b) { return a + b; }, 0) / g.scores.length;
+      var avgTokens = g.tokens.reduce(function(a, b) { return a + b; }, 0) / g.tokens.length;
+      if (avgTokens <= 0) continue; // 无 token 数据的点不展示
+      points.push({ task: g.task, agent: g.agent, score: avgScore, tokens: avgTokens, n: g.n });
+    }
+    if (!points.length) {
+      return '<div class="empty">暂无足够的运行数据绘制性能-成本散点图（需要含 token 记录的 completed run）</div>';
+    }
+    // 帕累托前沿：按 token 升序，维护最高得分
+    points.sort(function(a, b) { return a.tokens - b.tokens; });
+    var frontier = [];
+    var maxScore = -1;
+    for (var k = 0; k < points.length; k++) {
+      if (points[k].score > maxScore) {
+        frontier.push(points[k]);
+        maxScore = points[k].score;
+      }
+    }
+    // SVG 绘制
+    var W = 700, H = 380, padL = 60, padR = 20, padT = 20, padB = 50;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var maxTokens = Math.max.apply(null, points.map(function(p) { return p.tokens; })) * 1.1;
+    var maxScore = Math.max.apply(null, points.map(function(p) { return p.score; })) * 1.15;
+    if (maxScore < 1) maxScore = 1;
+    var x = function(t) { return padL + (t / maxTokens) * plotW; };
+    var y = function(s) { return padT + plotH - (s / maxScore) * plotH; };
+    // 坐标轴
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:' + W + 'px;height:auto;">';
+    svg += '<line x1="' + padL + '" y1="' + (padT + plotH) + '" x2="' + (padL + plotW) + '" y2="' + (padT + plotH) + '" stroke="#CBD5E1" stroke-width="1"/>';
+    svg += '<line x1="' + padL + '" y1="' + padT + '" x2="' + padL + '" y2="' + (padT + plotH) + '" stroke="#CBD5E1" stroke-width="1"/>';
+    // 刻度
+    for (var ti = 0; ti <= 4; ti++) {
+      var tv = (maxTokens / 4) * ti;
+      var tx = x(tv);
+      svg += '<line x1="' + tx + '" y1="' + (padT + plotH) + '" x2="' + tx + '" y2="' + (padT + plotH + 5) + '" stroke="#CBD5E1"/>';
+      svg += '<text x="' + tx + '" y="' + (padT + plotH + 18) + '" text-anchor="middle" font-size="10" fill="#6B7280">' + Math.round(tv / 1000) + 'k</text>';
+    }
+    for (var si = 0; si <= 4; si++) {
+      var sv = (maxScore / 4) * si;
+      var sy = y(sv);
+      svg += '<line x1="' + (padL - 5) + '" y1="' + sy + '" x2="' + padL + '" y2="' + sy + '" stroke="#CBD5E1"/>';
+      svg += '<text x="' + (padL - 8) + '" y="' + (sy + 3) + '" text-anchor="end" font-size="10" fill="#6B7280">' + sv.toFixed(1) + '</text>';
+    }
+    // 轴标签
+    svg += '<text x="' + (padL + plotW / 2) + '" y="' + (H - 10) + '" text-anchor="middle" font-size="12" fill="#374151" font-weight="600">Token 用量（成本）→</text>';
+    svg += '<text x="15" y="' + (padT + plotH / 2) + '" text-anchor="middle" font-size="12" fill="#374151" font-weight="600" transform="rotate(-90 15 ' + (padT + plotH / 2) + ')">得分（性能）→</text>';
+    // 帕累托前沿线
+    if (frontier.length > 1) {
+      var pathD = frontier.map(function(p, idx) { return (idx === 0 ? "M" : "L") + x(p.tokens) + "," + y(p.score); }).join(" ");
+      svg += '<path d="' + pathD + '" fill="none" stroke="#F59E0B" stroke-width="2" stroke-dasharray="6,3" opacity="0.7"/>';
+    }
+    // 数据点
+    var agentColors = {};
+    var colorPalette = ["#6366F1", "#10B981", "#F59E0B", "#EC4899", "#8B5CF6", "#0EA5E9", "#EF4444", "#14B8A6"];
+    var colorIdx = 0;
+    for (var pi = 0; pi < points.length; pi++) {
+      var p = points[pi];
+      if (!agentColors[p.agent]) { agentColors[p.agent] = colorPalette[colorIdx % colorPalette.length]; colorIdx++; }
+      var isFrontier = frontier.some(function(f) { return f.task === p.task && f.agent === p.agent; });
+      var cx = x(p.tokens), cy = y(p.score);
+      svg += '<circle cx="' + cx + '" cy="' + cy + '" r="' + (isFrontier ? 7 : 5) + '" fill="' + agentColors[p.agent] + '" opacity="0.8" stroke="' + (isFrontier ? "#F59E0B" : "none") + '" stroke-width="2">';
+      svg += '<title>' + esc(p.task) + ' / ' + esc(p.agent) + '&#10;得分: ' + p.score.toFixed(2) + '&#10;Token: ' + Math.round(p.tokens) + '&#10;运行次数: ' + p.n + (isFrontier ? '&#10;★ 帕累托最优' : '') + '</title>';
+      svg += '</circle>';
+    }
+    // 图例
+    var legendX = padL + 10, legendY = padT + 10;
+    var agentKeys = Object.keys(agentColors);
+    for (var li = 0; li < agentKeys.length; li++) {
+      svg += '<rect x="' + legendX + '" y="' + (legendY + li * 18) + '" width="12" height="12" rx="2" fill="' + agentColors[agentKeys[li]] + '"/>';
+      svg += '<text x="' + (legendX + 18) + '" y="' + (legendY + li * 18 + 10) + '" font-size="11" fill="#374151">' + esc(agentKeys[li]) + '</text>';
+    }
+    svg += '</svg>';
+    var summary = '<div class="scatter-summary">共 ' + points.length + ' 个 任务×后端 数据点 · 帕累托前沿 ' + frontier.length + ' 个点（同等成本下得分最高）</div>';
+    return '<div class="scatter-wrap">' + svg + summary + '</div>';
+  }
+
   // ---------- 视图：报告 ----------
   function viewReport() {
     renderHTML(
       '<h2 class="page-title">评测报告</h2>' +
+      '<div class="card"><h3>性能-成本分析 <span class="tl-note">帕累托前沿：同等成本下得分最高的配置</span></h3>' +
+      '<div id="scatter-container"><div class="empty">加载中…</div></div></div>' +
       '<div class="card"><button class="btn" id="btn-gen-report">生成报告</button> ' +
       '<span class="muted">复用引擎 reporter 生成自包含 HTML（离线可看）</span></div>' +
       '<iframe id="report-frame" style="width:100%;height:70vh;border:1px solid #E4E3DD;border-radius:12px;background:#fff;"></iframe>'
     );
+    // 加载散点图数据
+    api("/api/runs?limit=500").then(function(data) {
+      var runs = data.runs || data || [];
+      el("scatter-container").innerHTML = costPerformanceScatter(runs);
+    }).catch(function() {
+      el("scatter-container").innerHTML = '<div class="empty">加载运行数据失败</div>';
+    });
     var frame = el("report-frame");
     frame.src = "/reports/report.html";
     el("btn-gen-report").onclick = function () {

@@ -16,6 +16,7 @@ description: |
 
   提示：图中有 40+ 城市和 50+ 条边，需要正确处理无向图和路径回溯。
 tags: [algorithm, graph, dijkstra, code]
+capabilities: [execution, context, verification]
 
 fixtures:
   source: fixtures/

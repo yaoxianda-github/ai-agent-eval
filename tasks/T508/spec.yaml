@@ -32,6 +32,7 @@ description: |
 
   要求：不使用 pandas（需手写 csv/json 处理逻辑），金额保留 2 位小数。
 tags: [etl, data, pipeline, code]
+capabilities: [execution, tools, context, verification]
 
 fixtures:
   source: fixtures/

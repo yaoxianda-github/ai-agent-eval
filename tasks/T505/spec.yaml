@@ -18,6 +18,7 @@ description: |
   修改完成后，运行 `python main.py test_input.txt` 应输出 25。
   测试输入：a=3, b=4, c=a*a+b*b, 最后输出 c。
 tags: [code, refactor, multi-file, algorithm]
+capabilities: [execution, tools, context, verification]
 
 fixtures:
   source: fixtures/

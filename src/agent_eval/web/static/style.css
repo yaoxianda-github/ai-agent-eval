@@ -174,3 +174,45 @@ table.matrix th { position: sticky; top: 0; z-index: 1; }
 .totals-table td.num, .totals-table th.num { text-align: right; }
 .lock-tag { font-size: 11px; color: #9AA0A6; }
 
+
+/* ---------- Harness 六类能力覆盖率 ---------- */
+.cap-section { margin-bottom: 16px; padding: 14px 16px; background: #FAFAF7; border: 1px solid #E8E6DF; border-radius: 10px; }
+.cap-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; font-size: 13px; }
+.cap-header b { color: #1F3A5F; font-size: 13.5px; }
+.cap-summary { color: #6B7280; font-size: 12px; }
+.cap-hint { color: #9AA0A6; font-size: 12px; cursor: help; margin-left: auto; }
+.cap-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+@media (max-width: 700px) { .cap-grid { grid-template-columns: repeat(2, 1fr); } }
+.cap-cell { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #fff; border: 1px solid #E8E6DF; border-radius: 8px; transition: all .2s; }
+.cap-cell.cap-ok { border-color: #D1FAE5; background: #F0FDF4; }
+.cap-cell.cap-miss { border-color: #F3F4F6; background: #F9FAFB; opacity: .75; }
+.cap-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.cap-info { flex: 1; min-width: 0; }
+.cap-label { font-size: 12.5px; font-weight: 600; color: #374151; }
+.cap-cell.cap-miss .cap-label { color: #9CA3AF; }
+.cap-count { font-size: 11px; color: #6B7280; margin-top: 2px; }
+.cap-cell.cap-ok .cap-count { color: #059669; font-weight: 600; }
+
+/* ---------- 执行分析面板 ---------- */
+.ea-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 700px) { .ea-grid { grid-template-columns: 1fr; } }
+.ea-col { min-width: 0; }
+.ea-subtitle { font-size: 12px; font-weight: 700; color: #6B7280; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
+.ea-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.ea-stat { background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 8px; padding: 10px 12px; text-align: center; }
+.ea-stat b { display: block; font-size: 20px; color: #1F3A5F; font-weight: 700; }
+.ea-stat span { font-size: 11px; color: #6B7280; }
+.ea-phases { display: flex; flex-wrap: wrap; gap: 6px; }
+.ea-phase { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 11.5px; font-weight: 600; }
+.ea-phase-reason { background: #EDE9FE; color: #6D28D9; }
+.ea-phase-decision { background: #DBEAFE; color: #1D4ED8; }
+.ea-phase-final { background: #D1FAE5; color: #047857; }
+.ea-tool-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.ea-tool-name { width: 90px; font-size: 12px; color: #374151; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ea-tool-bar { flex: 1; height: 16px; background: #F3F4F6; border-radius: 4px; overflow: hidden; }
+.ea-tool-fill { height: 100%; background: linear-gradient(90deg, #1F3A5F, #2E7D7A); border-radius: 4px; transition: width .3s; }
+.ea-tool-count { width: 30px; text-align: right; font-size: 12px; font-weight: 600; color: #1F3A5F; }
+
+/* ---------- 性能-成本散点图 ---------- */
+.scatter-wrap { text-align: center; }
+.scatter-summary { margin-top: 10px; font-size: 12px; color: #6B7280; }

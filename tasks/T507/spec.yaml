@@ -16,6 +16,7 @@ description: |
   请修改 input/app.py 修复这 3 个 bug。修复完成后，运行 `python test_fix.py` 应全部通过。
   测试脚本会验证：正常创建、非法邮箱 400、不存在用户 404、并发计数正确。
 tags: [debug, web, concurrency, code]
+capabilities: [execution, tools, context, lifecycle, verification]
 
 fixtures:
   source: fixtures/
