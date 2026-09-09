@@ -41,9 +41,19 @@ SYSTEM_PROMPT = """你是一个在沙箱工作目录里执行任务的自主 Age
 
 
 def _extract_json(text: str) -> dict:
-    """从模型输出中提取第一个 JSON 对象并解析（容忍前后文字）。"""
+    """从模型输出中提取第一个 JSON 对象并解析（容忍前后文字、markdown 代码块、截断修复）。"""
     if not text:
         raise ValueError("模型输出为空")
+    # 剥离 markdown 代码块包裹（```json ... ``` 或 ``` ... ```）
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        # 去掉开头的 ```json 或 ```
+        first_newline = cleaned.find("\n")
+        if first_newline != -1:
+            cleaned = cleaned[first_newline + 1:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        text = cleaned
     start = text.find("{")
     if start == -1:
         raise ValueError("输出中未找到 JSON 对象")
@@ -68,6 +78,16 @@ def _extract_json(text: str) -> dict:
             depth -= 1
             if depth == 0:
                 return json.loads(text[start : i + 1])
+    # JSON 未闭合（可能被 max_tokens 截断），尝试修复
+    if depth > 0 or in_str:
+        candidate = text[start:]
+        if in_str:
+            candidate += '"'  # 先闭合未闭合的字符串
+        candidate += "}" * depth
+        try:
+            return json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
+            pass
     raise ValueError("未找到闭合的 JSON 对象")
 
 
@@ -81,7 +101,7 @@ class MinimalReactBackend(Backend):
         api_key: str | None = None,
         base_url: str | None = None,
         max_steps: int = 20,
-        max_parse_retries: int = 2,
+        max_parse_retries: int = 3,
         temperature: float = 0.0,
         timeout_s: int = 300,
     ) -> None:
@@ -122,7 +142,7 @@ class MinimalReactBackend(Backend):
                     model=self.model,
                     messages=messages,
                     temperature=self.temperature,
-                    max_tokens=600,
+                    max_tokens=1024,
                 )
                 raw = resp.choices[0].message.content or ""
                 usage = getattr(resp, "usage", None)
@@ -244,6 +264,21 @@ class MinimalReactBackend(Backend):
             )
 
             if tool == "finish":
+                # finish 前检查必需输出文件（从 checkpoints 的 file_exists 提取）
+                required_files = []
+                gt = getattr(task, "ground_truth", None) or {}
+                for cp in gt.get("checkpoints", []):
+                    if cp.get("type") == "file_exists" and cp.get("path"):
+                        required_files.append(cp["path"])
+                missing = [f for f in required_files if not (workspace / f).exists()]
+                if missing and i < self.max_steps:
+                    # 不允许 finish，提示 agent 继续生成缺失文件
+                    hint = f"任务尚未完成：以下必需输出文件不存在：{', '.join(missing)}。请继续执行，生成这些文件后再 finish。"
+                    steps[-1]["observation"] = hint
+                    messages.append({"role": "assistant", "content": raw})
+                    messages.append({"role": "user", "content": f"观察：{hint}"})
+                    logger.info("minimal-react finish 被拦截 | 缺失文件: %s", missing)
+                    continue
                 logger.info("minimal-react 完成 | steps=%d duration=%.1fs tokens=%d/%d", i, time.time() - start, self._usage.get("prompt_tokens", 0), self._usage.get("completion_tokens", 0))
                 return BackendResult(
                     status="completed",

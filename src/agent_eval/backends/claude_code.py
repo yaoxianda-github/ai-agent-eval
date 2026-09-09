@@ -387,7 +387,10 @@ class ClaudeCodeBackend(Backend):
         cmd: str | None = None,
         allowed_tools: str | None = None,
         max_budget_usd: float = _DEFAULT_MAX_BUDGET_USD,
+        max_steps: int | None = None,
     ) -> None:
+        # max_steps 保留接口：claude-code 黑盒后端由 dsh 自身循环控制，
+        # 接收此参数仅为与 runner 调用签名兼容，不实际限制步数。
         # 模型选择优先级（从高到低）：
         # 1. 显式传入的 claude 模型
         # 2. AGENT_EVAL_CLAUDE_MODEL 环境变量

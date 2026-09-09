@@ -379,6 +379,23 @@ def create_app(
             except Exception as e:  # noqa: BLE001 - 单次失败不中断批次
                 logger.error("批次内运行失败 | batch=%s %s/%s: %s",
                              batch_id, agent_id, task_id, e, exc_info=True)
+                # 插入 error 状态的 run 记录，确保失败任务在矩阵中可追踪（不再显示 "—"）
+                try:
+                    _t = _task_map().get(task_id)
+                    store.insert_run({
+                        "run_id": rid,
+                        "agent_id": agent_id,
+                        "agent_ver": "",
+                        "task_id": task_id,
+                        "task_level": _t.level if _t else "",
+                        "status": "error",
+                        "metrics": {"score": 0.0, "weight": 0.0, "pass_rate": 0.0},
+                        "duration_s": 0.0,
+                        "steps": [],
+                        "error": str(e)[:500],
+                    }, batch_id=batch_id)
+                except Exception:  # noqa: BLE001 - 记录失败不影响主流程
+                    pass
             done += 1
             store.update_batch(batch_id, done_runs=done)
         batch = store.get_batch(batch_id)
