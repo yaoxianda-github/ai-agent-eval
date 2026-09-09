@@ -1,0 +1,10 @@
+[
+  {"id": "C001", "name": "北京科技有限公司", "region": "华北", "tier": "VIP"},
+  {"id": "C002", "name": "上海贸易集团", "region": "华东", "tier": "VIP"},
+  {"id": "C003", "name": "广州电子厂", "region": "华南", "tier": "普通"},
+  {"id": "C004", "name": "深圳创新科技", "region": "华南", "tier": "VIP"},
+  {"id": "C005", "name": "成都软件开发", "region": "西部", "tier": "普通"},
+  {"id": "C006", "name": "杭州互联网公司", "region": "华东", "tier": "VIP"},
+  {"id": "C007", "name": "武汉制造企业", "region": "华中", "tier": "普通"},
+  {"id": "C008", "name": "西安数据服务", "region": "西部", "tier": "普通"}
+]

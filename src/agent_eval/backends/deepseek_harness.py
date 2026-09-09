@@ -206,6 +206,115 @@ def parse_dsh_session(path: Path) -> list[dict]:
     return traces
 
 
+def usage_from_dsh_session(path: Path) -> dict | None:
+    """从 session.jsonl.zstd 累计所有 LLM 调用的 token 用量。
+
+    dsh 在 assistant/message 事件的 data.usage 中记录每次模型调用的
+    inputTokens / outputTokens / totalTokens / cacheReadTokens / reasoningTokens。
+    累计所有 assistant/message 事件的 usage，返回 {prompt_tokens, completion_tokens}。
+    解析失败返回 None（黑盒后端拿不到 usage 时的兜底）。
+    """
+    raw = _decompress_zstd(path)
+    if not raw:
+        return None
+    try:
+        text = raw.decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001
+        return None
+    total_input = 0
+    total_output = 0
+    found = False
+    for line in text.splitlines():
+        try:
+            o = json.loads(line)
+        except Exception:  # noqa: BLE001
+            continue
+        if o.get("type") != "assistant/message":
+            continue
+        usage = (o.get("data") or {}).get("usage") or {}
+        inp = usage.get("inputTokens") or usage.get("input_tokens") or 0
+        out = usage.get("outputTokens") or usage.get("output_tokens") or 0
+        if inp or out:
+            total_input += int(inp)
+            total_output += int(out)
+            found = True
+    if not found:
+        return None
+    return {"prompt_tokens": total_input, "completion_tokens": total_output}
+
+
+def steps_from_dsh_session(path: Path) -> list[dict]:
+    """从 session.jsonl.zstd 提取工具调用步骤（tool/call + tool/result 配对）。
+
+    每个步骤 {step, action, args, observation, ts}，按 tool/call 的 callId 与
+    后续 tool/result 配对。未配对的 tool/call 也保留（observation 为空）。
+    解析失败返回 []。
+    """
+    raw = _decompress_zstd(path)
+    if not raw:
+        return []
+    try:
+        text = raw.decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001
+        return []
+
+    steps: list[dict] = []
+    pending: dict[str, int] = {}  # callId -> steps index
+    step_no = 0
+
+    for line in text.splitlines():
+        try:
+            o = json.loads(line)
+        except Exception:  # noqa: BLE001
+            continue
+        t = o.get("type")
+        data = o.get("data") or {}
+        ts = round((o.get("time") or 0) / 1000.0, 3)
+
+        if t == "tool/call":
+            step_no += 1
+            call_id = data.get("callId") or ""
+            name = data.get("name") or "tool"
+            args = data.get("arguments") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:  # noqa: BLE001
+                    args = {"raw": args}
+            pending[call_id] = len(steps)
+            steps.append({
+                "step": step_no,
+                "action": name,
+                "args": args,
+                "observation": "",
+                "ts": ts,
+            })
+        elif t == "tool/result":
+            msg = data.get("message") or {}
+            src = msg.get("source") or {}
+            call_id = src.get("callId") or ""
+            obs = ""
+            for c in (msg.get("content") or []):
+                if c.get("type") == "tool-result":
+                    obs = "".join(
+                        x.get("text", "") for x in (c.get("content") or []) if x.get("type") == "text"
+                    )
+            if call_id in pending:
+                steps[pending[call_id]]["observation"] = obs[:2000]
+                steps[pending[call_id]]["ts"] = ts or steps[pending[call_id]]["ts"]
+            elif obs:
+                # 未配对的 result，作为独立步骤
+                step_no += 1
+                steps.append({
+                    "step": step_no,
+                    "action": "tool_result",
+                    "args": {},
+                    "observation": obs[:2000],
+                    "ts": ts,
+                })
+    return steps
+
+
 class DeepseekHarnessBackend(Backend):
     name = "deepseek-harness"
     version = "0.1.0"
@@ -245,6 +354,40 @@ class DeepseekHarnessBackend(Backend):
                 return []
             return parse_dsh_session(sfile)
         except Exception:  # noqa: BLE001 - 回放数据非关键路径
+            return []
+
+    def _usage_from_session(self, workspace: Path) -> dict | None:
+        """从本次运行的 dsh session 累计 LLM token 用量。
+
+        dsh 在 assistant/message 事件的 data.usage 中记录每次模型调用的
+        inputTokens / outputTokens。累计所有调用返回 {prompt_tokens, completion_tokens}。
+        解析失败返回 None。
+        """
+        try:
+            sdir = _session_dir_for(workspace, self.dsh_home)
+            if not sdir:
+                return None
+            sfile = sdir / "session.jsonl.zstd"
+            if not sfile.is_file():
+                return None
+            return usage_from_dsh_session(sfile)
+        except Exception:  # noqa: BLE001 - usage 非关键路径
+            return None
+
+    def _steps_from_session(self, workspace: Path) -> list[dict]:
+        """从本次运行的 dsh session 提取工具调用步骤（tool/call + tool/result 配对）。
+
+        解析失败返回 []，由调用方降级为黑盒单步。
+        """
+        try:
+            sdir = _session_dir_for(workspace, self.dsh_home)
+            if not sdir:
+                return []
+            sfile = sdir / "session.jsonl.zstd"
+            if not sfile.is_file():
+                return []
+            return steps_from_dsh_session(sfile)
+        except Exception:  # noqa: BLE001 - steps 非关键路径
             return []
 
     def run(self, task, workspace) -> BackendResult:
@@ -302,27 +445,32 @@ class DeepseekHarnessBackend(Backend):
                     }
                 ],
                 traces=self._traces_from_session(workspace),
+                usage=self._usage_from_session(workspace),
                 duration_s=round(time.time() - start, 3),
                 error=f"dsh 超时（>{self.timeout_s}s）。输出尾部：{partial[:400]}",
             )
 
         full = (out or "") + (("\n" + err) if err else "")
         tail = full[-3000:]
-        steps = [
-            {
-                "step": 1,
-                "action": "dsh",
-                "args": {"profile": "headless", "model": self.model},
-                "observation": tail,
-                "ts": round(time.time(), 3),
-            }
-        ]
+        # 优先从 dsh session 提取多轮工具调用步骤；解析失败时降级为黑盒单步
+        steps = self._steps_from_session(workspace)
+        if not steps:
+            steps = [
+                {
+                    "step": 1,
+                    "action": "dsh",
+                    "args": {"profile": "headless", "model": self.model},
+                    "observation": tail,
+                    "ts": round(time.time(), 3),
+                }
+            ]
         # 退出码 0 且 stdout 有最终答案 → completed；其余按 error 记录（含 dsh 错误码）
         ok = rc == 0 and (out or "").strip() != ""
         traces = self._traces_from_session(workspace)
+        usage = self._usage_from_session(workspace)
         logger.info(
-            "dsh 执行完成 | status=%s rc=%d duration=%.1fs traces=%d stdout=%d chars",
-            "completed" if ok else "error", rc, time.time() - start, len(traces), len(out or ""),
+            "dsh 执行完成 | status=%s rc=%d duration=%.1fs traces=%d usage=%s stdout=%d chars",
+            "completed" if ok else "error", rc, time.time() - start, len(traces), usage, len(out or ""),
         )
         if not ok:
             logger.warning("dsh 未正常完成: 退出码 %d，stderr 尾部: %s", rc, (err or "")[-200:])
@@ -330,6 +478,7 @@ class DeepseekHarnessBackend(Backend):
             status="completed" if ok else "error",
             steps=steps,
             traces=traces,
+            usage=usage,
             duration_s=round(time.time() - start, 3),
             stdout=(out or "").strip(),
             error="" if ok else f"dsh 退出码 {rc}：{(err or out or '')[-300:]}",

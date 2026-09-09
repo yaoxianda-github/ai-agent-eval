@@ -1,0 +1,53 @@
+id: T507
+title: 系统调试 - Web 服务 3 个 bug 修复
+level: L5
+description: |
+  input/app.py 是一个用户管理 API（基于 Python http.server），包含 3 个已知 bug：
+
+  Bug 1（数据验证）：创建用户时未验证邮箱格式，任意字符串都能存入。
+    修复：添加邮箱格式验证（包含 @，@ 后至少有一个 .，@ 前后都有字符），非法邮箱返回 400。
+
+  Bug 2（并发安全）：user_count 自增不是原子操作，并发请求会丢计数。
+    修复：使用 threading.Lock 保护 user_count 自增操作。
+
+  Bug 3（错误处理）：查询不存在用户时抛 KeyError 导致 500，应返回 404。
+    修复：用户不存在时返回 404 状态码和错误信息。
+
+  请修改 input/app.py 修复这 3 个 bug。修复完成后，运行 `python test_fix.py` 应全部通过。
+  测试脚本会验证：正常创建、非法邮箱 400、不存在用户 404、并发计数正确。
+tags: [debug, web, concurrency, code]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/fix_report.md
+      desc: 已生成修复报告
+    - id: c2
+      type: content_contains
+      path: output/fix_report.md
+      pattern: "Bug 1|bug1|邮箱验证"
+      desc: 修复报告包含 Bug 1（邮箱验证）
+    - id: c3
+      type: content_contains
+      path: output/fix_report.md
+      pattern: "Bug 2|bug2|并发|lock|Lock"
+      desc: 修复报告包含 Bug 2（并发安全）
+    - id: c4
+      type: content_contains
+      path: output/fix_report.md
+      pattern: "Bug 3|bug3|404|不存在"
+      desc: 修复报告包含 Bug 3（错误处理）
+    - id: c5
+      type: cmd_exit_zero
+      cmd: "cd input && python test_fix.py > /dev/null 2>&1"
+      desc: 修复后测试全部通过
+
+verifier: deterministic
+weight: 2.5
+cost_budget_usd: 0.5
+timeout_s: 600
+max_steps: 50

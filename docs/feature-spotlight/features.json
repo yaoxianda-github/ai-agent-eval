@@ -1,0 +1,155 @@
+{
+  "series": "ai-agent-eval 核心功能每日介绍",
+  "total": 13,
+  "features": [
+    {
+      "id": 1,
+      "name": "统一后端注册表与多 Agent 接入",
+      "summary": "新增被测 Agent = 新增 Backend 子类并注册，统一 run() 接口返回 BackendResult",
+      "key_files": [
+        "src/agent_eval/backends/base.py",
+        "src/agent_eval/backends/__init__.py",
+        "src/agent_eval/backends/minimal_react.py",
+        "src/agent_eval/backends/deepseek_harness.py",
+        "src/agent_eval/backends/aider.py",
+        "src/agent_eval/backends/claude_code.py"
+      ],
+      "keywords": ["Backend", "registry", "get_backend", "BackendResult"]
+    },
+    {
+      "id": 2,
+      "name": "任务管理与评测集体系",
+      "summary": "23 个任务覆盖 L1-L5 五级难度，spec.yaml 定义任务描述/fixtures/ground_truth/权重/超时",
+      "key_files": [
+        "src/agent_eval/spec.py",
+        "tasks/manifest.yaml",
+        "tasks/T001/spec.yaml",
+        "tasks/T309/spec.yaml"
+      ],
+      "keywords": ["task", "spec", "fixtures", "level", "manifest"]
+    },
+    {
+      "id": 3,
+      "name": "确定性校验点与 Checkpoint 级 Testcase",
+      "summary": "file_exists / content_contains / content_not_contains / cmd_exit_zero 等校验类型，verifier 确定性判分",
+      "key_files": [
+        "src/agent_eval/verifier.py",
+        "src/agent_eval/spec.py",
+        "tasks/T001/spec.yaml",
+        "tasks/T309/spec.yaml"
+      ],
+      "keywords": ["checkpoint", "verifier", "ground_truth", "deterministic"]
+    },
+    {
+      "id": 4,
+      "name": "工作台与运行控制台",
+      "summary": "FastAPI + 原生 JS 单页 Web UI，选择任务/Agent/模型/采样次数发起评测，实时轮询运行状态",
+      "key_files": [
+        "src/agent_eval/web/app.py",
+        "src/agent_eval/web/static/app.js",
+        "src/agent_eval/web/static/style.css",
+        "src/agent_eval/cli.py"
+      ],
+      "keywords": ["workbench", "FastAPI", "web", "run", "console"]
+    },
+    {
+      "id": 5,
+      "name": "运行历史与运行详情",
+      "summary": "历史列表分页展示，详情页展示步骤轨迹/产物文件/校验点结果/评分，支持产物下载",
+      "key_files": [
+        "src/agent_eval/web/app.py",
+        "src/agent_eval/web/static/app.js",
+        "src/agent_eval/runner.py",
+        "results/runs/"
+      ],
+      "keywords": ["history", "run detail", "pagination", "artifact"]
+    },
+    {
+      "id": 6,
+      "name": "轨迹回放面板（V2.4）",
+      "summary": "时间线形式展示：输入意图 → RAG 检索了哪些知识片段 → 模型生成了什么 → 工具如何执行，支持自助定位问题",
+      "key_files": [
+        "src/agent_eval/web/static/app.js",
+        "src/agent_eval/backends/base.py",
+        "src/agent_eval/runner.py"
+      ],
+      "keywords": ["trace", "timeline", "replay", "trajectory", "Langfuse"]
+    },
+    {
+      "id": 7,
+      "name": "真实成本核算",
+      "summary": "预计成本（任务选择时展示）+ 实际成本（运行后按 token 折算），pricing_for 按模型定价，无实测时按 L1-L5 分级估算",
+      "key_files": [
+        "src/agent_eval/costing.py",
+        "src/agent_eval/web/app.py",
+        "src/agent_eval/web/static/app.js"
+      ],
+      "keywords": ["cost", "pricing", "token", "budget", "estimate"]
+    },
+    {
+      "id": 8,
+      "name": "RAG 真实检索环节",
+      "summary": "search_kb BM25 检索将知识片段作为评测任务真实环节，替代之前的文件读取式伪检索，轨迹回放可看到检索了哪些片段",
+      "key_files": [
+        "src/agent_eval/backends/minimal_react.py",
+        "src/agent_eval/knowledge.py"
+      ],
+      "keywords": ["RAG", "retrieval", "BM25", "search_kb", "knowledge"]
+    },
+    {
+      "id": 9,
+      "name": "CI 质量门禁与合并阻断",
+      "summary": "agent-eval ci 无头模式运行，输出 JUnit XML + Allure 报告，core 12 任务通过率不达标自动阻断 GitHub PR 合并",
+      "key_files": [
+        "src/agent_eval/ci.py",
+        "src/agent_eval/cli.py",
+        ".github/workflows/"
+      ],
+      "keywords": ["CI", "gate", "JUnit", "Allure", "headless", "block merge"]
+    },
+    {
+      "id": 10,
+      "name": "多 Agent 对比矩阵（功能 A / Pro）",
+      "summary": "批次模型发起多 Agent 对比，彩色矩阵展示得分/通过率/成本/耗时/σ，格下钻查看详情，CSV 导出，License 社区/Pro 收费墙",
+      "key_files": [
+        "src/agent_eval/license.py",
+        "src/agent_eval/web/store.py",
+        "src/agent_eval/web/app.py",
+        "src/agent_eval/web/static/app.js",
+        "tests/test_matrix.py"
+      ],
+      "keywords": ["matrix", "batch", "compare", "license", "Pro", "export"]
+    },
+    {
+      "id": 11,
+      "name": "统一日志体系（V2.6）",
+      "summary": "控制台 + 文件双输出，单文件超 10MB 自动切割，按年月日-时分秒命名，结构化日志格式便于排查",
+      "key_files": [
+        "src/agent_eval/log.py",
+        "src/agent_eval/runner.py"
+      ],
+      "keywords": ["logging", "rotation", "10MB", "timestamp", "console"]
+    },
+    {
+      "id": 12,
+      "name": "评测报告与全宽布局",
+      "summary": "结构化评测报告展示得分/校验点/步骤/成本，页面布局全宽铺满消除两侧空白",
+      "key_files": [
+        "src/agent_eval/reporter.py",
+        "src/agent_eval/web/static/app.js",
+        "src/agent_eval/web/static/style.css"
+      ],
+      "keywords": ["report", "full-width", "reporter", "layout"]
+    },
+    {
+      "id": 13,
+      "name": "Claude Code 后端接入与配置隔离",
+      "summary": "subprocess 调 claude CLI --bare --output-format json，复制 ~/.claude 到临时 HOME 实现认证隔离（解决 CLAUDE_CONFIG_DIR 导致的 403），模型名自动回退，多轮 JSON 解析",
+      "key_files": [
+        "src/agent_eval/backends/claude_code.py",
+        "src/agent_eval/costing.py"
+      ],
+      "keywords": ["claude", "subprocess", "--bare", "isolation", "403", "ANTHROPIC_API_KEY"]
+    }
+  ]
+}

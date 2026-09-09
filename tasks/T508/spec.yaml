@@ -1,0 +1,73 @@
+id: T508
+title: 数据管道 - ETL 多源数据清洗与聚合
+level: L5
+description: |
+  input/ 目录下有两个数据源：
+  - orders.csv：订单数据（date, customer_id, product, quantity, price），共 40 条
+  - customers.json：客户信息（id, name, region, tier），共 8 个客户
+
+  请编写一个 Python ETL 程序（如 etl.py），完成以下三步：
+
+  1. Extract（抽取）：
+     - 读取 orders.csv（注意处理可能的空行和格式问题）
+     - 读取 customers.json
+
+  2. Transform（转换）：
+     - 清洗：去除空值行、统一日期格式（YYYY-MM-DD）、计算每行订单金额（quantity * price）
+     - 关联：将订单与客户信息通过 customer_id 关联，补充 region 和 tier 字段
+     - 聚合：
+       a. 按区域（region）汇总：订单数、总销售额
+       b. 按产品（product）汇总：订单数、总销量、总销售额
+       c. 按客户层级（tier）汇总：客户数、总销售额
+
+  3. Load（加载）：
+     - 输出 output/report.csv：区域汇总报表（列：region, order_count, total_revenue）
+     - 输出 output/summary.json：关键指标 JSON，包含：
+       - total_orders: 总订单数（应为 40）
+       - total_revenue: 总销售额
+       - total_customers: 客户数（应为 8）
+       - by_region: 按区域汇总
+       - by_product: 按产品汇总
+       - by_tier: 按客户层级汇总
+
+  要求：不使用 pandas（需手写 csv/json 处理逻辑），金额保留 2 位小数。
+tags: [etl, data, pipeline, code]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/report.csv
+      desc: 已生成区域汇总报表
+    - id: c2
+      type: file_exists
+      path: output/summary.json
+      desc: 已生成关键指标 JSON
+    - id: c3
+      type: content_contains
+      path: output/summary.json
+      pattern: "40"
+      desc: 总订单数正确（40 条）
+    - id: c4
+      type: content_contains
+      path: output/summary.json
+      pattern: "8"
+      desc: 客户数正确（8 个）
+    - id: c5
+      type: content_contains
+      path: output/report.csv
+      pattern: "region"
+      desc: 报表包含 region 列
+    - id: c6
+      type: cmd_exit_zero
+      cmd: "cd input && python etl.py > /dev/null 2>&1"
+      desc: ETL 程序可正常运行
+
+verifier: deterministic
+weight: 2.5
+cost_budget_usd: 0.5
+timeout_s: 600
+max_steps: 50

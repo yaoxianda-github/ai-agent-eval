@@ -1,0 +1,5 @@
+{
+  "current_index": 0,
+  "last_updated": "2026-09-09",
+  "note": "current_index 从 0 开始，对应 features.json 中 features 数组的下标。每次介绍完成后 +1。"
+}

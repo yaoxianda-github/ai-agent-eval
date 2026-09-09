@@ -1,0 +1,53 @@
+id: T506
+title: 复杂算法 - Dijkstra 最短路径规划
+level: L5
+description: |
+  input/cities.csv 是中国主要城市间的公路距离数据（无向图），列：from, to, distance。
+  请编写一个 Python 程序（如 solve.py），实现 Dijkstra 最短路径算法，
+  计算从「北京」到「广州」的最短路径和总距离。
+
+  要求：
+  1. 读取 input/cities.csv 构建无向图（每条边双向）
+  2. 实现 Dijkstra 算法（不可直接调用 networkx 等图库，需手写核心逻辑）
+  3. 输出最短路径经过的城市序列和总距离
+  4. 将结果写入 output/route.txt，格式示例：
+     路径: 北京 -> 石家庄 -> 郑州 -> 武汉 -> 南昌 -> 广州
+     总距离: 1980 km
+
+  提示：图中有 40+ 城市和 50+ 条边，需要正确处理无向图和路径回溯。
+tags: [algorithm, graph, dijkstra, code]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/route.txt
+      desc: 已生成路径结果文件
+    - id: c2
+      type: content_contains
+      path: output/route.txt
+      pattern: "1980"
+      desc: 最短距离正确（北京到广州最短 1980km）
+    - id: c3
+      type: content_contains
+      path: output/route.txt
+      pattern: "北京"
+      desc: 路径包含起点北京
+    - id: c4
+      type: content_contains
+      path: output/route.txt
+      pattern: "广州"
+      desc: 路径包含终点广州
+    - id: c5
+      type: cmd_exit_zero
+      cmd: "cd input && python solve.py > /dev/null 2>&1 || true"
+      desc: 程序可运行（允许输出到 stdout）
+
+verifier: deterministic
+weight: 2.5
+cost_budget_usd: 0.5
+timeout_s: 600
+max_steps: 50

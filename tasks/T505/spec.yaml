@@ -1,0 +1,45 @@
+id: T505
+title: 多文件代码重构 - 表达式计算器扩展变量功能
+level: L5
+description: |
+  input/ 目录下是一个简单的表达式计算器项目，包含 4 个文件：
+  - lexer.py：词法分析器（当前只支持数字和运算符）
+  - parser.py：语法分析器（当前只支持数字和二元运算）
+  - evaluator.py：求值器（当前只支持数字和二元运算）
+  - main.py：CLI 入口，读取输入文件逐行求值并输出最后结果
+
+  请修改代码，添加变量赋值和引用功能：
+  1. lexer.py：添加 IDENT（标识符，字母/下划线开头）和 ASSIGN（=）token 类型
+  2. parser.py：添加 AssignNode（变量赋值）和 VarRefNode（变量引用）AST 节点，
+     支持语句 "x = expr" 和表达式中引用变量 "x + 1"
+  3. evaluator.py：添加变量环境字典，赋值时写入，引用时读取（未定义变量抛 NameError）
+  4. main.py：无需修改（已支持多行语句）
+
+  修改完成后，运行 `python main.py test_input.txt` 应输出 25。
+  测试输入：a=3, b=4, c=a*a+b*b, 最后输出 c。
+tags: [code, refactor, multi-file, algorithm]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/result.txt
+      desc: 已生成结果文件
+    - id: c2
+      type: content_contains
+      path: output/result.txt
+      pattern: "25"
+      desc: 变量赋值与引用计算正确（a=3,b=4,c=a*a+b*b=25）
+    - id: c3
+      type: cmd_exit_zero
+      cmd: "cd input && python main.py test_input.txt > /dev/null 2>&1"
+      desc: 程序可正常运行无报错
+
+verifier: deterministic
+weight: 2.5
+cost_budget_usd: 0.5
+timeout_s: 600
+max_steps: 50
