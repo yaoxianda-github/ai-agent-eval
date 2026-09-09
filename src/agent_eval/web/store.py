@@ -229,12 +229,23 @@ class RunStore:
             self._conn.commit()
 
     def rebuild(self, results_dir: Path) -> int:
-        """扫描 results_dir/*/run.json 重建索引，返回已索引 run 数。"""
+        """扫描 results_dir/*/run.json 重建索引，返回已索引 run 数。
+
+        注意：rebuild 时保留已有的 batch_id 关联，避免清空批次与 run 的关联关系。
+        """
         n = 0
         for p in sorted(Path(results_dir).glob("*/run.json")):
             try:
                 rec = json.loads(p.read_text(encoding="utf-8"))
-                self.insert_run(rec)
+                # 保留已有的 batch_id 关联（rebuild 不应清空批次关联）
+                existing_batch = ""
+                with self._lock:
+                    row = self._conn.execute(
+                        "SELECT batch_id FROM runs WHERE run_id=?", (rec.get("run_id"),)
+                    ).fetchone()
+                    if row and row[0]:
+                        existing_batch = row[0]
+                self.insert_run(rec, batch_id=existing_batch)
                 n += 1
             except Exception:  # noqa: BLE001 - 单条损坏不影响整体
                 continue
