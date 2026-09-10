@@ -1,99 +1,21 @@
 #!/bin/bash
-# agent-eval workbench 守护进程管理
+# agent-eval workbench 守护进程管理（Python 版）
 # 用法: ./scripts/daemon.sh start | stop | status | restart
+#
+# 改进：使用 Python 守护进程（scripts/_daemon.py）替代 bash 循环
+# - os.setsid() 完全脱离终端会话
+# - 健壮的异常处理和日志记录
+# - 指数退避重启（1s → 2s → 4s → ... → 最大 30s）
+# - 优雅退出（SIGTERM → 等待 → SIGKILL）
+# - 启动前自动清理 8000 端口
 
 PROJECT_DIR="/Users/yaoxianda/Desktop/yaoxianda/doubaowork/ai-agent-eval"
-SCRIPT_DIR="${PROJECT_DIR}/scripts"
-LOG_DIR="${PROJECT_DIR}/logs"
-PID_FILE="${LOG_DIR}/workbench.pid"
-DAEMON_PID_FILE="${LOG_DIR}/daemon.pid"
-DAEMON_LOG="${LOG_DIR}/daemon.log"
-PORT=8000
-
-mkdir -p "${LOG_DIR}"
-
-is_daemon_running() {
-    if [ -f "${DAEMON_PID_FILE}" ]; then
-        dpid=$(cat "${DAEMON_PID_FILE}" 2>/dev/null)
-        if [ -n "${dpid}" ] && kill -0 "${dpid}" 2>/dev/null; then
-            return 0
-        fi
-    fi
-    return 1
-}
-
-is_workbench_running() {
-    if [ -f "${PID_FILE}" ]; then
-        wpid=$(cat "${PID_FILE}" 2>/dev/null)
-        if [ -n "${wpid}" ] && kill -0 "${wpid}" 2>/dev/null; then
-            return 0
-        fi
-    fi
-    return 1
-}
+PYTHON="${PROJECT_DIR}/.venv/bin/python"
+DAEMON_SCRIPT="${PROJECT_DIR}/scripts/_daemon.py"
 
 case "${1:-}" in
-    start)
-        if is_daemon_running; then
-            dpid=$(cat "${DAEMON_PID_FILE}")
-            echo "守护进程已在运行 (PID=${dpid})"
-            exit 0
-        fi
-        # 清理旧的 pid 文件
-        rm -f "${DAEMON_PID_FILE}" "${PID_FILE}"
-        # 用 nohup 启动守护循环，完全脱离终端
-        nohup bash "${SCRIPT_DIR}/_daemon_loop.sh" >> "${DAEMON_LOG}" 2>&1 < /dev/null &
-        disown
-        echo "守护进程启动中..."
-        sleep 5
-        if is_workbench_running; then
-            wpid=$(cat "${PID_FILE}")
-            echo "守护进程已启动，workbench 运行中 (PID=${wpid}, 端口 ${PORT})"
-            echo "服务日志: ${LOG_DIR}/workbench.log"
-            echo "守护日志: ${DAEMON_LOG}"
-        else
-            echo "启动失败，请查看日志: ${DAEMON_LOG}"
-            exit 1
-        fi
-        ;;
-    stop)
-        if is_daemon_running; then
-            dpid=$(cat "${DAEMON_PID_FILE}")
-            kill "${dpid}" 2>/dev/null || true
-            echo "已停止守护进程 (PID=${dpid})"
-        else
-            echo "守护进程未运行"
-        fi
-        if is_workbench_running; then
-            wpid=$(cat "${PID_FILE}")
-            kill "${wpid}" 2>/dev/null || true
-            echo "已停止 workbench (PID=${wpid})"
-        fi
-        # 清理端口
-        old_pid=$(lsof -ti tcp:${PORT} 2>/dev/null || true)
-        if [ -n "${old_pid}" ]; then
-            kill -9 ${old_pid} 2>/dev/null || true
-        fi
-        rm -f "${DAEMON_PID_FILE}" "${PID_FILE}"
-        ;;
-    status)
-        if is_daemon_running; then
-            dpid=$(cat "${DAEMON_PID_FILE}")
-            echo "守护进程: 运行中 (PID=${dpid})"
-        else
-            echo "守护进程: 未运行"
-        fi
-        if is_workbench_running; then
-            wpid=$(cat "${PID_FILE}")
-            echo "workbench: 运行中 (PID=${wpid}, 端口 ${PORT})"
-        else
-            echo "workbench: 未运行"
-        fi
-        ;;
-    restart)
-        $0 stop
-        sleep 2
-        $0 start
+    start|stop|status|restart)
+        exec "${PYTHON}" "${DAEMON_SCRIPT}" "$1"
         ;;
     *)
         echo "用法: $0 {start|stop|status|restart}"
