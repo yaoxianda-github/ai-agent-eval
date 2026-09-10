@@ -58,7 +58,12 @@
     return api("/api/meta").then(function (m) {
       meta = m;
       var box = el("side-meta");
-      if (box) box.innerHTML = "v" + esc(m.version) + "<br>任务: " + esc(m.tasks_dir) + "<br>结果: " + esc(m.results_dir);
+      if (box) {
+        box.innerHTML =
+          '<div class="sm-ver">v' + esc(m.version) + '</div>' +
+          '<div class="sm-path" title="' + esc(m.tasks_dir) + '"><span class="sm-label">任务</span>' + esc(m.tasks_dir) + '</div>' +
+          '<div class="sm-path" title="' + esc(m.results_dir) + '"><span class="sm-label">结果</span>' + esc(m.results_dir) + '</div>';
+      }
     });
   }
 
@@ -1151,6 +1156,16 @@
       return '<div class="empty">暂无足够的运行数据绘制能力雷达图（需要 completed run）</div>';
     }
 
+    // 兼容两种数据格式：列表接口（r.score/r.tokens/r.steps数字）和详情接口（r.metrics.score/r.metrics.usage/r.steps数组）
+    var getScore = function(r) { return r.score !== undefined ? r.score : ((r.metrics && r.metrics.score) || 0); };
+    var getTokens = function(r) {
+      if (r.tokens) return (r.tokens.prompt_tokens || 0) + (r.tokens.completion_tokens || 0);
+      var u = (r.metrics && r.metrics.usage) || {};
+      return (u.prompt_tokens || 0) + (u.completion_tokens || 0);
+    };
+    var getStepsArr = function(r) { return Array.isArray(r.steps) ? r.steps : []; };
+    var getStepCount = function(r) { return Array.isArray(r.steps) ? r.steps.length : (r.steps || 0); };
+
     // 8 维度计算（0-100 分）
     var dims = [
       { key: "completion", label: "任务完成率", score: 0, desc: "" },
@@ -1163,80 +1178,78 @@
       { key: "cost",       label: "成本效益",   score: 0, desc: "" },
     ];
 
-    // 1. 任务完成率：平均 score * 100
-    var avgScore = completed.reduce(function(s, r) { return s + ((r.metrics && r.metrics.score) || 0); }, 0) / completed.length;
+    // 1. 任务完成率：平均 score * 100（score 可能 >1，归一化到 pass_rate）
+    var avgScore = completed.reduce(function(s, r) { return s + (r.pass_rate !== undefined ? r.pass_rate : Math.min(1, getScore(r))); }, 0) / completed.length;
     dims[0].score = Math.min(100, Math.round(avgScore * 100));
-    dims[0].desc = "平均得分 " + avgScore.toFixed(2);
+    dims[0].desc = "平均通过率 " + (avgScore * 100).toFixed(0) + "% · " + completed.length + " 次运行";
 
-    // 2. 工具使用：工具调用成功率 + 工具多样性
+    // 2. 工具使用：工具调用数 + 工具多样性（从 steps 数组提取，列表接口降级为步骤数估算）
     var totalToolCalls = 0, toolFailures = 0, toolSet = {};
     for (var i = 0; i < completed.length; i++) {
-      var steps = completed[i].steps || [];
-      for (var j = 0; j < steps.length; j++) {
-        var st = steps[j] || {};
-        if (st.action && st.action !== "finish" && st.action !== "think") {
-          totalToolCalls++;
-          toolSet[st.action] = true;
-          var obs = ((st.observation || "") + " " + (st.error || "")).toLowerCase();
-          if (obs.indexOf("error") >= 0 || obs.indexOf("fail") >= 0 || obs.indexOf("失败") >= 0) toolFailures++;
+      var steps = getStepsArr(completed[i]);
+      if (steps.length) {
+        for (var j = 0; j < steps.length; j++) {
+          var st = steps[j] || {};
+          if (st.action && st.action !== "finish" && st.action !== "think") {
+            totalToolCalls++;
+            toolSet[st.action] = true;
+            var obs = ((st.observation || "") + " " + (st.error || "")).toLowerCase();
+            if (obs.indexOf("error") >= 0 || obs.indexOf("fail") >= 0 || obs.indexOf("失败") >= 0) toolFailures++;
+          }
         }
+      } else {
+        // 列表接口降级：用步骤计数作为工具调用近似
+        var sc = getStepCount(completed[i]);
+        totalToolCalls += Math.max(0, sc - 1); // 减去 finish 步
       }
     }
-    var toolSuccessRate = totalToolCalls > 0 ? (1 - toolFailures / totalToolCalls) * 70 : 50;
+    var toolSuccessRate = totalToolCalls > 0 ? (1 - toolFailures / totalToolCalls) * 70 : 60;
     var toolDiversity = Math.min(30, Object.keys(toolSet).length * 5);
     dims[1].score = Math.round(Math.min(100, toolSuccessRate + toolDiversity));
-    dims[1].desc = totalToolCalls + " 次调用 · " + Object.keys(toolSet).length + " 种工具";
+    dims[1].desc = totalToolCalls + " 次工具调用 · " + (Object.keys(toolSet).length || "N/A") + " 种工具";
 
-    // 3. 推理规划：模型调用阶段分布 + 步骤合理性
-    var llmCount = 0, reasoningCount = 0;
-    for (var k = 0; k < completed.length; k++) {
-      var traces = completed[k].traces || [];
-      for (var l = 0; l < traces.length; l++) {
-        if (traces[l].kind === "llm") { llmCount++; if (traces[l].phase === "reasoning") reasoningCount++; }
-      }
-    }
-    dims[2].score = llmCount > 0 ? Math.min(100, 40 + reasoningCount / llmCount * 60) : 40;
-    dims[2].desc = llmCount + " 次模型调用 · 推理 " + reasoningCount + " 次";
+    // 3. 推理规划：平均步骤数作为推理深度近似
+    var avgSteps = completed.reduce(function(s, r) { return s + getStepCount(r); }, 0) / completed.length;
+    dims[2].score = Math.min(100, Math.round(30 + avgSteps * 8));
+    dims[2].desc = "平均 " + avgSteps.toFixed(1) + " 步推理";
 
-    // 4. 容错纠错：失败后恢复率 + 重试有效性
-    var faultRuns = completed.filter(function(r) { return (r.steps || []).some(function(s) { return (s.observation || "").toLowerCase().indexOf("error") >= 0; }); });
-    var recoveredRuns = faultRuns.filter(function(r) { return r.status === "completed" && ((r.metrics && r.metrics.score) || 0) > 0; });
-    dims[3].score = faultRuns.length > 0 ? Math.round(recoveredRuns.length / faultRuns.length * 100) : 70;
-    dims[3].desc = faultRuns.length + " 次遇到错误 · 恢复 " + recoveredRuns.length + " 次";
+    // 4. 容错纠错：error 状态 run 的比例（越低越好）+ 有 steps 数组时检测失败恢复
+    var allRuns = runs || [];
+    var errorRuns = allRuns.filter(function(r) { return r.status === "error" || r.status === "timeout"; }).length;
+    var faultRate = allRuns.length > 0 ? errorRuns / allRuns.length : 0;
+    dims[3].score = Math.max(0, Math.round(100 - faultRate * 200));
+    dims[3].desc = errorRuns + "/" + allRuns.length + " 次运行出错/超时";
 
     // 5. 效率：平均步骤数 + 平均 token（越低越好）
-    var avgSteps = completed.reduce(function(s, r) { return s + (r.steps || []).length; }, 0) / completed.length;
-    var avgTokens = completed.reduce(function(s, r) {
-      var u = (r.metrics && r.metrics.usage) || {}; return s + ((u.prompt_tokens || 0) + (u.completion_tokens || 0));
-    }, 0) / completed.length;
+    var avgTokens = completed.reduce(function(s, r) { return s + getTokens(r); }, 0) / completed.length;
     var stepScore = Math.max(0, 100 - avgSteps * 3);
     var tokenScore = avgTokens > 0 ? Math.max(0, 100 - avgTokens / 200) : 50;
     dims[4].score = Math.round((stepScore + tokenScore) / 2);
     dims[4].desc = "平均 " + avgSteps.toFixed(1) + " 步 · " + Math.round(avgTokens) + " tokens";
 
     // 6. 稳定性：得分标准差（越低越稳定）
-    var scores = completed.map(function(r) { return (r.metrics && r.metrics.score) || 0; });
+    var scores = completed.map(function(r) { return r.pass_rate !== undefined ? r.pass_rate : Math.min(1, getScore(r)); });
     var mean = scores.reduce(function(a, b) { return a + b; }, 0) / scores.length;
     var variance = scores.reduce(function(s, v) { return s + Math.pow(v - mean, 2); }, 0) / scores.length;
     var std = Math.sqrt(variance);
-    dims[5].score = Math.max(0, Math.round(100 - std * 200));
-    dims[5].desc = "得分 σ=" + std.toFixed(3) + " · " + completed.length + " 次采样";
+    dims[5].score = Math.max(0, Math.round(100 - std * 150));
+    dims[5].desc = "通过率 σ=" + std.toFixed(3) + " · " + completed.length + " 次采样";
 
-    // 7. 安全性：安全测试任务通过率（T703/T704）
+    // 7. 安全性：安全测试任务（T703/T704）通过率
     var securityRuns = completed.filter(function(r) { return r.task_id === "T703" || r.task_id === "T704"; });
     if (securityRuns.length) {
-      var secPass = securityRuns.filter(function(r) { return ((r.metrics && r.metrics.score) || 0) >= 1.0; }).length;
+      var secPass = securityRuns.filter(function(r) { return (r.pass_rate !== undefined ? r.pass_rate : getScore(r)) >= 1.0; }).length;
       dims[6].score = Math.round(secPass / securityRuns.length * 100);
       dims[6].desc = secPass + "/" + securityRuns.length + " 安全测试通过";
     } else {
       dims[6].score = 50;
-      dims[6].desc = "暂无安全测试数据";
+      dims[6].desc = "暂无安全测试数据（跑 T703/T704）";
     }
 
-    // 8. 成本效益：得分 / token 比率
-    var costEff = avgTokens > 0 ? Math.min(100, avgScore / avgTokens * 50000) : 50;
+    // 8. 成本效益：通过率 / 千 token 比率
+    var costEff = avgTokens > 0 ? Math.min(100, avgScore / avgTokens * 30000) : 50;
     dims[7].score = Math.round(costEff);
-    dims[7].desc = "每万 token 得分 " + (avgTokens > 0 ? (avgScore / avgTokens * 10000).toFixed(2) : "N/A");
+    dims[7].desc = "每万 token 通过率 " + (avgTokens > 0 ? (avgScore / avgTokens * 10000).toFixed(2) : "N/A");
 
     // SVG 雷达图绘制
     var cx = 200, cy = 200, R = 140;
@@ -1291,9 +1304,15 @@
       var key = (r.task_id || "?") + "|" + (r.agent_id || "?");
       if (!groups[key]) groups[key] = { task: r.task_id, agent: r.agent_id, scores: [], tokens: [], n: 0 };
       var g = groups[key];
-      var score = (r.metrics && r.metrics.score) || 0;
-      var usage = (r.metrics && r.metrics.usage) || {};
-      var tokens = (usage.prompt_tokens || 0) + (usage.completion_tokens || 0);
+      // 兼容列表接口（r.score/r.tokens）和详情接口（r.metrics.score/r.metrics.usage）
+      var score = r.score !== undefined ? r.score : ((r.metrics && r.metrics.score) || 0);
+      var tokens = 0;
+      if (r.tokens) {
+        tokens = (r.tokens.prompt_tokens || 0) + (r.tokens.completion_tokens || 0);
+      } else {
+        var usage = (r.metrics && r.metrics.usage) || {};
+        tokens = (usage.prompt_tokens || 0) + (usage.completion_tokens || 0);
+      }
       g.scores.push(score);
       g.tokens.push(tokens);
       g.n++;

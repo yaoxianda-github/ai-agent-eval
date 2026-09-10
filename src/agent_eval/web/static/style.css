@@ -18,6 +18,10 @@ body {
 .nav a:hover { background: rgba(31,58,95,0.06); }
 .nav a.active { background: #1F3A5F; color: #fff; font-weight: 600; }
 .side-meta { margin-top: auto; padding: 12px; font-size: 11px; color: #9AA0A6; line-height: 1.7; border-top: 1px solid #E4E3DD; }
+.side-meta .sm-ver { font-weight: 600; color: #6B7280; margin-bottom: 4px; }
+.side-meta .sm-path { font-family: "SF Mono", "JetBrains Mono", "Fira Code", Consolas, monospace; font-size: 10px; color: #9AA0A6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; cursor: default; line-height: 1.6; }
+.side-meta .sm-path:hover { color: #6B7280; white-space: normal; word-break: break-all; }
+.side-meta .sm-label { display: inline-block; min-width: 28px; color: #6B7280; font-weight: 600; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 10px; }
 .content { flex: 1 1 auto; padding: 28px 32px; width: 100%; }
 h2.page-title { font-size: 18px; margin-bottom: 16px; color: #1F3A5F; }
 .card { background: #fff; border-radius: 12px; padding: 18px 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
