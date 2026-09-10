@@ -10,12 +10,14 @@ from agent_eval.backends.minimal_react import MinimalReactBackend
 from agent_eval.backends.aider import AiderBackend
 from agent_eval.backends.deepseek_harness import DeepseekHarnessBackend
 from agent_eval.backends.claude_code import ClaudeCodeBackend
+from agent_eval.backends.hermes_agent import HermesAgentBackend
 
 _BACKENDS: dict[str, type[Backend]] = {
     MinimalReactBackend.name: MinimalReactBackend,
     AiderBackend.name: AiderBackend,
     DeepseekHarnessBackend.name: DeepseekHarnessBackend,
     ClaudeCodeBackend.name: ClaudeCodeBackend,
+    HermesAgentBackend.name: HermesAgentBackend,
 }
 
 
