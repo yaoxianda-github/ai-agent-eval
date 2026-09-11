@@ -36,6 +36,10 @@ ground_truth:
       desc: 变量赋值与引用计算正确（a=3,b=4,c=a*a+b*b=25）
     - id: c3
       type: cmd_exit_zero
+      cmd: "cd input && python -m py_compile main.py > /dev/null 2>&1"
+      desc: 代码语法检查通过（无语法错误）
+    - id: c4
+      type: cmd_exit_zero
       cmd: "cd input && python main.py test_input.txt > /dev/null 2>&1"
       desc: 程序可正常运行无报错
 

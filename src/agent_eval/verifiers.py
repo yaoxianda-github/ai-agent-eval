@@ -83,7 +83,12 @@ def _check_file(cp, workspace: Path) -> bool:
     paths = _resolve_paths(workspace, cp.path)
     if not paths:
         return not want_exists
-    return all((p.exists() and p.is_file()) if want_exists else not p.exists() for p in paths)
+    # file_exists 检查路径是否存在（文件或目录均可），不强制 is_file
+    # 因为任务 spec 中常常用 file_exists 检查输出目录是否创建
+    if want_exists:
+        return all(p.exists() for p in paths)
+    # file_not_exists 要求路径不存在（文件或目录都算存在）
+    return all(not p.exists() for p in paths)
 
 
 def _check_content(cp, workspace: Path) -> bool:

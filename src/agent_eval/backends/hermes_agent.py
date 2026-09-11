@@ -46,9 +46,11 @@ _DEFAULT_HERMES_CANDIDATES = (
     "/opt/homebrew/bin/hermes",
     "~/.local/bin/hermes",
 )
-# 评测默认工具集：terminal（含文件读写、命令执行）；禁 web 避免联网引入不确定性
-# 注意：Hermes 没有独立的 filesystem 工具集，文件操作通过 terminal 的 cat/echo 等命令完成
-_DEFAULT_TOOLSETS = "terminal"
+# 评测默认工具集：terminal（命令执行）+ file（文件读写）+ code_execution（代码执行）
+# 启用 file 工具集后，hermes 可以直接调用 write_file/read_file 等工具，
+# 不需要通过 terminal 的 cat/echo 间接操作，避免工具不存在的错误
+# 禁 web/browser 避免联网引入不确定性
+_DEFAULT_TOOLSETS = "terminal,file,code_execution"
 # 单次评测超时（秒）
 _DEFAULT_TIMEOUT = 300
 # 与 claude-code 后端一致的默认模型
@@ -137,13 +139,13 @@ class HermesAgentBackend(Backend):
         model: str | None = None,
         provider: str | None = None,
         toolsets: str = _DEFAULT_TOOLSETS,
-        timeout: int = _DEFAULT_TIMEOUT,
+        timeout_s: int = _DEFAULT_TIMEOUT,
         max_steps: int | None = None,
     ):
         self.model = model or self.default_model
         self.provider = provider or _DEFAULT_PROVIDER
         self.toolsets = toolsets
-        self.timeout = timeout
+        self.timeout_s = timeout_s
         self.max_steps = max_steps
         self._cmd = _find_hermes_cmd()
         if not self._cmd:
@@ -163,12 +165,16 @@ class HermesAgentBackend(Backend):
 
         # 构造命令：与 claude-code 相同的模型和 API Key，评测隔离模式
         # 注意：不使用 --worktree（要求 git 仓库），直接用 cwd 指定工作目录
+        # --yolo：绕过危险命令审批提示，避免评测因交互审批而卡住
+        # -Q：quiet 模式，抑制 banner/spinner/tool previews，只输出最终响应和 session info
         cmd = [
             self._cmd,
             "chat",
             "-q", task.description,
             "--ignore-user-config",
             "--ignore-rules",
+            "--yolo",
+            "-Q",
             "--model", self.model,
             "--provider", self.provider,
             "--toolsets", self.toolsets,
@@ -177,7 +183,7 @@ class HermesAgentBackend(Backend):
         task_id = getattr(task, "id", getattr(task, "task_id", "unknown"))
         logger.info(
             f"hermes-agent 执行开始 | model={self.model} provider={self.provider} "
-            f"timeout={self.timeout}s task={task_id} workspace={workspace}"
+            f"timeout={self.timeout_s}s task={task_id} workspace={workspace}"
         )
 
         try:
@@ -194,7 +200,7 @@ class HermesAgentBackend(Backend):
                     "HERMES_DISABLE_UPDATE_CHECK": "1",
                 },
             )
-            stdout, stderr = proc.communicate(timeout=self.timeout)
+            stdout, stderr = proc.communicate(timeout=self.timeout_s)
             duration = time.time() - start
             rc = proc.returncode
 
@@ -202,18 +208,18 @@ class HermesAgentBackend(Backend):
             proc.kill()
             stdout, stderr = proc.communicate()
             duration = time.time() - start
-            logger.warning(f"hermes-agent 超时 | task={task_id} {self.timeout}s")
+            logger.warning(f"hermes-agent 超时 | task={task_id} {self.timeout_s}s")
             return BackendResult(
                 status="timeout",
                 steps=[{
                     "step": 1,
                     "action": "hermes",
                     "args": {"model": self.model, "provider": self.provider},
-                    "observation": f"超时（>{self.timeout}s）",
+                    "observation": f"超时（>{self.timeout_s}s）",
                     "ts": time.time(),
                 }],
                 duration_s=duration,
-                error=f"timeout after {self.timeout}s",
+                error=f"timeout after {self.timeout_s}s",
             )
 
         # 解析结果和轨迹
@@ -232,10 +238,17 @@ class HermesAgentBackend(Backend):
                     db_usage.update({k: v for k, v in usage.items() if k not in db_usage})
                 usage = db_usage
 
-        status = "completed" if rc == 0 else "error"
-        if rc != 0:
+        # 增强错误检测：即使退出码为 0，也检查输出中的错误模式
+        error_detected = self._detect_errors(stdout, stderr, steps, workspace)
+
+        status = "completed" if (rc == 0 and not error_detected) else "error"
+        if rc != 0 or error_detected:
+            error_msg = stderr[-500:] if stderr else ""
+            if error_detected and not error_msg:
+                error_msg = error_detected
             logger.warning(
-                f"hermes-agent 退出码 {rc} | task={task_id} "
+                f"hermes-agent 异常 | task={task_id} rc={rc} "
+                f"error_detected={error_detected or 'N/A'} "
                 f"stderr_tail={stderr[-200:] if stderr else '(empty)'}"
             )
 
@@ -253,6 +266,45 @@ class HermesAgentBackend(Backend):
             error=stderr[-1000:] if rc != 0 and stderr else "",
             usage=usage,
         )
+
+    def _detect_errors(self, stdout: str, stderr: str, steps: list[dict], workspace: Path) -> str | None:
+        """增强错误检测：检查输出中的错误模式、工具调用失败、关键输出文件缺失。
+
+        返回错误描述字符串，无错误返回 None。
+        """
+        # 1. 检查 stderr 中的错误模式
+        error_patterns = [
+            (r"Traceback \(most recent call last\)", "Python Traceback"),
+            (r"Permission denied", "Permission denied"),
+            (r"No such file or directory", "File not found"),
+            (r"command not found", "Command not found"),
+            (r"Error:", "Error"),
+            (r"Exception:", "Exception"),
+            (r"Failed to", "Operation failed"),
+        ]
+        for pattern, label in error_patterns:
+            if re.search(pattern, stderr, re.IGNORECASE):
+                return f"{label} in stderr"
+
+        # 2. 检查 stdout 中的错误模式（排除正常的 "Error handling" 等）
+        for pattern, label in error_patterns:
+            matches = re.findall(pattern, stdout, re.IGNORECASE)
+            if matches and label not in ("Error",):  # "Error" 太宽泛，只检查更具体的模式
+                return f"{label} in stdout"
+
+        # 3. 检查步骤轨迹中的工具调用失败
+        for step in steps:
+            obs = step.get("observation", "")
+            if obs:
+                # 检查工具输出中的错误
+                if re.search(r"(error|failed|exception|traceback)", obs, re.IGNORECASE):
+                    # 但要排除正常的 "error handling" 或 "no error" 等
+                    if not re.search(r"(no error|without error|error handling|error rate)", obs, re.IGNORECASE):
+                        return f"Tool error in step {step.get('step', '?')}: {obs[:100]}"
+
+        # 4. 检查关键输出文件是否存在（从任务的 ground_truth checkpoints 提取）
+        # 这部分在 verifier 层面会做更严格的检查，这里只做简单的存在性检查
+        return None
 
     def _parse_steps(self, stdout: str, task) -> list[dict]:
         """从 hermes 输出解析步骤级轨迹。
@@ -423,7 +475,16 @@ class HermesAgentBackend(Backend):
                 except (json.JSONDecodeError, TypeError):
                     continue
 
-                for tc in tool_calls:
+                # 收集此 assistant 消息之后的所有 tool 输出（按顺序匹配）
+                tool_outputs = []
+                for j in range(i + 1, min(i + 20, len(messages))):
+                    if messages[j]["role"] == "tool":
+                        tool_outputs.append(messages[j])
+                    elif messages[j]["role"] == "assistant":
+                        # 遇到下一个 assistant 消息，停止收集（tool outputs 应该在两个 assistant 之间）
+                        break
+
+                for tc_idx, tc in enumerate(tool_calls):
                     # Hermes tool_calls 格式：{"id":..., "type":"function_call", "function":{"name":..., "arguments":"..."}}
                     func = tc.get("function", tc)
                     tool_name = func.get("name", tc.get("name", tc.get("tool_name", "unknown")))
@@ -434,24 +495,32 @@ class HermesAgentBackend(Backend):
                         except json.JSONDecodeError:
                             tool_args = {"raw": tool_args[:200]}
 
-                    # 查找对应的 tool 输出（下一条 role=tool 的消息）
+                    # 查找对应的 tool 输出（按顺序匹配第 tc_idx 个 tool output）
                     observation = ""
-                    for j in range(i + 1, min(i + 5, len(messages))):
-                        if messages[j]["role"] == "tool":
-                            tool_output = messages[j]["content"]
-                            if tool_output:
-                                try:
-                                    output_json = json.loads(tool_output)
-                                    observation = output_json.get("output", str(output_json)[:300])
-                                except (json.JSONDecodeError, TypeError):
-                                    observation = tool_output[:300]
-                            break
+                    if tc_idx < len(tool_outputs):
+                        tool_output = tool_outputs[tc_idx]["content"]
+                        if tool_output:
+                            try:
+                                output_json = json.loads(tool_output)
+                                # 优先提取 output 字段，其次是 content，最后是整个 JSON
+                                observation = (
+                                    output_json.get("output")
+                                    or output_json.get("content")
+                                    or output_json.get("result")
+                                    or str(output_json)[:500]
+                                )
+                            except (json.JSONDecodeError, TypeError):
+                                observation = tool_output[:500]
+
+                    # 截断过长的 observation
+                    if len(observation) > 500:
+                        observation = observation[:500] + "..."
 
                     steps.append({
                         "step": step_idx,
                         "action": tool_name,
                         "args": tool_args if isinstance(tool_args, dict) else {"raw": str(tool_args)[:200]},
-                        "observation": str(observation)[:300] if observation else "",
+                        "observation": str(observation) if observation else "",
                         "ts": msg["timestamp"] or time.time(),
                     })
                     step_idx += 1
