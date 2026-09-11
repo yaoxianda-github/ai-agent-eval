@@ -11,6 +11,11 @@ from agent_eval.backends.aider import AiderBackend
 from agent_eval.backends.deepseek_harness import DeepseekHarnessBackend
 from agent_eval.backends.claude_code import ClaudeCodeBackend
 from agent_eval.backends.hermes_agent import HermesAgentBackend
+from agent_eval.backends.codex_agent import CodexAgentBackend
+from agent_eval.backends.workbuddy import WorkBuddyBackend
+from agent_eval.backends.kimi_code import KimiCodeBackend
+from agent_eval.backends.trae_agent import TraeAgentBackend
+from agent_eval.backends.qoder_agent import QoderAgentBackend
 
 _BACKENDS: dict[str, type[Backend]] = {
     MinimalReactBackend.name: MinimalReactBackend,
@@ -18,6 +23,11 @@ _BACKENDS: dict[str, type[Backend]] = {
     DeepseekHarnessBackend.name: DeepseekHarnessBackend,
     ClaudeCodeBackend.name: ClaudeCodeBackend,
     HermesAgentBackend.name: HermesAgentBackend,
+    CodexAgentBackend.name: CodexAgentBackend,
+    WorkBuddyBackend.name: WorkBuddyBackend,
+    KimiCodeBackend.name: KimiCodeBackend,
+    TraeAgentBackend.name: TraeAgentBackend,
+    QoderAgentBackend.name: QoderAgentBackend,
 }
 
 
