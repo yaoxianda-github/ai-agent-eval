@@ -35,3 +35,11 @@ Thumbs.db
 # 本地 Pro License（不入库）
 license.key
 logs/
+
+# 本地 CLI 配置
+.trae/
+
+# 个人工作文件（不入库）
+docs/ppt-work/
+docs/videos/
+AI-Agent*.html
