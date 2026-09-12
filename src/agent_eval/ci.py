@@ -413,10 +413,47 @@ def run_gate(
     all_rate = round(min(ar["pass_rate"] for ar in agent_results), 3)
     bal_costs = [ar["balance_cost_cny"] for ar in agent_results]
     total_duration = time.time() - started
+
+    # V3.2 P2：6个blocking指标门禁评估
+    from agent_eval.gate import evaluate_gate, load_gate_threshold
+    from agent_eval.confidence import calculate_batch_confidence
+    gate_threshold = load_gate_threshold(cfg)
+    # 计算批次置信度
+    batch_conf = None
+    try:
+        all_runs = []
+        for ar in agent_results:
+            for tr in ar["task_results"]:
+                all_runs.append({
+                    "task_id": tr["task_id"],
+                    "metrics": {"score": 1.0 if tr["task_passed"] else 0.0},
+                    "verifier": tasks.get(tr["task_id"]).verifier if tasks.get(tr["task_id"]) else "deterministic",
+                })
+        batch_conf = calculate_batch_confidence(
+            all_runs, task_count_total=len(task_ids),
+            core_task_ids=task_ids, task_specs=list(tasks.values()),
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    # 评估门禁（用第一个 agent 的结果，多 agent 时取最差）
+    gate_evals = []
+    for ar in agent_results:
+        ge = evaluate_gate(
+            ar["task_results"],
+            threshold=gate_threshold,
+            task_specs=[tasks.get(tr["task_id"]) for tr in ar["task_results"] if tasks.get(tr["task_id"])],
+            confidence_score=batch_conf["score"] if batch_conf else None,
+        )
+        gate_evals.append({"agent": ar["agent"], **ge.to_dict()})
+    # 整体门禁：全部 agent 通过才算 PASS
+    gate_all_passed = all(ge["passed"] for ge in gate_evals)
+
     logger.info(
-        "CI 门禁完成 | gate=%s %s | pass_rate=%.3f (阈值%.2f) | duration=%.1fs | tokens=%d/%d | agents=%d",
+        "CI 门禁完成 | gate=%s %s | pass_rate=%.3f (阈值%.2f) | 6指标门禁=%s | duration=%.1fs | tokens=%d/%d | agents=%d",
         gate_name, "PASS" if all_passed else "FAIL",
-        all_rate, g["min_pass_rate"], total_duration,
+        all_rate, g["min_pass_rate"],
+        "PASS" if gate_all_passed else "FAIL",
+        total_duration,
         total_tokens["prompt_tokens"], total_tokens["completion_tokens"], len(agents),
     )
     return {
@@ -430,8 +467,21 @@ def run_gate(
         "task_ids": task_ids,
         "task_results": agent_results[0]["task_results"],
         "agent_results": agent_results,
-        "passed": bool(all_passed),
+        "passed": bool(all_passed and gate_all_passed),  # V3.2：通过率+6指标全部通过
         "pass_rate": all_rate,
+        "gate_evaluation": {  # V3.2：6个blocking指标门禁结果
+            "passed": gate_all_passed,
+            "per_agent": gate_evals,
+            "threshold": {
+                "golden_pass_rate": gate_threshold.golden_pass_rate,
+                "overall_accuracy": gate_threshold.overall_accuracy,
+                "p95_latency_s": gate_threshold.p95_latency_s,
+                "max_tokens_per_task": gate_threshold.max_tokens_per_task,
+                "security_pass_rate": gate_threshold.security_pass_rate,
+                "min_confidence": gate_threshold.min_confidence,
+            },
+        },
+        "confidence": batch_conf,  # V3.2：批次置信度
         "duration_s": round(time.time() - started, 2),
         "tokens": total_tokens,
         "cost_cny": round(sum(ar["cost_cny"] for ar in agent_results), 4),

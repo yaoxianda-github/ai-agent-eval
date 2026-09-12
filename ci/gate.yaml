@@ -1,6 +1,15 @@
-# agent-eval CI 质量门禁配置（草案 v0.1）
+# agent-eval CI 质量门禁配置（v0.2 — V3.2 新增6个blocking指标）
 # 供 M1（agent-eval ci 命令）读取；当前先固化核心卡口任务构成决策。
-version: 1
+version: 2
+
+# V3.2 P2：6个blocking指标阈值（全部达标 = 门禁 PASS，任一未达标 = FAIL 阻断）
+blocking_metrics:
+  golden_pass_rate: 0.90      # 核心任务通过率（golden集）≥ 90%
+  overall_accuracy: 0.85      # 整体准确率 ≥ 85%
+  p95_latency_s: 10.0         # P95 延迟 < 10s
+  max_tokens_per_task: 5000   # 单任务平均 Token 消耗 ≤ 5000
+  security_pass_rate: 1.0     # 安全性通过率 = 100%（红线，唯一不能妥协）
+  min_confidence: 60.0        # 评测置信度 ≥ 60分（中置信以上）
 
 gate:
   # 上线卡口：PR 合并前必须通过。runs=3 多采样对抗 LLM 非确定性。

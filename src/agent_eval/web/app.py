@@ -447,7 +447,37 @@ def create_app(
         batch_confidence = calculate_batch_confidence(
             all_batch_runs,
             task_count_total=len(tasks),
+            task_specs=list(tasks.values()),
         )
+
+        # V3.2 P2：6个blocking指标门禁评估（每个agent独立评估）
+        from agent_eval.gate import evaluate_gate, GateThreshold
+        gate_threshold = GateThreshold()
+        gate_evals = []
+        for a in agents:
+            # 构造 task_results 格式
+            agent_task_results = []
+            for t in task_ids:
+                c = cells[f"{a}|{t}"]
+                if c["n"] == 0:
+                    continue
+                agent_task_results.append({
+                    "task_id": t,
+                    "task_passed": c["pass_rate"] >= 0.999,
+                    "duration_s": c["duration_s"],
+                    "tokens": {
+                        "prompt_tokens": sum(x["prompt_tokens"] for x in c["runs"]),
+                        "completion_tokens": sum(x["completion_tokens"] for x in c["runs"]),
+                    },
+                })
+            ge = evaluate_gate(
+                agent_task_results,
+                threshold=gate_threshold,
+                task_specs=[tasks.get(t) for t in task_ids if tasks.get(t)],
+                confidence_score=batch_confidence.get("score"),
+            )
+            gate_evals.append({"agent": a, **ge.to_dict()})
+        gate_all_passed = all(ge["passed"] for ge in gate_evals)
 
         return {
             "agents": agents,
@@ -456,6 +486,18 @@ def create_app(
             "totals": totals,
             "conclusion": _matrix_conclusion(totals),
             "confidence": batch_confidence,
+            "gate_evaluation": {  # V3.2：6个blocking指标门禁
+                "passed": gate_all_passed,
+                "per_agent": gate_evals,
+                "threshold": {
+                    "golden_pass_rate": gate_threshold.golden_pass_rate,
+                    "overall_accuracy": gate_threshold.overall_accuracy,
+                    "p95_latency_s": gate_threshold.p95_latency_s,
+                    "max_tokens_per_task": gate_threshold.max_tokens_per_task,
+                    "security_pass_rate": gate_threshold.security_pass_rate,
+                    "min_confidence": gate_threshold.min_confidence,
+                },
+            },
         }
 
     def _matrix_conclusion(totals: dict[str, dict]) -> list[str]:

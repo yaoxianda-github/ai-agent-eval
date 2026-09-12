@@ -1683,6 +1683,39 @@
         dimsHtml + '</div>';
     }
 
+    // V3.2 P2：6个blocking指标门禁
+    var gateHtml = "";
+    if (m.gate_evaluation) {
+      var ge = m.gate_evaluation;
+      var gateColor = ge.passed ? "#22c55e" : "#ef4444";
+      var gateLabel = ge.passed ? "门禁 PASS" : "门禁 FAIL（阻断）";
+      var gateMetricsHtml = "";
+      (ge.per_agent || []).forEach(function (ag) {
+        gateMetricsHtml += '<div style="margin-bottom:8px;"><b>' + esc(ag.agent) + '</b>：' +
+          (ag.passed ? '<span style="color:#22c55e;">PASS</span>' : '<span style="color:#ef4444;">FAIL</span>') +
+          '（' + ag.passed_count + '/' + ag.total_count + '指标达标）</div>';
+        (ag.metrics || []).forEach(function (m2) {
+          var mc = m2.passed ? "#22c55e" : "#ef4444";
+          var actualTxt = m2.unit === "%" ? (m2.actual * 100).toFixed(1) + "%" :
+                          m2.unit === "s" ? m2.actual.toFixed(1) + "s" :
+                          m2.unit === "tokens" ? m2.actual.toFixed(0) :
+                          m2.unit === "分" ? m2.actual.toFixed(1) + "分" : m2.actual;
+          var thresholdTxt = m2.unit === "%" ? "≥" + (m2.threshold * 100).toFixed(0) + "%" :
+                             m2.unit === "s" ? "<" + m2.threshold + "s" :
+                             m2.unit === "tokens" ? "≤" + m2.threshold :
+                             m2.unit === "分" ? "≥" + m2.threshold + "分" : m2.threshold;
+          gateMetricsHtml += '<div class="conf-dim"><span>' +
+            (m2.passed ? "✓" : "✗") + ' ' + esc(m2.label) + '：' + actualTxt +
+            '（阈值' + thresholdTxt + '）</span><b style="color:' + mc + ';">' +
+            (m2.passed ? "达标" : "未达标") + '</b></div>';
+        });
+      });
+      gateHtml = '<div class="confidence-box" style="border-left:4px solid ' + gateColor + ';margin-top:12px;">' +
+        '<div class="conf-header"><b style="color:' + gateColor + ';">' + gateLabel + '</b>' +
+        '<span class="info-icon" title="6个blocking指标全部达标=PASS，任一未达标=FAIL（阻断代码合并）">ⓘ</span></div>' +
+        gateMetricsHtml + '</div>';
+    }
+
     var totHead = showCost
       ? "<tr><th>Agent</th><th class='num'>加权总分</th><th class='num'>任务通过</th><th class='num'>总成本</th><th class='num'>总耗时</th><th class='num'>平均波动σ</th></tr>"
       : "<tr><th>Agent</th><th class='num'>加权总分</th><th class='num'>任务通过</th><th class='num'>总耗时</th></tr>";
@@ -1708,7 +1741,7 @@
 
     el("mx-result").innerHTML =
       '<div class="card"><h3>对比结论 <span class="muted">' + esc(b.label) + " · runs=" + (b.runs || 1) +
-        " · " + fmtTime(b.finished_at || b.created_at) + '</span></h3><div class="mx-concl">' + concl + "</div>" + confHtml + "</div>" +
+        " · " + fmtTime(b.finished_at || b.created_at) + '</span></h3><div class="mx-concl">' + concl + "</div>" + confHtml + gateHtml + "</div>" +
       '<div class="card"><h3>得分矩阵 <span class="muted">格内=最好成绩，颜色=通过率；点击单元格下钻每次运行</span></h3>' +
         '<div class="matrix-scroll"><table class="matrix">' + head + rows + "</table></div>" +
         '<div style="margin-top:12px;">' + exportBtn + "</div></div>" +
