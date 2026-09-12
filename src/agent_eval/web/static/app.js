@@ -470,6 +470,187 @@
     }).catch(function (e) { el("h-list").innerHTML = '<div class="err-banner">' + esc(e.message) + "</div>"; });
   }
 
+  // ---------- 视图：Badcase 管理（V2.8） ----------
+  var bcPage = 0, bcLimit = 20;
+
+  var BC_CATEGORY_LABELS = {
+    reasoning: "推理错误", tool_use: "工具使用错误", format: "输出格式错误",
+    timeout: "超时", crash: "异常崩溃", hallucination: "幻觉/编造",
+    planning: "规划错误", context: "上下文理解错误", other: "其他"
+  };
+  var BC_STATUS_LABELS = {
+    pending: "待分析", analyzing: "分析中", fixed: "已修复", ignored: "已忽略"
+  };
+  var BC_SEVERITY_COLORS = { P0: "#dc2626", P1: "#ea580c", P2: "#ca8a04", P3: "#65a30d" };
+  var BC_STATUS_COLORS = { pending: "#6b7280", analyzing: "#2563eb", fixed: "#16a34a", ignored: "#9ca3af" };
+
+  function viewBadcases() {
+    Promise.all([loadTasks(), loadBackends()]).then(function () {
+      var taskOpts = '<option value="">全部任务</option>' + tasksCache.map(function (t) {
+        return '<option value="' + esc(t.id) + '">' + esc(t.id) + "</option>";
+      }).join("");
+      var agentOpts = '<option value="">全部后端</option>' + backendsCache.map(function (b) {
+        return '<option value="' + esc(b.id) + '">' + esc(b.id) + "</option>";
+      }).join("");
+      var catOpts = '<option value="">全部分类</option>' + Object.keys(BC_CATEGORY_LABELS).map(function (k) {
+        return '<option value="' + k + '">' + BC_CATEGORY_LABELS[k] + "</option>";
+      }).join("");
+      var sevOpts = '<option value="">全部严重度</option><option>P0</option><option>P1</option><option>P2</option><option>P3</option>';
+      var stOpts = '<option value="">全部状态</option>' + Object.keys(BC_STATUS_LABELS).map(function (k) {
+        return '<option value="' + k + '">' + BC_STATUS_LABELS[k] + "</option>";
+      }).join("");
+      renderHTML(
+        '<h2 class="page-title">Badcase 管理</h2>' +
+        '<div class="card">' +
+          '<div class="form-row">' +
+            '<div class="field"><label>任务</label><select id="bc-task">' + taskOpts + "</select></div>" +
+            '<div class="field"><label>后端</label><select id="bc-agent">' + agentOpts + "</select></div>" +
+            '<div class="field"><label>分类</label><select id="bc-category">' + catOpts + "</select></div>" +
+          "</div>" +
+          '<div class="form-row">' +
+            '<div class="field"><label>严重度</label><select id="bc-severity">' + sevOpts + "</select></div>" +
+            '<div class="field"><label>状态</label><select id="bc-status">' + stOpts + "</select></div>" +
+            '<div class="field" style="flex:0 0 100px;"><label>&nbsp;</label><button class="btn secondary" id="bc-filter">筛选</button></div>' +
+          "</div>" +
+          '<div id="bc-stats" class="bc-stats"></div>' +
+          '<div id="bc-list"><div class="empty">加载中…</div></div>' +
+        "</div>"
+      );
+      el("bc-filter").onclick = function () { bcPage = 0; loadBadcases(); };
+      loadBadcases();
+    }).catch(function (e) { renderErr(e.message); });
+  }
+
+  function loadBadcases() {
+    var q = ["page=" + (bcPage + 1), "page_size=" + bcLimit];
+    var tv = el("bc-task") && el("bc-task").value;
+    var av = el("bc-agent") && el("bc-agent").value;
+    var cv = el("bc-category") && el("bc-category").value;
+    var sv = el("bc-severity") && el("bc-severity").value;
+    var stv = el("bc-status") && el("bc-status").value;
+    if (tv) q.push("task_id=" + encodeURIComponent(tv));
+    if (av) q.push("agent_id=" + encodeURIComponent(av));
+    if (cv) q.push("category=" + encodeURIComponent(cv));
+    if (sv) q.push("severity=" + encodeURIComponent(sv));
+    if (stv) q.push("status=" + encodeURIComponent(stv));
+    api("/api/badcases?" + q.join("&")).then(function (d) {
+      var list = el("bc-list");
+      var stats = el("bc-stats");
+      if (stats && d.stats) {
+        var s = d.stats;
+        var statHtml = '<div class="bc-stat-row">';
+        statHtml += '<span class="bc-stat"><b>' + s.total + '</b> 总计</span>';
+        Object.keys(BC_STATUS_LABELS).forEach(function (k) {
+          statHtml += '<span class="bc-stat" style="color:' + BC_STATUS_COLORS[k] + '"><b>' + (s.by_status[k] || 0) + '</b> ' + BC_STATUS_LABELS[k] + '</span>';
+        });
+        Object.keys(BC_SEVERITY_COLORS).forEach(function (k) {
+          statHtml += '<span class="bc-stat" style="color:' + BC_SEVERITY_COLORS[k] + '"><b>' + (s.by_severity[k] || 0) + '</b> ' + k + '</span>';
+        });
+        statHtml += '</div>';
+        stats.innerHTML = statHtml;
+      }
+      if (!d.items || !d.items.length) { list.innerHTML = '<div class="empty">暂无 badcase 记录。可在运行详情页点击「标记为 badcase」导入。</div>'; return; }
+      var rows = d.items.map(function (b) {
+        var catLabel = BC_CATEGORY_LABELS[b.category] || b.category;
+        var stLabel = BC_STATUS_LABELS[b.status] || b.status;
+        return '<tr class="clickable" data-bid="' + esc(b.id) + '">' +
+          "<td>" + esc(fmtTime(b.created_at)) + "</td>" +
+          '<td><span class="badge" style="background:' + BC_SEVERITY_COLORS[b.severity] + ';color:#fff">' + esc(b.severity) + "</span></td>" +
+          "<td><b>" + esc(b.title) + "</b></td>" +
+          "<td>" + esc(b.task_id) + "</td><td>" + esc(b.agent_id) + "</td>" +
+          "<td>" + esc(catLabel) + "</td>" +
+          '<td><span class="badge" style="background:' + BC_STATUS_COLORS[b.status] + ';color:#fff">' + esc(stLabel) + "</span></td>" +
+          "</tr>";
+      }).join("");
+      var total = Number(d.total || 0);
+      var pages = Math.max(1, d.total_pages || Math.ceil(total / bcLimit));
+      var cur = Math.min(bcPage + 1, pages);
+      var pager = '<div class="pager">' +
+        '<button class="btn secondary small" id="bc-prev"' + (bcPage <= 0 ? " disabled" : "") + '>‹ 上一页</button>' +
+        '<span class="pager-info">第 ' + cur + " / " + pages + " 页 · 共 " + total + " 条</span>" +
+        '<button class="btn secondary small" id="bc-next"' + (bcPage >= pages - 1 ? " disabled" : "") + '>下一页 ›</button>' +
+        "</div>";
+      list.innerHTML = '<table><tr><th>创建时间</th><th>严重度</th><th>标题</th><th>任务</th><th>后端</th><th>分类</th><th>状态</th></tr>' + rows + "</table>" + pager;
+      list.querySelectorAll("tr.clickable").forEach(function (tr) {
+        tr.onclick = function () { location.hash = "#/badcase/" + tr.getAttribute("data-bid"); };
+      });
+      var prevBtn = el("bc-prev"), nextBtn = el("bc-next");
+      if (prevBtn) prevBtn.onclick = function () { if (bcPage > 0) { bcPage--; loadBadcases(); } };
+      if (nextBtn) nextBtn.onclick = function () { if (bcPage < pages - 1) { bcPage++; loadBadcases(); } };
+    }).catch(function (e) { el("bc-list").innerHTML = '<div class="err-banner">' + esc(e.message) + "</div>"; });
+  }
+
+  function viewBadcaseDetail(bid) {
+    api("/api/badcases/" + bid).then(function (b) {
+      var catOpts = Object.keys(BC_CATEGORY_LABELS).map(function (k) {
+        return '<option value="' + k + '"' + (k === b.category ? " selected" : "") + '>' + BC_CATEGORY_LABELS[k] + "</option>";
+      }).join("");
+      var sevOpts = ["P0", "P1", "P2", "P3"].map(function (s) {
+        return '<option value="' + s + '"' + (s === b.severity ? " selected" : "") + '>' + s + "</option>";
+      }).join("");
+      var stOpts = Object.keys(BC_STATUS_LABELS).map(function (k) {
+        return '<option value="' + k + '"' + (k === b.status ? " selected" : "") + '>' + BC_STATUS_LABELS[k] + "</option>";
+      }).join("");
+      var runLink = b.run_id ? '<a href="#/run/' + esc(b.run_id) + '" class="btn secondary small">查看关联运行 →</a>' : "";
+      var runSummary = b.run_summary ? (
+        '<div class="bc-run-summary"><b>关联运行摘要：</b> status=' + esc(b.run_summary.status) +
+        ', score=' + esc(b.run_summary.score) + ', pass_rate=' + esc(b.run_summary.pass_rate) +
+        ', duration=' + fmtDur(b.run_summary.duration_s) + ', steps=' + esc(b.run_summary.steps) + '</div>'
+      ) : "";
+      renderHTML(
+        '<h2 class="page-title">Badcase 详情 · ' + esc(b.id) + '</h2>' +
+        '<div class="card">' +
+          '<div class="form-row">' +
+            '<div class="field" style="flex:2"><label>标题</label><input id="bc-title" value="' + esc(b.title) + '"></div>' +
+            '<div class="field"><label>严重度</label><select id="bc-severity">' + sevOpts + "</select></div>" +
+            '<div class="field"><label>状态</label><select id="bc-status">' + stOpts + "</select></div>" +
+          "</div>" +
+          '<div class="form-row">' +
+            '<div class="field"><label>任务</label><input id="bc-task" value="' + esc(b.task_id) + '"></div>' +
+            '<div class="field"><label>后端</label><input id="bc-agent" value="' + esc(b.agent_id) + '"></div>' +
+            '<div class="field"><label>分类</label><select id="bc-category">' + catOpts + "</select></div>" +
+          "</div>" +
+          '<div class="field"><label>问题描述</label><textarea id="bc-desc" rows="4">' + esc(b.description) + "</textarea></div>" +
+          '<div class="field"><label>根因分析</label><textarea id="bc-root" rows="3" placeholder="分析 badcase 的根本原因...">' + esc(b.root_cause || "") + "</textarea></div>" +
+          '<div class="field"><label>修复方案</label><textarea id="bc-fix" rows="3" placeholder="记录修复方案或改进措施...">' + esc(b.fix_plan || "") + "</textarea></div>" +
+          runSummary +
+          '<div class="form-row" style="margin-top:16px">' +
+            '<button class="btn" id="bc-save">保存修改</button>' +
+            runLink +
+            '<button class="btn danger" id="bc-delete" style="margin-left:auto">删除</button>' +
+          "</div>" +
+          '<div id="bc-msg"></div>' +
+        "</div>"
+      );
+      el("bc-save").onclick = function () { saveBadcase(bid); };
+      el("bc-delete").onclick = function () {
+        if (confirm("确定删除这条 badcase？")) {
+          api("/api/badcases/" + bid, { method: "DELETE" }).then(function () {
+            location.hash = "#/badcases";
+          }).catch(function (e) { el("bc-msg").innerHTML = '<div class="err-banner">' + esc(e.message) + "</div>"; });
+        }
+      };
+    }).catch(function (e) { renderErr(e.message); });
+  }
+
+  function saveBadcase(bid) {
+    var body = {
+      title: el("bc-title").value,
+      task_id: el("bc-task").value,
+      agent_id: el("bc-agent").value,
+      category: el("bc-category").value,
+      severity: el("bc-severity").value,
+      status: el("bc-status").value,
+      description: el("bc-desc").value,
+      root_cause: el("bc-root").value,
+      fix_plan: el("bc-fix").value,
+    };
+    api("/api/badcases/" + bid, { method: "PUT", body: body }).then(function () {
+      el("bc-msg").innerHTML = '<div class="success-banner">已保存 ✓</div>';
+      setTimeout(function () { el("bc-msg").innerHTML = ""; }, 2000);
+    }).catch(function (e) { el("bc-msg").innerHTML = '<div class="err-banner">' + esc(e.message) + "</div>"; });
+  }
+
   // ---------- 视图：运行详情 ----------
   function viewRunDetail(runId) {
     api("/api/runs/" + runId).then(function (r) {
@@ -501,7 +682,10 @@
       var sc = (r.metrics && r.metrics.score) || 0;
       var wt = (r.metrics && r.metrics.weight) || 0;
       renderHTML(
-        '<h2 class="page-title">运行详情 <a class="btn secondary" style="float:right;" href="#/history">← 返回历史</a></h2>' +
+        '<h2 class="page-title">运行详情 ' +
+          '<a class="btn secondary" style="float:right;margin-left:8px;" href="#/history">← 返回历史</a>' +
+          '<button class="btn secondary" id="btn-mark-badcase" style="float:right;">标记为 badcase</button>' +
+        '</h2>' +
         '<div class="kpi-row">' +
           '<div class="kpi"><b>' + esc(r.run_id) + "</b><span>run_id</span></div>" +
           '<div class="kpi"><b>' + esc(r.task_id) + " / " + esc(r.agent_id) + "</b><span>任务 / 后端</span></div>" +
@@ -517,6 +701,23 @@
         '<div class="card" id="file-view" style="display:none;"><h3>文件预览</h3><pre class="code" id="file-content"></pre></div>'
       );
       loadFiles(runId);
+      var markBtn = el("btn-mark-badcase");
+      if (markBtn) {
+        markBtn.onclick = function () {
+          markBtn.disabled = true;
+          markBtn.textContent = "导入中…";
+          api("/api/badcases/import-from-run", { method: "POST", body: { run_id: runId } }).then(function (d) {
+            markBtn.textContent = "✓ 已标记";
+            setTimeout(function () {
+              location.hash = "#/badcase/" + d.id;
+            }, 800);
+          }).catch(function (e) {
+            markBtn.disabled = false;
+            markBtn.textContent = "标记为 badcase";
+            alert("标记失败: " + e.message);
+          });
+        };
+      }
     }).catch(function (e) { renderErr(e.message); });
   }
 
@@ -1549,10 +1750,12 @@
       a.classList.toggle("active", a.getAttribute("data-view") === name);
     });
     if (name === "run") { viewRunDetail(parts[1]); return; }
+    if (name === "badcase") { viewBadcaseDetail(parts[1]); return; }
     if (name === "dashboard") viewDashboard();
     else if (name === "tasks") viewTasks();
     else if (name === "packages") viewPackages();
     else if (name === "history") viewHistory();
+    else if (name === "badcases") viewBadcases();
     else if (name === "compare") viewCompare();
     else if (name === "report") viewReport();
     else if (name === "settings") viewSettings();

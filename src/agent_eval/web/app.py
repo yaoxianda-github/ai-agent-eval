@@ -796,6 +796,156 @@ def create_app(
             return {"status": "removed", "name": name, "message": f"任务包 {name} 已卸载"}
         raise HTTPException(status_code=404, detail=f"任务包不存在: {name}")
 
+    # ---------- Badcase 管理（V2.8 评测 badcase 积累） ----------
+    @app.get("/api/badcases")
+    def api_list_badcases(
+        task_id: str = Query(None),
+        agent_id: str = Query(None),
+        category: str = Query(None),
+        severity: str = Query(None),
+        status: str = Query(None),
+        page: int = Query(1, ge=1),
+        page_size: int = Query(20, ge=1, le=100),
+    ) -> dict:
+        """分页列出 badcase，支持按任务/Agent/分类/严重程度/状态筛选。"""
+        offset = (page - 1) * page_size
+        items, total = store.list_badcases(
+            limit=page_size, offset=offset,
+            task_id=task_id, agent_id=agent_id,
+            category=category, severity=severity, status=status,
+        )
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total + page_size - 1) // page_size,
+            "categories": store.BADCASE_CATEGORIES,
+            "severities": store.BADCASE_SEVERITIES,
+            "statuses": store.BADCASE_STATUSES,
+            "stats": store.badcase_stats(),
+        }
+
+    @app.get("/api/badcases/{bid}")
+    def api_get_badcase(bid: str) -> dict:
+        """查看 badcase 详情。"""
+        b = store.get_badcase(bid)
+        if not b:
+            raise HTTPException(status_code=404, detail=f"badcase 不存在: {bid}")
+        # 如果有关联的 run_id，附带运行记录摘要
+        if b.get("run_id"):
+            try:
+                run_path = results_dir / b["run_id"] / "run.json"
+                if run_path.exists():
+                    run_data = json.loads(run_path.read_text(encoding="utf-8"))
+                    b["run_summary"] = {
+                        "status": run_data.get("status"),
+                        "score": run_data.get("metrics", {}).get("score"),
+                        "pass_rate": run_data.get("metrics", {}).get("pass_rate"),
+                        "duration_s": run_data.get("duration_s"),
+                        "steps": len(run_data.get("steps", [])),
+                    }
+            except Exception:  # noqa: BLE001
+                pass
+        return b
+
+    @app.post("/api/badcases")
+    def api_create_badcase(payload: dict = Body(...)) -> dict:
+        """手动创建 badcase。"""
+        required = ["title"]
+        for f in required:
+            if not payload.get(f):
+                raise HTTPException(status_code=400, detail=f"缺少必填字段: {f}")
+        bid = store.insert_badcase(payload)
+        return {"id": bid, "message": "badcase 已创建"}
+
+    @app.put("/api/badcases/{bid}")
+    def api_update_badcase(bid: str, payload: dict = Body(...)) -> dict:
+        """更新 badcase（分类/严重程度/状态/根因/修复方案等）。"""
+        if not store.get_badcase(bid):
+            raise HTTPException(status_code=404, detail=f"badcase 不存在: {bid}")
+        # 允许更新的字段
+        allowed = {"title", "description", "category", "severity", "status",
+                   "root_cause", "fix_plan", "tags", "run_id", "task_id", "agent_id"}
+        update_fields = {k: v for k, v in payload.items() if k in allowed}
+        if update_fields:
+            store.update_badcase(bid, **update_fields)
+        return {"id": bid, "message": "badcase 已更新", "updated": list(update_fields.keys())}
+
+    @app.delete("/api/badcases/{bid}")
+    def api_delete_badcase(bid: str) -> dict:
+        """删除 badcase。"""
+        if not store.get_badcase(bid):
+            raise HTTPException(status_code=404, detail=f"badcase 不存在: {bid}")
+        store.delete_badcase(bid)
+        return {"id": bid, "message": "badcase 已删除"}
+
+    @app.post("/api/badcases/import-from-run")
+    def api_import_badcase_from_run(payload: dict = Body(...)) -> dict:
+        """从运行记录导入 badcase：自动识别未通过的任务并创建 badcase。
+
+        请求体: {"run_id": "xxx", "category": "reasoning", "severity": "P1", "title": "可选标题"}
+        """
+        run_id = str(payload.get("run_id", ""))
+        if not run_id:
+            raise HTTPException(status_code=400, detail="缺少 run_id")
+        run_path = results_dir / run_id / "run.json"
+        if not run_path.exists():
+            raise HTTPException(status_code=404, detail=f"运行记录不存在: {run_id}")
+        try:
+            run_data = json.loads(run_path.read_text(encoding="utf-8"))
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"运行记录解析失败: {e}")
+
+        # 自动判断 badcase 分类
+        status = run_data.get("status", "")
+        verdicts = run_data.get("verdicts", [])
+        failed_checkpoints = [v for v in verdicts if not v.get("passed", True)]
+
+        category = payload.get("category", "other")
+        if status == "timeout":
+            category = "timeout"
+        elif status == "error":
+            category = "crash"
+        elif failed_checkpoints:
+            # 根据失败的 checkpoint 类型推断分类
+            for v in failed_checkpoints:
+                ctype = v.get("checkpoint_type", "")
+                if ctype in ("content_contains", "content_not_contains"):
+                    category = "reasoning"
+                    break
+                elif ctype == "cmd_exit_zero":
+                    category = "tool_use"
+                    break
+
+        severity = payload.get("severity", "P2")
+        if status in ("error", "timeout"):
+            severity = "P0"
+        elif failed_checkpoints and len(failed_checkpoints) >= len(verdicts) * 0.5:
+            severity = "P1"
+
+        title = payload.get("title") or f"{run_data.get('task_id', '?')} × {run_data.get('agent_id', '?')} 未通过"
+        description = payload.get("description", "")
+        if not description:
+            parts = [f"运行状态: {status}"]
+            if failed_checkpoints:
+                parts.append(f"失败校验点: {', '.join(v.get('checkpoint_id', '?') for v in failed_checkpoints)}")
+            if run_data.get("error"):
+                parts.append(f"错误信息: {run_data['error'][:200]}")
+            description = "\n".join(parts)
+
+        bid = store.insert_badcase({
+            "run_id": run_id,
+            "task_id": run_data.get("task_id", ""),
+            "agent_id": run_data.get("agent_id", ""),
+            "title": title,
+            "description": description,
+            "category": category,
+            "severity": severity,
+            "status": "pending",
+        })
+        return {"id": bid, "message": "已从运行记录导入 badcase", "category": category, "severity": severity}
+
     # ---------- 静态页 ----------
     @app.middleware("http")
     async def _request_logging(request, call_next):
