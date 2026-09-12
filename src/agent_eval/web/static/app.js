@@ -1453,6 +1453,90 @@
     }).catch(function (e) { renderErr(e.message); });
   }
 
+  // ---------- 任务包市场（M3 Web 集成） ----------
+  function viewPackages() {
+    renderHTML(
+      '<h2 class="page-title">任务包市场</h2>' +
+      '<div class="card">' +
+        '<h3>安装新任务包</h3>' +
+        '<div style="display:flex;gap:8px;align-items:center;">' +
+          '<input type="text" id="pkg-source" placeholder="git 仓库 URL 或本地目录路径" style="flex:1;padding:6px 10px;border:1px solid #ddd;border-radius:4px;">' +
+          '<input type="text" id="pkg-name" placeholder="包名（可选，覆盖默认）" style="width:180px;padding:6px 10px;border:1px solid #ddd;border-radius:4px;">' +
+          '<button onclick="installPkg()" style="padding:6px 16px;background:#2563eb;color:#fff;border:none;border-radius:4px;cursor:pointer;">安装</button>' +
+        '</div>' +
+        '<p style="color:#666;font-size:12px;margin-top:8px;">支持 git 仓库 URL（如 https://github.com/user/taskpack.git）或本地目录路径。安装后可在 tasks/manifest.yaml 中添加 includes: [包名] 启用。</p>' +
+      '</div>' +
+      '<div id="pkg-list"><p style="color:#999;">加载中...</p></div>'
+    );
+    loadPackages();
+  }
+
+  function loadPackages() {
+    fetch("/api/packages").then(function (r) { return r.json(); }).then(function (data) {
+      var html = '<h3 style="margin-top:24px;">已安装任务包（' + data.total + '）</h3>';
+      if (data.total === 0) {
+        html += '<div class="card"><p style="color:#999;">尚未安装任何任务包。使用上方表单安装，或通过 CLI：agent-eval taskpack install &lt;source&gt;</p></div>';
+      } else {
+        html += '<div class="card"><table class="env-table" style="width:100%;">';
+        html += '<tr><th>包名</th><th>版本</th><th>作者</th><th>描述</th><th>任务数</th><th>操作</th></tr>';
+        data.packages.forEach(function (p) {
+          html += '<tr>' +
+            '<td><strong>' + esc(p.name) + '</strong></td>' +
+            '<td>' + esc(p.version) + '</td>' +
+            '<td>' + esc(p.author || '-') + '</td>' +
+            '<td>' + esc(p.description || '-') + '</td>' +
+            '<td>' + p.task_count + '</td>' +
+            '<td><button onclick="removePkg(\'' + esc(p.name) + '\')" style="padding:4px 10px;background:#dc2626;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;">卸载</button></td>' +
+            '</tr>';
+          if (p.tasks && p.tasks.length > 0) {
+            html += '<tr><td colspan="6" style="background:#f9fafb;padding:8px 12px;font-size:12px;color:#666;">包含任务: ' + p.tasks.map(esc).join(', ') + '</td></tr>';
+          }
+        });
+        html += '</table></div>';
+      }
+      document.getElementById("pkg-list").innerHTML = html;
+    }).catch(function (e) {
+      document.getElementById("pkg-list").innerHTML = '<p style="color:#dc2626;">加载失败: ' + esc(e.message) + '</p>';
+    });
+  }
+
+  window.installPkg = function () {
+    var source = document.getElementById("pkg-source").value.trim();
+    var name = document.getElementById("pkg-name").value.trim();
+    if (!source) { alert("请输入任务包来源（git URL 或本地路径）"); return; }
+    var body = { source: source };
+    if (name) body.name = name;
+    fetch("/api/packages/install", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || "安装失败"); });
+      return r.json();
+    }).then(function (data) {
+      alert(data.message);
+      document.getElementById("pkg-source").value = "";
+      document.getElementById("pkg-name").value = "";
+      loadPackages();
+    }).catch(function (e) {
+      alert("安装失败: " + e.message);
+    });
+  };
+
+  window.removePkg = function (name) {
+    if (!confirm("确定要卸载任务包 '" + name + "' 吗？")) return;
+    fetch("/api/packages/" + encodeURIComponent(name), { method: "DELETE" })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || "卸载失败"); });
+        return r.json();
+      })
+      .then(function (data) {
+        alert(data.message);
+        loadPackages();
+      })
+      .catch(function (e) { alert("卸载失败: " + e.message); });
+  };
+
   // ---------- 路由 ----------
   function router() {
     var h = location.hash || "#/dashboard";
@@ -1467,6 +1551,7 @@
     if (name === "run") { viewRunDetail(parts[1]); return; }
     if (name === "dashboard") viewDashboard();
     else if (name === "tasks") viewTasks();
+    else if (name === "packages") viewPackages();
     else if (name === "history") viewHistory();
     else if (name === "compare") viewCompare();
     else if (name === "report") viewReport();

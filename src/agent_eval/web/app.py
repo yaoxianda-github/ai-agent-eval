@@ -727,6 +727,75 @@ def create_app(
         except (ValueError, FileExistsError) as e:
             raise HTTPException(status_code=400, detail=str(e))
 
+    # ---------- 任务包市场（M3 Web 集成） ----------
+    @app.get("/api/packages")
+    def api_list_packages() -> dict:
+        """列出已安装的所有任务包。"""
+        from agent_eval.taskpack import list_packages
+        packages = list_packages()
+        return {
+            "packages": [
+                {
+                    "name": p.name,
+                    "version": p.version,
+                    "author": p.author,
+                    "description": p.description,
+                    "license": p.license,
+                    "task_count": len(p.tasks),
+                    "tasks": p.tasks,
+                    "install_path": str(p.install_path) if p.install_path else None,
+                }
+                for p in packages
+            ],
+            "total": len(packages),
+        }
+
+    @app.get("/api/packages/{name}")
+    def api_get_package(name: str) -> dict:
+        """查看任务包详情。"""
+        from agent_eval.taskpack import get_package
+        pkg = get_package(name)
+        if pkg is None:
+            raise HTTPException(status_code=404, detail=f"任务包不存在: {name}")
+        return {
+            "name": pkg.name,
+            "version": pkg.version,
+            "author": pkg.author,
+            "description": pkg.description,
+            "license": pkg.license,
+            "task_count": len(pkg.tasks),
+            "tasks": pkg.tasks,
+            "install_path": str(pkg.install_path) if pkg.install_path else None,
+        }
+
+    @app.post("/api/packages/install")
+    def api_install_package(payload: dict = Body(...)) -> dict:
+        """安装任务包（从 git URL 或本地目录）。"""
+        from agent_eval.taskpack import install_package
+        source = payload.get("source", "")
+        name = payload.get("name") or None
+        if not source:
+            raise HTTPException(status_code=400, detail="缺少 source 参数")
+        try:
+            pkg = install_package(source, name=name)
+            return {
+                "status": "installed",
+                "name": pkg.name,
+                "version": pkg.version,
+                "task_count": len(pkg.tasks),
+                "message": f"任务包 {pkg.name} v{pkg.version} 安装成功（{len(pkg.tasks)} 个任务）",
+            }
+        except (FileNotFoundError, RuntimeError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.delete("/api/packages/{name}")
+    def api_remove_package(name: str) -> dict:
+        """卸载任务包。"""
+        from agent_eval.taskpack import remove_package
+        if remove_package(name):
+            return {"status": "removed", "name": name, "message": f"任务包 {name} 已卸载"}
+        raise HTTPException(status_code=404, detail=f"任务包不存在: {name}")
+
     # ---------- 静态页 ----------
     @app.middleware("http")
     async def _request_logging(request, call_next):
