@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS badcases (
     root_cause  TEXT NOT NULL DEFAULT '',
     fix_plan    TEXT NOT NULL DEFAULT '',
     tags        TEXT NOT NULL DEFAULT '[]',
+    regression_task_id TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -98,6 +99,10 @@ class RunStore:
         bcols = {r[1] for r in self._conn.execute("PRAGMA table_info(batches)").fetchall()}
         if "last_heartbeat" not in bcols:
             self._conn.execute("ALTER TABLE batches ADD COLUMN last_heartbeat TEXT NOT NULL DEFAULT ''")
+        # badcases 表加 regression_task_id 字段（V2.8.1：badcase 转化为回归评测用例）
+        bccols = {r[1] for r in self._conn.execute("PRAGMA table_info(badcases)").fetchall()}
+        if "regression_task_id" not in bccols:
+            self._conn.execute("ALTER TABLE badcases ADD COLUMN regression_task_id TEXT NOT NULL DEFAULT ''")
 
     def insert_run(self, rec: dict, batch_id: str = "") -> None:
         m = rec.get("metrics", {})
@@ -386,6 +391,23 @@ class RunStore:
             "by_severity": by_severity,
             "by_category": by_category,
         }
+
+    def list_regression_badcases(self) -> list[dict]:
+        """获取所有已转化为回归评测用例的 badcase（regression_task_id 不为空）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM badcases WHERE regression_task_id != '' ORDER BY created_at DESC"
+            ).fetchall()
+            cols = [d[0] for d in self._conn.execute("SELECT * FROM badcases LIMIT 1").description]
+        result = []
+        for r in rows:
+            d = dict(zip(cols, r))
+            try:
+                d["tags"] = json.loads(d.get("tags") or "[]")
+            except (ValueError, TypeError):
+                d["tags"] = []
+            result.append(d)
+        return result
 
     def rebuild(self, results_dir: Path) -> int:
         """扫描 results_dir/*/run.json 重建索引，返回已索引 run 数。

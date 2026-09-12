@@ -1,0 +1,42 @@
+id: T-REG-001
+title: '[回归] 测试回归用例'
+level: L2
+description: '【回归测试用例】由 badcase 7e3055199f69 转化生成
+
+  原始任务: T800 × minimal-react
+
+  问题分类: other
+
+  严重程度: P2
+
+
+  【问题描述】
+
+  运行状态: max_steps
+
+  错误信息: 达到最大步数 3
+
+
+  【评测要求】
+
+  Agent 必须正确处理此场景，避免复现上述问题。
+
+  请将最终结果写入 output/result.md 文件。'
+tags:
+- regression
+- other
+fixtures:
+  source: fixtures/
+ground_truth:
+  checkpoints:
+  - id: c1
+    type: file_exists
+    path: output/result.md
+    desc: Agent 必须输出结果文件
+verifier: deterministic
+weight: 1.0
+cost_budget_usd: 0.2
+timeout_s: 300
+capabilities:
+- tool_use
+- reasoning

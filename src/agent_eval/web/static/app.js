@@ -471,7 +471,7 @@
   }
 
   // ---------- 视图：Badcase 管理（V2.8） ----------
-  var bcPage = 0, bcLimit = 20;
+  var bcPage = 0, bcLimit = 20, bcTab = "all";
 
   var BC_CATEGORY_LABELS = {
     reasoning: "推理错误", tool_use: "工具使用错误", format: "输出格式错误",
@@ -499,8 +499,14 @@
       var stOpts = '<option value="">全部状态</option>' + Object.keys(BC_STATUS_LABELS).map(function (k) {
         return '<option value="' + k + '">' + BC_STATUS_LABELS[k] + "</option>";
       }).join("");
+      var allTabClass = bcTab === "all" ? "bc-tab-active" : "";
+      var regTabClass = bcTab === "regression" ? "bc-tab-active" : "";
       renderHTML(
         '<h2 class="page-title">Badcase 管理</h2>' +
+        '<div class="bc-tabs">' +
+          '<button class="bc-tab ' + allTabClass + '" id="bc-tab-all">全部 badcase</button>' +
+          '<button class="bc-tab ' + regTabClass + '" id="bc-tab-regression">回归测试集</button>' +
+        "</div>" +
         '<div class="card">' +
           '<div class="form-row">' +
             '<div class="field"><label>任务</label><select id="bc-task">' + taskOpts + "</select></div>" +
@@ -517,11 +523,41 @@
         "</div>"
       );
       el("bc-filter").onclick = function () { bcPage = 0; loadBadcases(); };
+      el("bc-tab-all").onclick = function () { bcTab = "all"; bcPage = 0; viewBadcases(); };
+      el("bc-tab-regression").onclick = function () { bcTab = "regression"; bcPage = 0; viewBadcases(); };
       loadBadcases();
     }).catch(function (e) { renderErr(e.message); });
   }
 
   function loadBadcases() {
+    // 回归测试集 tab：调用专用 API，不分页
+    if (bcTab === "regression") {
+      api("/api/regression-badcases").then(function (d) {
+        var list = el("bc-list");
+        var stats = el("bc-stats");
+        if (stats) {
+          stats.innerHTML = '<div class="bc-stat-row"><span class="bc-stat"><b>' + d.total + '</b> 回归用例</span><span class="bc-stat" style="color:#16a34a;">这些 badcase 已转化为评测任务，可在任务管理中运行回归测试</span></div>';
+        }
+        if (!d.items || !d.items.length) { list.innerHTML = '<div class="empty">暂无回归用例。在 badcase 详情页点击「转化为评测用例」即可生成回归任务。</div>'; return; }
+        var rows = d.items.map(function (b) {
+          var catLabel = BC_CATEGORY_LABELS[b.category] || b.category;
+          return '<tr class="clickable" data-bid="' + esc(b.id) + '">' +
+            "<td>" + esc(fmtTime(b.created_at)) + "</td>" +
+            '<td><span class="badge" style="background:' + BC_SEVERITY_COLORS[b.severity] + ';color:#fff">' + esc(b.severity) + "</span></td>" +
+            "<td><b>" + esc(b.title) + "</b></td>" +
+            '<td><a href="#/tasks" style="color:#2563eb;text-decoration:underline;">' + esc(b.regression_task_id) + '</a></td>' +
+            "<td>" + esc(b.task_id) + "</td><td>" + esc(b.agent_id) + "</td>" +
+            "<td>" + esc(catLabel) + "</td>" +
+            "</tr>";
+        }).join("");
+        list.innerHTML = '<table><tr><th>创建时间</th><th>严重度</th><th>标题</th><th>回归任务</th><th>原始任务</th><th>后端</th><th>分类</th></tr>' + rows + "</table>";
+        list.querySelectorAll("tr.clickable").forEach(function (tr) {
+          tr.onclick = function () { location.hash = "#/badcase/" + tr.getAttribute("data-bid"); };
+        });
+      }).catch(function (e) { el("bc-list").innerHTML = '<div class="err-banner">' + esc(e.message) + "</div>"; });
+      return;
+    }
+    // 全部 badcase tab：原有逻辑
     var q = ["page=" + (bcPage + 1), "page_size=" + bcLimit];
     var tv = el("bc-task") && el("bc-task").value;
     var av = el("bc-agent") && el("bc-agent").value;
@@ -597,6 +633,12 @@
         ', score=' + esc(b.run_summary.score) + ', pass_rate=' + esc(b.run_summary.pass_rate) +
         ', duration=' + fmtDur(b.run_summary.duration_s) + ', steps=' + esc(b.run_summary.steps) + '</div>'
       ) : "";
+      // 回归用例关联信息
+      var regressionInfo = "";
+      if (b.regression_task_id) {
+        regressionInfo = '<div class="bc-run-summary" style="background:#ECFDF5;color:#065F46;"><b>✓ 已转化为回归评测用例：</b> <a href="#/tasks" style="color:#065F46;text-decoration:underline;">' + esc(b.regression_task_id) + '</a>（可在任务管理中查看和运行）</div>';
+      }
+      var convertBtn = b.regression_task_id ? "" : '<button class="btn secondary" id="bc-convert">转化为评测用例</button>';
       renderHTML(
         '<h2 class="page-title">Badcase 详情 · ' + esc(b.id) + '</h2>' +
         '<div class="card">' +
@@ -614,12 +656,28 @@
           '<div class="field"><label>根因分析</label><textarea id="bc-root" rows="3" placeholder="分析 badcase 的根本原因...">' + esc(b.root_cause || "") + "</textarea></div>" +
           '<div class="field"><label>修复方案</label><textarea id="bc-fix" rows="3" placeholder="记录修复方案或改进措施...">' + esc(b.fix_plan || "") + "</textarea></div>" +
           runSummary +
+          regressionInfo +
           '<div class="form-row" style="margin-top:16px">' +
             '<button class="btn" id="bc-save">保存修改</button>' +
+            convertBtn +
             runLink +
             '<button class="btn danger" id="bc-delete" style="margin-left:auto">删除</button>' +
           "</div>" +
           '<div id="bc-msg"></div>' +
+          // 转化对话框
+          '<div id="bc-convert-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;">' +
+            '<div style="background:#fff;padding:24px;border-radius:8px;width:560px;max-width:90vw;">' +
+              '<h3 style="margin-top:0;">转化为回归评测用例</h3>' +
+              '<div class="field"><label>新任务 ID（如 T-REG-001）</label><input id="bc-new-task-id" placeholder="T-REG-001"></div>' +
+              '<div class="field"><label>任务标题</label><input id="bc-new-title" value="[回归] ' + esc(b.title) + '"></div>' +
+              '<div class="field"><label>任务描述（可编辑）</label><textarea id="bc-new-desc" rows="6"></textarea></div>' +
+              '<div class="field" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="bc-add-manifest" checked><label for="bc-add-manifest" style="margin:0;">自动加入 manifest.yaml</label></div>' +
+              '<div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end;">' +
+                '<button class="btn secondary" id="bc-convert-cancel">取消</button>' +
+                '<button class="btn" id="bc-convert-confirm">确认转化</button>' +
+              "</div>" +
+            "</div>" +
+          "</div>" +
         "</div>"
       );
       el("bc-save").onclick = function () { saveBadcase(bid); };
@@ -630,6 +688,52 @@
           }).catch(function (e) { el("bc-msg").innerHTML = '<div class="err-banner">' + esc(e.message) + "</div>"; });
         }
       };
+      // 转化为评测用例
+      var convertBtnEl = el("bc-convert");
+      if (convertBtnEl) {
+        // 预填充描述
+        var descLines = [
+          "【回归测试用例】由 badcase " + bid + " 转化生成",
+          "原始任务: " + b.task_id + " × " + b.agent_id,
+          "问题分类: " + (BC_CATEGORY_LABELS[b.category] || b.category),
+          "严重程度: " + b.severity,
+          "",
+          "【问题描述】",
+          b.description,
+        ];
+        if (b.root_cause) descLines.push("", "【根因分析】", b.root_cause);
+        if (b.fix_plan) descLines.push("", "【修复方案】", b.fix_plan);
+        descLines.push("", "【评测要求】", "Agent 必须正确处理此场景，避免复现上述问题。", "请将最终结果写入 output/result.md 文件。");
+        el("bc-new-desc").value = descLines.join("\n");
+
+        convertBtnEl.onclick = function () {
+          el("bc-convert-modal").style.display = "flex";
+        };
+        el("bc-convert-cancel").onclick = function () {
+          el("bc-convert-modal").style.display = "none";
+        };
+        el("bc-convert-confirm").onclick = function () {
+          var newTaskId = el("bc-new-task-id").value.trim();
+          if (!newTaskId) { alert("请输入新任务 ID"); return; }
+          var body = {
+            new_task_id: newTaskId,
+            title: el("bc-new-title").value,
+            description: el("bc-new-desc").value,
+            add_to_manifest: el("bc-add-manifest").checked,
+          };
+          el("bc-convert-confirm").disabled = true;
+          el("bc-convert-confirm").textContent = "转化中...";
+          api("/api/badcases/" + bid + "/convert-to-task", { method: "POST", body: body }).then(function (d) {
+            el("bc-convert-modal").style.display = "none";
+            el("bc-msg").innerHTML = '<div class="success-banner">✓ 已转化为回归评测用例 ' + esc(d.new_task_id) + '，页面即将刷新...</div>';
+            setTimeout(function () { viewBadcaseDetail(bid); }, 1500);
+          }).catch(function (e) {
+            el("bc-convert-confirm").disabled = false;
+            el("bc-convert-confirm").textContent = "确认转化";
+            alert("转化失败: " + e.message);
+          });
+        };
+      }
     }).catch(function (e) { renderErr(e.message); });
   }
 

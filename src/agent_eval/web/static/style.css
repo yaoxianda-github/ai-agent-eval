@@ -240,6 +240,10 @@ table.matrix th { position: sticky; top: 0; z-index: 1; }
 .radar-detail th { background: #F9FAFB; font-weight: 600; color: #374151; }
 
 /* ---------- Badcase 管理（V2.8） ---------- */
+.bc-tabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid #E5E7EB; }
+.bc-tab { padding: 10px 20px; background: none; border: none; cursor: pointer; font-size: 14px; color: #6B7280; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.2s; }
+.bc-tab:hover { color: #2563EB; }
+.bc-tab-active { color: #2563EB; border-bottom-color: #2563EB; font-weight: 600; }
 .bc-stats { margin: 12px 0; padding: 10px 14px; background: #F9FAFB; border-radius: 8px; }
 .bc-stat-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
 .bc-stat { font-size: 13px; color: #6B7280; }

@@ -68,6 +68,30 @@ def _app_version() -> str:
         return "0.1.0"
 
 
+def _build_regression_description(b: dict) -> str:
+    """根据 badcase 信息生成回归评测用例的描述。"""
+    lines = [
+        f"【回归测试用例】由 badcase {b.get('id', '')} 转化生成",
+        f"原始任务: {b.get('task_id', '')} × {b.get('agent_id', '')}",
+        f"问题分类: {b.get('category', '')}",
+        f"严重程度: {b.get('severity', '')}",
+        "",
+        "【问题描述】",
+        b.get("description", ""),
+    ]
+    if b.get("root_cause"):
+        lines.extend(["", "【根因分析】", b["root_cause"]])
+    if b.get("fix_plan"):
+        lines.extend(["", "【修复方案】", b["fix_plan"]])
+    lines.extend([
+        "",
+        "【评测要求】",
+        "Agent 必须正确处理此场景，避免复现上述问题。",
+        "请将最终结果写入 output/result.md 文件。",
+    ])
+    return "\n".join(lines)
+
+
 def create_app(
     tasks_dir: Path | None = None,
     results_dir: Path | None = None,
@@ -945,6 +969,102 @@ def create_app(
             "status": "pending",
         })
         return {"id": bid, "message": "已从运行记录导入 badcase", "category": category, "severity": severity}
+
+    @app.post("/api/badcases/{bid}/convert-to-task")
+    def api_convert_badcase_to_task(bid: str, payload: dict = Body(...)) -> dict:
+        """将 badcase 转化为回归评测用例：生成 spec.yaml 并更新 badcase 关联。
+
+        请求体: {"new_task_id": "T-REG-001", "title": "...", "description": "...", "add_to_manifest": true}
+        """
+        b = store.get_badcase(bid)
+        if not b:
+            raise HTTPException(status_code=404, detail=f"badcase 不存在: {bid}")
+
+        new_task_id = str(payload.get("new_task_id", "")).strip()
+        if not new_task_id:
+            raise HTTPException(status_code=400, detail="缺少 new_task_id")
+
+        # 检查任务 ID 是否已存在
+        task_dir = tasks_dir / new_task_id
+        if task_dir.exists():
+            raise HTTPException(status_code=400, detail=f"任务 ID 已存在: {new_task_id}")
+
+        title = payload.get("title") or f"[回归] {b.get('title', '')}"
+        description = payload.get("description") or _build_regression_description(b)
+        add_to_manifest = bool(payload.get("add_to_manifest", True))
+
+        # 生成 spec.yaml
+        import yaml
+        task_dir.mkdir(parents=True, exist_ok=True)
+        spec = {
+            "id": new_task_id,
+            "title": title,
+            "level": "L2",
+            "description": description,
+            "tags": ["regression", b.get("category", "other")],
+            "fixtures": {"source": "fixtures/"},
+            "ground_truth": {
+                "checkpoints": [
+                    {
+                        "id": "c1",
+                        "type": "file_exists",
+                        "path": "output/result.md",
+                        "desc": "Agent 必须输出结果文件"
+                    }
+                ]
+            },
+            "verifier": "deterministic",
+            "weight": 1.0,
+            "cost_budget_usd": 0.2,
+            "timeout_s": 300,
+            "capabilities": ["tool_use", "reasoning"],
+        }
+        spec_path = task_dir / "spec.yaml"
+        with open(spec_path, "w", encoding="utf-8") as f:
+            yaml.dump(spec, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+        # 创建 fixtures 目录（占位）
+        fixtures_dir = task_dir / "fixtures"
+        fixtures_dir.mkdir(exist_ok=True)
+        (fixtures_dir / ".gitkeep").touch()
+
+        # 可选：加入 manifest.yaml
+        manifest_updated = False
+        if add_to_manifest:
+            manifest_path = tasks_dir / "manifest.yaml"
+            if manifest_path.exists():
+                try:
+                    with open(manifest_path, "r", encoding="utf-8") as f:
+                        manifest = yaml.safe_load(f)
+                    tasks_list = manifest.get("tasks", [])
+                    if new_task_id not in tasks_list:
+                        tasks_list.append(new_task_id)
+                        manifest["tasks"] = tasks_list
+                        with open(manifest_path, "w", encoding="utf-8") as f:
+                            yaml.dump(manifest, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+                        manifest_updated = True
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("更新 manifest.yaml 失败: %s", e)
+
+        # 更新 badcase：记录 regression_task_id，状态改为 fixed（如果还是 pending）
+        update_fields = {"regression_task_id": new_task_id}
+        if b.get("status") == "pending":
+            update_fields["status"] = "fixed"
+        store.update_badcase(bid, **update_fields)
+
+        return {
+            "message": "badcase 已转化为回归评测用例",
+            "badcase_id": bid,
+            "new_task_id": new_task_id,
+            "spec_path": str(spec_path),
+            "manifest_updated": manifest_updated,
+        }
+
+    @app.get("/api/regression-badcases")
+    def api_list_regression_badcases() -> dict:
+        """获取所有已转化为回归评测用例的 badcase 列表。"""
+        items = store.list_regression_badcases()
+        return {"items": items, "total": len(items)}
 
     # ---------- 静态页 ----------
     @app.middleware("http")
