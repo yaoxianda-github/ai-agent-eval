@@ -1,0 +1,45 @@
+id: T800
+title: RPA/UI 评测示例：网页 UI 状态验证
+level: L1
+description: |
+  RPA/UI 操作评测的示例任务（M4）。
+  验证三种新增的 UI checkpoint 类型：
+  - http_status：检查 URL 的 HTTP 状态码
+  - ui_element_exists：检查页面中是否存在 CSS 选择器匹配的元素
+  - browser_url_contains：检查导航后 URL 是否包含指定字符串
+
+  目标网站：https://example.com（一个稳定的测试网站）
+  Agent 端无需操作，checkpoint 直接访问 URL 验证 UI 状态。
+  真正的 RPA 操作任务可结合 MCP browser server 使用。
+tags:
+  - rpa
+  - ui
+  - browser
+  - example
+fixtures:
+  source: fixtures/
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: http_status
+      desc: example.com 返回 2xx 状态码
+      path: https://example.com
+      pattern: "2"
+    - id: c2
+      type: ui_element_exists
+      desc: example.com 页面包含 h1 标题元素
+      path: https://example.com
+      pattern: "h1"
+    - id: c3
+      type: browser_url_contains
+      desc: 导航到 example.com 后 URL 包含 example.com
+      path: https://example.com
+      pattern: "example.com"
+verifier: deterministic
+weight: 0.1
+cost_budget_usd: 0.01
+timeout_s: 60
+max_steps: 3
+capabilities:
+  - execution
+  - tools

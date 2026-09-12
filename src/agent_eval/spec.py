@@ -24,6 +24,10 @@ CheckpointType = Literal[
     "content_contains",
     "content_not_contains",
     "cmd_exit_zero",
+    # M4：RPA/UI 操作评测的 checkpoint 类型
+    "ui_element_exists",   # path=URL, pattern=CSS selector
+    "browser_url_contains", # path=起始URL, pattern=期望URL包含的字符串
+    "http_status",         # path=URL, pattern=状态码（如 "200"、"2"、"200-299"）
 ]
 
 LEVELS = {"L1", "L2", "L3", "L4", "L5"}

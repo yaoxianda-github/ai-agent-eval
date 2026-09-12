@@ -57,6 +57,15 @@ def _run_checkpoint(cp, workspace: Path) -> dict:
     elif name == "cmd_exit_zero":
         passed, detail = _check_cmd(cp, workspace)
         detail = f"{cp.desc}：{detail}" if cp.desc else detail
+    elif name == "ui_element_exists":
+        passed, detail = _check_ui_element(cp)
+        detail = f"{cp.desc}：{detail}" if cp.desc else detail
+    elif name == "browser_url_contains":
+        passed, detail = _check_browser_url(cp)
+        detail = f"{cp.desc}：{detail}" if cp.desc else detail
+    elif name == "http_status":
+        passed, detail = _check_http_status(cp)
+        detail = f"{cp.desc}：{detail}" if cp.desc else detail
     else:
         logger.warning("未知校验点类型: %s (id=%s)", name, cp.id)
         return {"id": cp.id, "type": name, "passed": False, "detail": f"未知校验点类型: {name}"}
@@ -146,3 +155,69 @@ def _check_cmd(cp, workspace: Path) -> tuple[bool, str]:
         return False, "命令执行超时"
     except Exception as e:  # noqa: BLE001
         return False, f"命令执行异常: {e}"
+
+
+# ============================================================
+# M4：RPA/UI 操作评测的 checkpoint 实现
+# ============================================================
+
+def _get_browser_env():
+    """懒加载浏览器环境（避免无 UI checkpoint 时启动浏览器）。"""
+    from agent_eval.browser_env import get_browser_env
+    return get_browser_env()
+
+
+def _check_ui_element(cp) -> tuple[bool, str]:
+    """检查 URL 页面中是否存在 CSS 选择器匹配的元素。
+
+    cp.path = 目标 URL
+    cp.pattern = CSS 选择器
+    """
+    if not cp.path:
+        return False, "缺少 URL（path 字段）"
+    if not cp.pattern:
+        return False, "缺少 CSS 选择器（pattern 字段）"
+    try:
+        env = _get_browser_env()
+        return env.element_exists(cp.path, cp.pattern)
+    except ImportError:
+        return False, "Playwright 未安装，无法执行 UI 校验"
+    except Exception as e:  # noqa: BLE001
+        return False, f"UI 元素校验异常: {e}"
+
+
+def _check_browser_url(cp) -> tuple[bool, str]:
+    """导航到起始 URL，检查最终 URL 是否包含 pattern。
+
+    cp.path = 起始 URL
+    cp.pattern = 期望 URL 包含的字符串
+    """
+    if not cp.path:
+        return False, "缺少起始 URL（path 字段）"
+    if not cp.pattern:
+        return False, "缺少期望 URL 模式（pattern 字段）"
+    try:
+        env = _get_browser_env()
+        return env.url_contains(cp.path, cp.pattern)
+    except ImportError:
+        return False, "Playwright 未安装，无法执行 URL 校验"
+    except Exception as e:  # noqa: BLE001
+        return False, f"浏览器 URL 校验异常: {e}"
+
+
+def _check_http_status(cp) -> tuple[bool, str]:
+    """检查 URL 的 HTTP 状态码是否匹配 pattern。
+
+    cp.path = 目标 URL
+    cp.pattern = 状态码模式（"200"、"2"、"200-299"），默认 "2"
+    """
+    if not cp.path:
+        return False, "缺少 URL（path 字段）"
+    pattern = cp.pattern or "2"
+    try:
+        env = _get_browser_env()
+        return env.http_status(cp.path, pattern)
+    except ImportError:
+        return False, "Playwright 未安装，无法执行 HTTP 状态校验"
+    except Exception as e:  # noqa: BLE001
+        return False, f"HTTP 状态校验异常: {e}"
