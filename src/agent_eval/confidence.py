@@ -111,6 +111,7 @@ def calculate_batch_confidence(
     batch_runs: list[dict[str, Any]],
     task_count_total: int = 36,
     core_task_ids: set[str] | None = None,
+    task_specs: list | None = None,
 ) -> dict[str, Any]:
     """计算批次（多任务多Agent对比）的置信度。
 
@@ -118,6 +119,7 @@ def calculate_batch_confidence(
         batch_runs: 批次中所有 run 的 run.json 列表
         task_count_total: 任务总数
         core_task_ids: core 包任务 ID 集合
+        task_specs: 任务 spec 列表（用于识别 golden 集覆盖情况）
 
     Returns:
         同 calculate_run_confidence 的结构
