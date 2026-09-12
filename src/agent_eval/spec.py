@@ -54,6 +54,7 @@ class TaskSpec:
     tags: list[str] = field(default_factory=list)
     rubric: str = ""  # V2.2：verifier=llm_judge 时的评分标准（任务作者自定义）
     capabilities: list[str] = field(default_factory=list)  # V2.5：任务考察的 Harness 能力（六类）
+    mcp_servers: list[dict] = field(default_factory=list)  # M2：任务声明的 MCP server 列表（stdio 模式）
     spec_path: Optional[Path] = None
 
     @classmethod
@@ -85,6 +86,7 @@ class TaskSpec:
             tags=list(data.get("tags", [])),
             rubric=str(data.get("rubric", "")),
             capabilities=list(data.get("capabilities", [])),
+            mcp_servers=list(data.get("mcp_servers", [])),
             spec_path=path,
         )
         errors = spec.validate()

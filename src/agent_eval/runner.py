@@ -9,6 +9,7 @@ V2.6：统一日志体系——run_one 包裹 run_logger，每次运行同时写
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import time
 import uuid
@@ -18,6 +19,7 @@ from pathlib import Path
 from agent_eval.backends import get_backend
 from agent_eval.judge import judge_llm
 from agent_eval.log import get_logger, run_logger
+from agent_eval.mcp_env import MCPEnvironment
 from agent_eval.scoring import score_task
 from agent_eval.spec import TaskSpec
 from agent_eval.traces import tool_category
@@ -87,6 +89,17 @@ def run_one(
         _copy_fixtures(task, workspace)
         logger.debug("fixtures 已复制到 workspace=%s", workspace)
 
+        # M2：MCP 工具环境——如果任务声明了 mcp_servers，生成配置文件并注入环境变量
+        mcp_env = MCPEnvironment(task.mcp_servers, workspace)
+        mcp_env_vars = mcp_env.prepare()
+        if mcp_env_vars:
+            logger.info("MCP 环境已准备: %d 个 server, 配置文件=%s", len(task.mcp_servers), mcp_env_vars.get("MCP_CONFIG_FILE"))
+            # 临时注入到当前进程环境，backend 启动的子进程会继承
+            _saved_env = {k: os.environ.get(k) for k in mcp_env_vars}
+            os.environ.update(mcp_env_vars)
+        else:
+            _saved_env = {}
+
         # 后端默认超时取任务 spec 的 timeout_s，可被 config 覆盖；max_steps 同理
         agent_kwargs = dict(config.get("agent", {}))
         agent_kwargs.setdefault("timeout_s", task.timeout_s)
@@ -94,9 +107,21 @@ def run_one(
             agent_kwargs.setdefault("max_steps", task.max_steps)
         backend = get_backend(agent_id, **agent_kwargs)
         logger.debug("后端已初始化: %s v%s", getattr(backend, "name", agent_id), getattr(backend, "version", "dev"))
-        start = time.time()
-        result = backend.run(task, workspace)
-        duration = round(time.time() - start, 3)
+
+        try:
+            start = time.time()
+            result = backend.run(task, workspace)
+            duration = round(time.time() - start, 3)
+        finally:
+            # M2：MCP 环境清理——恢复环境变量，删除配置文件
+            if _saved_env:
+                for k, v in _saved_env.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
+            mcp_env.cleanup()
+
         logger.info(
             "后端执行完成 | status=%s steps=%d duration=%.1fs traces=%d",
             result.status, len(result.steps), duration, len(result.traces),

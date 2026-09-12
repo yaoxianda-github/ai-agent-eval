@@ -1,0 +1,43 @@
+id: T900
+title: MCP 环境集成测试（验证 mcp_servers 字段生效）
+level: L1
+description: |
+  这是一个 MCP 工具环境的集成测试任务。
+  spec 中声明了两个 MCP server（filesystem 和 echo），
+  评测执行前 runner 应生成 mcp_config.json 并注入 MCP_CONFIG_FILE 环境变量，
+  执行完毕后自动清理配置文件。
+
+  任务本身很简单：在工作目录创建一个 mcp_test.txt 文件，内容包含 "mcp-ok"。
+tags:
+  - test
+  - mcp
+  - integration
+fixtures:
+  source: fixtures/
+mcp_servers:
+  - name: filesystem
+    command: "npx -y @modelcontextprotocol/server-filesystem /tmp"
+    env: {}
+  - name: echo-test
+    command: "echo mcp-server-ready"
+    env:
+      MCP_TEST_ENV: "true"
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      desc: 工作目录下创建了 mcp_test.txt
+      path: mcp_test.txt
+    - id: c2
+      type: content_contains
+      desc: 文件内容包含 mcp-ok
+      path: mcp_test.txt
+      pattern: "mcp-ok"
+verifier: deterministic
+weight: 0.1
+cost_budget_usd: 0.01
+timeout_s: 60
+max_steps: 5
+capabilities:
+  - execution
+  - tools
