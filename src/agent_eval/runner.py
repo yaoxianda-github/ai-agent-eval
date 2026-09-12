@@ -239,7 +239,7 @@ def run_one(
 
         # V3.3 P3：熔断降级——步数超限检查 + 熔断记录
         cb = get_circuit_breaker(results_dir)
-        step_overflow = not cb.check_steps(len(result.steps))
+        step_overflow = cb.check_step_overflow(len(result.steps))
         if step_overflow:
             logger.warning(
                 "步数超限防死循环 | steps=%d > max_steps=%d，标记为 step_overflow",

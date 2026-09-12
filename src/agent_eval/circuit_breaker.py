@@ -166,8 +166,28 @@ class CircuitBreaker:
         self._save_stats()
 
     def check_steps(self, steps: int) -> bool:
-        """检查步数是否超限（防死循环）。"""
+        """检查步数是否在限制内（返回 True 表示未超限）。
+
+        注意：此方法命名语义不明确，建议使用 check_step_overflow() 替代。
+        保留此方法仅为向后兼容。
+        """
         return steps <= self.config.max_steps_per_task
+
+    def check_step_overflow(self, steps: int) -> bool:
+        """检查步数是否超限（防死循环）。
+
+        Args:
+            steps: 当前运行的步数
+
+        Returns:
+            True 表示步数超限（> max_steps_per_task），可能存在死循环
+            False 表示步数在限制内
+        """
+        return steps > self.config.max_steps_per_task
+
+    def is_step_overflow(self, steps: int) -> bool:
+        """check_step_overflow 的别名，语义更直观。"""
+        return self.check_step_overflow(steps)
 
     def get_status(self) -> dict[str, Any]:
         """获取熔断器状态。"""
