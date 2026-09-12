@@ -165,6 +165,57 @@ def report(
     typer.echo(f"报告已生成: {path}")
 
 
+@app.command("convert")
+def convert(
+    source: str = typer.Option(..., "--source", "-s", help="源数据文件路径（SWE-bench JSON/JSONL）"),
+    converter: str = typer.Option("swe-bench", "--converter", "-c", help="转换器名称（swe-bench）"),
+    output: str = typer.Option("tasks", "--output", "-o", help="输出目录（在此创建 tasks/<id>/spec.yaml）"),
+    limit: int = typer.Option(0, "--limit", "-n", help="转换数量上限，0 表示全部"),
+    start_index: int = typer.Option(0, "--start-index", help="起始任务序号（用于分批转换）"),
+    id_prefix: str = typer.Option("SW", "--id-prefix", help="任务 ID 前缀"),
+) -> None:
+    """将其他平台评测用例转换为 ai-agent-eval spec.yaml 格式。
+
+    示例：
+      agent-eval convert -s swe-bench-lite.json -c swe-bench -o tasks -n 10
+      agent-eval convert --source data.json --converter swe-bench --output tasks --limit 5
+    """
+    from pathlib import Path
+
+    from agent_eval.converters import CONVERTERS, get_converter
+
+    source_path = Path(source)
+    if not source_path.exists():
+        typer.echo(f"错误：源文件不存在: {source_path}")
+        raise typer.Exit(code=1)
+
+    if converter not in CONVERTERS:
+        typer.echo(f"错误：未知转换器 '{converter}'，可用: {sorted(CONVERTERS)}")
+        raise typer.Exit(code=1)
+
+    output_dir = Path(output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    typer.echo(f"转换器: {converter}")
+    typer.echo(f"源文件: {source_path}")
+    typer.echo(f"输出目录: {output_dir}")
+    typer.echo("-" * 50)
+
+    conv = get_converter(converter)
+    tasks = conv.convert(
+        source_path, output_dir,
+        limit=limit,
+        start_index=start_index,
+        id_prefix=id_prefix,
+    )
+
+    typer.echo("-" * 50)
+    typer.echo(f"转换完成: {len(tasks)} 个任务")
+    for t in tasks:
+        typer.echo(f"  {t.id}  [{t.level}]  {t.title[:50]}")
+    typer.echo(f"\n提示: 记得将新任务 ID 添加到 {output_dir}/manifest.yaml 的 tasks 列表中")
+
+
 @app.command("workbench")
 def workbench(
     host: str = typer.Option("127.0.0.1", "--host", help="监听地址"),
