@@ -169,12 +169,24 @@ def calculate_batch_confidence(
         "detail": f"确定性校验 {deterministic_count} 个，LLM Judge {llm_judge_count} 个",
     }
 
-    # 3. 任务覆盖度
-    unique_tasks = len(set(r.get("task_id") for r in batch_runs))
+    # 3. 任务覆盖度（V3.1：集成 tier 分层覆盖度）
+    unique_task_ids = set(r.get("task_id") for r in batch_runs)
+    unique_tasks = len(unique_task_ids)
+    # V3.1：检查 golden 集覆盖情况
+    golden_ids = set()
+    if task_specs:
+        for t in task_specs:
+            tier = getattr(t, "tier", "") or ""
+            if tier == "golden":
+                golden_ids.add(t.id)
+    golden_covered = golden_ids and all(tid in unique_task_ids for tid in golden_ids)
+    golden_count = len(golden_ids)
+    golden_covered_count = len(golden_ids & unique_task_ids) if golden_ids else 0
+
     if unique_tasks >= task_count_total * 0.8:
         coverage_score = 100.0
         coverage_detail = f"覆盖 {unique_tasks}/{task_count_total} 个任务（全量）"
-    elif core_task_ids and all(tid in core_task_ids for tid in set(r.get("task_id") for r in batch_runs)):
+    elif core_task_ids and all(tid in core_task_ids for tid in unique_task_ids):
         coverage_score = 70.0
         coverage_detail = f"覆盖 {unique_tasks} 个任务（core 包）"
     elif unique_tasks >= 5:
@@ -183,8 +195,13 @@ def calculate_batch_confidence(
     else:
         coverage_score = 40.0
         coverage_detail = f"仅覆盖 {unique_tasks} 个任务"
+    # V3.1：如果未覆盖全部 golden 集，扣分
+    if golden_ids and not golden_covered:
+        penalty = (1 - golden_covered_count / golden_count) * 20  # 最多扣20分
+        coverage_score = max(30, coverage_score - penalty)
+        coverage_detail += f"，golden集覆盖 {golden_covered_count}/{golden_count}（扣{penalty:.0f}分）"
     dimensions["task_coverage"] = {
-        "score": coverage_score,
+        "score": round(coverage_score, 1),
         "detail": coverage_detail,
     }
 

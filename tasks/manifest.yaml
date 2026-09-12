@@ -1,44 +1,118 @@
 name: agent-eval-basic
-version: 0.3.0
+version: 0.4.0
 schema: task-spec@v1
 defaults:
   timeout_s: 300
   cost_budget_usd: 0.5
+
+# 数据集4层分层（V3.1 P1）
+# 参考：Agent评测体系全生命周期6步闭环
+# - golden（黄金集）：核心场景，必须100%通过，约20%
+# - boundary（边界集）：异常输入、对抗样本，约30%
+# - regression（回归集）：历史bug复现，约30%
+# - random（随机集）：线上流量采样，约20%
+tiers:
+  golden:
+    label: 黄金集
+    description: 核心场景，必须100%通过
+    color: "#22c55e"
+  boundary:
+    label: 边界集
+    description: 异常输入、对抗样本
+    color: "#f59e0b"
+  regression:
+    label: 回归集
+    description: 历史bug复现
+    color: "#3b82f6"
+  random:
+    label: 随机集
+    description: 线上流量采样
+    color: "#8b5cf6"
+
+# core 包 = golden + regression（上线门禁必须通过的任务集）
+core_pack:
+  - golden
+  - regression
+
 tasks:
-- T001
-- T002
-- T003
-- T102
-- T103
-- T106
-- T204
-- T205
-- T207
-- T303
-- T305
-- T306
-- T307
-- T308
-- T309
-- T401
-- T402
-- T502
-- T503
-- T504
-- T505
-- T506
-- T507
-- T508
-- T601
-- T610
-- T611
-- T612
-- T701
-- T702
-- T703
-- T704
-- RAG-001
-- RAG-002
-- RAG-003
-- RAG-004
-- T-REG-001
+  # ===== 黄金集（核心场景，必须100%通过）=====
+  - id: T001
+    tier: golden
+  - id: T002
+    tier: golden
+  - id: T003
+    tier: golden
+  - id: T102
+    tier: golden
+  - id: T204
+    tier: golden
+  - id: T303
+    tier: golden
+  - id: T701
+    tier: golden
+  - id: RAG-001
+    tier: golden
+  - id: T-REG-001
+    tier: golden
+
+  # ===== 边界集（异常输入、对抗样本）=====
+  - id: T106
+    tier: boundary
+  - id: T207
+    tier: boundary
+  - id: T308
+    tier: boundary
+  - id: T402
+    tier: boundary
+  - id: T502
+    tier: boundary
+  - id: T503
+    tier: boundary
+  - id: T504
+    tier: boundary
+  - id: T508
+    tier: boundary
+  - id: T612
+    tier: boundary
+  - id: T704
+    tier: boundary
+  - id: RAG-002
+    tier: boundary
+  - id: RAG-003
+    tier: boundary
+
+  # ===== 回归集（历史bug复现）=====
+  - id: T103
+    tier: regression
+  - id: T205
+    tier: regression
+  - id: T305
+    tier: regression
+  - id: T306
+    tier: regression
+  - id: T307
+    tier: regression
+  - id: T309
+    tier: regression
+  - id: T401
+    tier: regression
+  - id: T505
+    tier: regression
+  - id: T506
+    tier: regression
+  - id: T507
+    tier: regression
+  - id: T601
+    tier: regression
+
+  # ===== 随机集（线上流量采样）=====
+  - id: T610
+    tier: random
+  - id: T611
+    tier: random
+  - id: T702
+    tier: random
+  - id: T703
+    tier: random
+  - id: RAG-004
+    tier: random

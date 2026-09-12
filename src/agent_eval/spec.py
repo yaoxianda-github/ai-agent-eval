@@ -63,6 +63,7 @@ class TaskSpec:
     rubric: str = ""  # V2.2：verifier=llm_judge 时的评分标准（任务作者自定义）
     capabilities: list[str] = field(default_factory=list)  # V2.5：任务考察的 Harness 能力（六类）
     mcp_servers: list[dict] = field(default_factory=list)  # M2：任务声明的 MCP server 列表（stdio 模式）
+    tier: str = ""  # V3.1：数据集分层（golden/boundary/regression/random）
     spec_path: Optional[Path] = None
 
     @classmethod
@@ -95,6 +96,7 @@ class TaskSpec:
             rubric=str(data.get("rubric", "")),
             capabilities=list(data.get("capabilities", [])),
             mcp_servers=list(data.get("mcp_servers", [])),
+            tier=str(data.get("tier", "")),
             spec_path=path,
         )
         errors = spec.validate()
@@ -142,6 +144,10 @@ def load_task_pack(tasks_dir: Path) -> list[TaskSpec]:
 
     支持 manifest includes 字段：引用已安装的任务包，自动合并包内任务。
     本地任务与 includes 任务 ID 冲突时，本地任务优先。
+
+    V3.1：支持 tasks 列表的两种格式：
+    - 旧格式：["T001", "T002", ...]（字符串列表）
+    - 新格式：[{"id": "T001", "tier": "golden"}, ...]（字典列表，含 tier 分层）
     """
     from agent_eval.taskpack import load_included_tasks
 
@@ -149,12 +155,27 @@ def load_task_pack(tasks_dir: Path) -> list[TaskSpec]:
     tasks: list[TaskSpec] = []
     seen_ids: set[str] = set()
 
-    # 先加载本地任务
-    for task_id in manifest.get("tasks", []):
+    # 先加载本地任务（兼容新旧两种格式）
+    raw_tasks = manifest.get("tasks", [])
+    for item in raw_tasks:
+        # 新格式：{"id": "T001", "tier": "golden"}
+        if isinstance(item, dict):
+            task_id = item.get("id")
+            tier = item.get("tier")
+        # 旧格式："T001"
+        else:
+            task_id = item
+            tier = None
+        if not task_id:
+            continue
         spec_path = tasks_dir / task_id / "spec.yaml"
         if not spec_path.exists():
             raise FileNotFoundError(f"任务 {task_id} 缺少 spec.yaml: {spec_path}")
-        tasks.append(TaskSpec.from_yaml(spec_path))
+        spec = TaskSpec.from_yaml(spec_path)
+        # tier 优先从 manifest 读取，其次从 spec.yaml 读取
+        if tier and not getattr(spec, "tier", None):
+            spec.tier = tier
+        tasks.append(spec)
         seen_ids.add(task_id)
 
     # 再加载 includes 引用的任务包（跳过 ID 冲突的）

@@ -33,7 +33,7 @@ from agent_eval.backends import _BACKENDS, list_backends
 from agent_eval.log import get_logger, setup_logging
 from agent_eval.reporter import load_runs, render_html, summarize
 from agent_eval.runner import default_results_dir, run_one
-from agent_eval.spec import find_tasks_dir, load_task_pack
+from agent_eval.spec import find_tasks_dir, load_manifest, load_task_pack
 from agent_eval.stats import summarize_scores
 from agent_eval.traces import tool_category
 from agent_eval.web.store import RunStore
@@ -579,7 +579,22 @@ def create_app(
             )
             d["cost_estimate"] = est
             out.append(d)
-        return {"tasks": out}
+        # V3.1：返回 tier 配置和 core 包定义
+        manifest = load_manifest(tasks_dir)
+        return {
+            "tasks": out,
+            "tiers": manifest.get("tiers", {}),
+            "core_pack": manifest.get("core_pack", ["golden", "regression"]),
+        }
+
+    @app.get("/api/tiers")
+    def api_tiers() -> dict:
+        """V3.1：返回数据集4层分层配置。"""
+        manifest = load_manifest(tasks_dir)
+        return {
+            "tiers": manifest.get("tiers", {}),
+            "core_pack": manifest.get("core_pack", ["golden", "regression"]),
+        }
 
     @app.get("/api/costs")
     def api_costs() -> dict:
