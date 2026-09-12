@@ -787,13 +787,87 @@
           '<div class="field"><label>状态</label><select id="mem-status"><option value="">全部</option><option value="active">生效中</option><option value="inactive">已停用</option></select></div>' +
           '<div class="field" style="flex:2"><label>关键词</label><input id="mem-keyword" placeholder="搜索标题或内容..."></div>' +
           '<div class="field" style="flex:0 0 100px;"><label>&nbsp;</label><button class="btn secondary" id="mem-filter">筛选</button></div>' +
+          '<div class="field" style="flex:0 0 120px;"><label>&nbsp;</label><button class="btn" id="mem-auto-manage" style="background:#7c3aed;">自动治理</button></div>' +
+          '<div class="field" style="flex:0 0 120px;"><label>&nbsp;</label><button class="btn secondary" id="mem-test-recall">测试召回</button></div>' +
         "</div>" +
         '<div id="mem-stats" class="bc-stats"></div>' +
+        '<div id="mem-quality" class="bc-stats" style="margin-top:8px;"></div>' +
         '<div id="mem-list"><div class="empty">加载中…</div></div>' +
       "</div>"
     );
     el("mem-filter").onclick = function () { memPage = 0; loadMemories(); };
+    el("mem-auto-manage").onclick = function () {
+      if (!confirm("执行记忆自动治理？\n\n策略：\n1. 低成功率(<30%)且使用≥3次 → 自动停用\n2. 高成功率(≥80%)且使用≥5次 → 提升置信度到0.9\n3. 超过30天未使用 → 降低置信度到0.3")) return;
+      api("/api/memory-auto-manage", { method: "POST", body: {} }).then(function (r) {
+        alert("自动治理完成：\n- 评估记忆: " + r.total_evaluated + " 条\n- 自动停用: " + r.deactivated + " 条\n- 置信度提升: " + r.promoted + " 条\n- 置信度降级: " + r.demoted + " 条");
+        loadMemories();
+        loadMemoryQuality();
+      }).catch(function (e) { alert("治理失败: " + e.message); });
+    };
+    el("mem-test-recall").onclick = function () { showMemoryRecallTest(); };
     loadMemories();
+    loadMemoryQuality();
+  }
+
+  function showMemoryRecallTest() {
+    var html = '<div class="modal-overlay" id="recall-modal">' +
+      '<div class="modal" style="max-width:700px;">' +
+        '<h3>记忆召回测试</h3>' +
+        '<p style="color:#6b7280;font-size:13px;">输入任务特征，查看会召回哪些记忆及匹配原因（可解释性）</p>' +
+        '<div class="form-row">' +
+          '<div class="field" style="flex:2"><label>任务标签（逗号分隔）</label><input id="rt-tags" placeholder="file, text, reasoning"></div>' +
+          '<div class="field" style="flex:2"><label>关键词（逗号分隔）</label><input id="rt-keywords" placeholder="日期, 格式, 解析"></div>' +
+          '<div class="field" style="flex:0 0 80px;"><label>数量</label><input id="rt-limit" type="number" value="5" min="1" max="20"></div>' +
+        '</div>' +
+        '<div style="margin:12px 0;"><button class="btn" id="rt-run">执行召回测试</button> <button class="btn secondary" id="rt-close">关闭</button></div>' +
+        '<div id="rt-results" style="max-height:400px;overflow-y:auto;"></div>' +
+      '</div></div>';
+    document.body.insertAdjacentHTML("beforeend", html);
+    el("rt-close").onclick = function () { document.getElementById("recall-modal").remove(); };
+    el("rt-run").onclick = function () {
+      var tags = el("rt-tags").value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+      var keywords = el("rt-keywords").value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+      var limit = parseInt(el("rt-limit").value) || 5;
+      api("/api/memories/recall", { method: "POST", body: { task_tags: tags, keywords: keywords, limit: limit } }).then(function (d) {
+        var results = el("rt-results");
+        if (!d.items || d.items.length === 0) {
+          results.innerHTML = '<div class="empty">未召回任何记忆</div>';
+          return;
+        }
+        var html = '<p style="color:#6b7280;font-size:13px;margin-bottom:8px;">召回 ' + d.items.length + ' 条记忆（按相关性降序）</p>';
+        d.items.forEach(function (m, idx) {
+          var scorePct = Math.round(m._relevance_score * 100);
+          var reasonsHtml = (m.match_reasons || []).map(function (r) { return '<li style="font-size:12px;color:#6b7280;">' + r + '</li>'; }).join("");
+          var tagsHtml = (m.matched_tags || []).map(function (t) { return '<span class="tag" style="background:#dbeafe;color:#1e40af;">' + t + '</span>'; }).join(" ");
+          var kwHtml = (m.matched_keywords || []).map(function (k) { return '<span class="tag" style="background:#fef3c7;color:#92400e;">' + k + '</span>'; }).join(" ");
+          html += '<div class="card" style="margin-bottom:10px;padding:12px;">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+              '<span style="font-weight:600;">#' + (idx + 1) + ' ' + m.title + '</span>' +
+              '<span style="font-size:14px;font-weight:700;color:#7c3aed;">' + scorePct + '分</span>' +
+            '</div>' +
+            '<div style="margin-bottom:6px;">' + (tagsHtml || '<span style="color:#9ca3af;font-size:12px;">无标签匹配</span>') + ' ' + (kwHtml || '<span style="color:#9ca3af;font-size:12px;">无关键词匹配</span>') + '</div>' +
+            '<details><summary style="cursor:pointer;font-size:12px;color:#6b7280;">查看匹配分数计算</summary><ul style="margin-top:6px;padding-left:16px;">' + reasonsHtml + '</ul></details>' +
+          '</div>';
+        });
+        results.innerHTML = html;
+      }).catch(function (e) { el("rt-results").innerHTML = '<div class="empty" style="color:#dc2626;">召回失败: ' + e.message + '</div>'; });
+    };
+  }
+
+  function loadMemoryQuality() {
+    api("/api/memory-quality-stats").then(function (s) {
+      var q = el("mem-quality");
+      if (!q) return;
+      var successRatePct = Math.round(s.avg_success_rate * 100);
+      var confPct = Math.round(s.avg_confidence * 100);
+      q.innerHTML = '<div class="bc-stat-row">' +
+        '<span class="bc-stat" style="color:#7c3aed;"><b>' + confPct + '%</b> 平均置信度</span>' +
+        '<span class="bc-stat" style="color:#16a34a;"><b>' + successRatePct + '%</b> 平均成功率</span>' +
+        '<span class="bc-stat" style="color:#dc2626;"><b>' + s.low_quality + '</b> 低质量记忆</span>' +
+        '<span class="bc-stat" style="color:#ca8a04;"><b>' + s.unused_over_7d + '</b> 超7天未使用</span>' +
+        '<span class="bc-stat"><b>' + s.total_usage + '</b> 累计使用次数</span>' +
+        '</div>';
+    }).catch(function () {});
   }
 
   function loadMemories() {

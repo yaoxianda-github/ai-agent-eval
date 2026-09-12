@@ -548,6 +548,8 @@ class RunStore:
         1. task_tags 交集匹配（任务标签重叠越多，相关性越高）
         2. trigger_keywords 交集匹配（触发关键词重叠越多，相关性越高）
         3. 按 confidence 和 success_rate 加权排序
+
+        V2.9.1：返回匹配可解释性信息（match_reasons），包括匹配的标签、关键词和分数计算过程。
         """
         with self._lock:
             rows = self._conn.execute(
@@ -565,24 +567,55 @@ class RunStore:
                 d["task_tags"] = json.loads(d.get("task_tags") or "[]")
             except (ValueError, TypeError):
                 d["task_tags"] = []
+
+            # V2.9.1：匹配可解释性——记录匹配原因和分数计算过程
+            match_reasons = []
+            matched_tags = []
+            matched_keywords = []
+
             # 计算相关性分数
-            score = float(d.get("confidence", 0.5))
+            confidence = float(d.get("confidence", 0.5))
+            score = confidence
+            match_reasons.append(f"基础置信度: {confidence:.2f}")
+
             # 成功率加权
             usage = int(d.get("usage_count", 0))
             success = int(d.get("success_count", 0))
             if usage > 0:
-                score *= (0.5 + 0.5 * (success / usage))  # 成功率 0-1，加权到 0.5-1.0
+                success_rate = success / usage
+                score *= (0.5 + 0.5 * success_rate)  # 成功率 0-1，加权到 0.5-1.0
+                match_reasons.append(f"成功率加权: ×{0.5 + 0.5 * success_rate:.2f} (使用{usage}次, 成功{success}次, 成功率{success_rate:.0%})")
+            else:
+                match_reasons.append("成功率加权: ×1.00 (未使用过)")
+
             # 任务标签匹配
             if task_tags and d["task_tags"]:
                 overlap = len(set(task_tags) & set(d["task_tags"]))
+                matched_tags = sorted(set(task_tags) & set(d["task_tags"]))
                 if overlap > 0:
                     score *= (1 + 0.3 * overlap)
+                    match_reasons.append(f"任务标签匹配: ×{1 + 0.3 * overlap:.2f} (匹配{overlap}个: {', '.join(matched_tags)})")
+                else:
+                    match_reasons.append("任务标签匹配: ×1.00 (无匹配)")
+            else:
+                match_reasons.append("任务标签匹配: ×1.00 (无标签)")
+
             # 关键词匹配
             if keywords and d["trigger_keywords"]:
                 overlap = len(set(keywords) & set(d["trigger_keywords"]))
+                matched_keywords = sorted(set(keywords) & set(d["trigger_keywords"]))
                 if overlap > 0:
                     score *= (1 + 0.5 * overlap)
+                    match_reasons.append(f"关键词匹配: ×{1 + 0.5 * overlap:.2f} (匹配{overlap}个: {', '.join(matched_keywords)})")
+                else:
+                    match_reasons.append("关键词匹配: ×1.00 (无匹配)")
+            else:
+                match_reasons.append("关键词匹配: ×1.00 (无关键词)")
+
             d["_relevance_score"] = round(score, 4)
+            d["match_reasons"] = match_reasons
+            d["matched_tags"] = matched_tags
+            d["matched_keywords"] = matched_keywords
             items.append(d)
         # 按相关性排序
         items.sort(key=lambda x: x["_relevance_score"], reverse=True)
@@ -602,6 +635,98 @@ class RunStore:
                     (datetime.now().isoformat(timespec="seconds"), mid),
                 )
             self._conn.commit()
+
+    def auto_manage_memories(self, min_usage_for_eval: int = 3, low_success_threshold: float = 0.3,
+                              high_success_threshold: float = 0.8, unused_days: int = 30) -> dict:
+        """V2.9.1：记忆质量自动评估与主动遗忘。
+
+        治理策略（借鉴文章"记忆是治理问题不是存储问题"）：
+        1. 低成功率自动停用：usage_count >= min_usage 且 success_rate < low_success_threshold → status=inactive
+        2. 高成功率自动提升：usage_count >= 5 且 success_rate >= high_success_threshold → confidence=0.9
+        3. 长期未使用降级：created_at > unused_days 且 usage_count == 0 → confidence=0.3
+        4. 极低置信度清理：confidence < 0.2 且 usage_count == 0 → （仅标记，不自动删除，需人工确认）
+
+        Returns:
+            治理结果统计：{deactivated, promoted, demoted, total_evaluated}
+        """
+        from datetime import timedelta
+        cutoff = (datetime.now() - timedelta(days=unused_days)).isoformat(timespec="seconds")
+
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM memories WHERE status='active'").fetchall()
+            cols = [d[0] for d in self._conn.execute("SELECT * FROM memories LIMIT 1").description]
+
+        deactivated = 0
+        promoted = 0
+        demoted = 0
+
+        for r in rows:
+            d = dict(zip(cols, r))
+            mid = d["id"]
+            usage = int(d.get("usage_count", 0))
+            success = int(d.get("success_count", 0))
+            confidence = float(d.get("confidence", 0.5))
+            created_at = d.get("created_at", "")
+
+            # 1. 低成功率自动停用
+            if usage >= min_usage_for_eval:
+                success_rate = success / usage if usage > 0 else 0
+                if success_rate < low_success_threshold:
+                    self.update_memory(mid, status="inactive")
+                    deactivated += 1
+                    continue
+
+            # 2. 高成功率自动提升置信度
+            if usage >= 5 and success / usage >= high_success_threshold and confidence < 0.9:
+                self.update_memory(mid, confidence=0.9)
+                promoted += 1
+                continue
+
+            # 3. 长期未使用降级
+            if usage == 0 and created_at and created_at < cutoff and confidence > 0.3:
+                self.update_memory(mid, confidence=0.3)
+                demoted += 1
+
+        return {
+            "total_evaluated": len(rows),
+            "deactivated": deactivated,
+            "promoted": promoted,
+            "demoted": demoted,
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+        }
+
+    def get_memory_quality_stats(self) -> dict:
+        """获取记忆质量统计，用于前端展示治理效果。"""
+        with self._lock:
+            total = self._conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+            active = self._conn.execute("SELECT COUNT(*) FROM memories WHERE status='active'").fetchone()[0]
+            inactive = total - active
+            avg_confidence = self._conn.execute("SELECT AVG(confidence) FROM memories WHERE status='active'").fetchone()[0] or 0
+            total_usage = self._conn.execute("SELECT SUM(usage_count) FROM memories").fetchone()[0] or 0
+            total_success = self._conn.execute("SELECT SUM(success_count) FROM memories").fetchone()[0] or 0
+            avg_success_rate = (total_success / total_usage) if total_usage > 0 else 0
+            # 低质量记忆（成功率<30%且使用>=3次）
+            low_quality = self._conn.execute(
+                "SELECT COUNT(*) FROM memories WHERE usage_count >= 3 AND success_count * 1.0 / usage_count < 0.3"
+            ).fetchone()[0]
+            # 未使用记忆（创建超过7天但使用次数为0）
+            from datetime import timedelta
+            cutoff = (datetime.now() - timedelta(days=7)).isoformat(timespec="seconds")
+            unused = self._conn.execute(
+                "SELECT COUNT(*) FROM memories WHERE usage_count = 0 AND created_at < ?", (cutoff,)
+            ).fetchone()[0]
+
+        return {
+            "total": total,
+            "active": active,
+            "inactive": inactive,
+            "avg_confidence": round(avg_confidence, 3),
+            "total_usage": total_usage,
+            "total_success": total_success,
+            "avg_success_rate": round(avg_success_rate, 3),
+            "low_quality": low_quality,
+            "unused_over_7d": unused,
+        }
 
     def rebuild(self, results_dir: Path) -> int:
         """扫描 results_dir/*/run.json 重建索引，返回已索引 run 数。

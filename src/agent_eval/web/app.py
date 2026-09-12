@@ -1282,6 +1282,30 @@ def create_app(
         items = store.recall_memories(task_tags=task_tags, keywords=keywords, limit=limit)
         return {"items": items, "total": len(items)}
 
+    @app.post("/api/memory-auto-manage")
+    def api_auto_manage_memories(payload: dict = Body(...)) -> dict:
+        """V2.9.1：记忆质量自动评估与主动遗忘。
+
+        治理策略：
+        1. 低成功率自动停用：usage_count >= 3 且 success_rate < 30% → inactive
+        2. 高成功率自动提升：usage_count >= 5 且 success_rate >= 80% → confidence=0.9
+        3. 长期未使用降级：created_at > 30天 且 usage_count == 0 → confidence=0.3
+
+        请求体: {"min_usage": 3, "low_success": 0.3, "high_success": 0.8, "unused_days": 30}
+        """
+        result = store.auto_manage_memories(
+            min_usage_for_eval=int(payload.get("min_usage", 3)),
+            low_success_threshold=float(payload.get("low_success", 0.3)),
+            high_success_threshold=float(payload.get("high_success", 0.8)),
+            unused_days=int(payload.get("unused_days", 30)),
+        )
+        return result
+
+    @app.get("/api/memory-quality-stats")
+    def api_memory_quality_stats() -> dict:
+        """获取记忆质量统计，用于前端展示治理效果。"""
+        return store.get_memory_quality_stats()
+
     # ---------- 静态页 ----------
     @app.middleware("http")
     async def _request_logging(request, call_next):

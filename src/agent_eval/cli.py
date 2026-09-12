@@ -340,15 +340,18 @@ def dreaming(
     days: int = typer.Option(7, "--days", "-d", help="分析最近 N 天的运行记录"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="输出报告文件路径（默认输出到控制台）"),
     min_pattern: int = typer.Option(2, "--min-pattern", help="模式最小出现次数（低于此数不视为系统性模式）"),
+    auto_badcase: bool = typer.Option(False, "--auto-badcase", help="自动将发现的系统性模式转化为 badcase"),
 ) -> None:
     """V2.9：Dreaming 异步进化分析——定期审阅历史运行记录，发现系统性失败模式、低效路径和知识缺口。
 
     借鉴 Anthropic Dreaming 机制：在空闲时运行，输出结构化的改进建议报告。
     与同步评测互补：同步评测解决"单次任务做得好不好"，Dreaming 解决"跨任务的系统性模式"。
+
+    使用 --auto-badcase 可将发现的模式自动转化为 badcase，进入自进化飞轮回流。
     """
     from pathlib import Path
 
-    from agent_eval.dreaming import analyze_runs
+    from agent_eval.dreaming import analyze_runs, convert_patterns_to_badcases
     from agent_eval.runner import default_results_dir
 
     results_dir = default_results_dir()
@@ -405,6 +408,26 @@ def dreaming(
         typer.echo(f"完整报告已写入: {output_path}")
     else:
         typer.echo("提示: 使用 --output <文件路径> 可将完整报告写入 Markdown 文件")
+
+    # V2.9.1：自动将发现的模式转化为 badcase（飞轮回流闭环）
+    if auto_badcase:
+        typer.echo("")
+        typer.echo("=" * 60)
+        typer.echo("  自动转化为 badcase（飞轮回流）")
+        typer.echo("=" * 60)
+        try:
+            from agent_eval.web.store import RunStore
+            store = RunStore(results_dir.parent / "run_history.db")
+            convert_results = convert_patterns_to_badcases(report, store, min_count=min_pattern)
+            created_count = sum(1 for r in convert_results if r.get("created"))
+            skipped_count = len(convert_results) - created_count
+            typer.echo(f"  转化完成: 新建 {created_count} 个 badcase，跳过 {skipped_count} 个（已存在）")
+            for r in convert_results:
+                status = "新建" if r.get("created") else "跳过"
+                typer.echo(f"  [{status}] {r['pattern']} → badcase_id={r['badcase_id']}")
+        except Exception as e:
+            typer.echo(f"  转化失败: {e}")
+        typer.echo("=" * 60)
 
 
 if __name__ == "__main__":

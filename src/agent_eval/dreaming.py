@@ -343,3 +343,84 @@ def _get_status_suggestion(status: str) -> str:
         "failed": "审查失败的具体校验点，定位根因后针对性优化",
     }
     return suggestions.get(status, "审查运行日志和轨迹，定位具体失败原因")
+
+
+def convert_patterns_to_badcases(report: DreamingReport, store, min_count: int = 3) -> list[dict]:
+    """V2.9.1：将 Dreaming 发现的系统性失败模式自动转化为 badcase。
+
+    这是自进化飞轮回流的关键环节：Dreaming 发现的模式自动进入 badcase 积累，
+    后续可转化为回归用例或经验记忆，形成完整的进化闭环。
+
+    Args:
+        report: Dreaming 分析报告
+        store: RunStore 实例（用于创建 badcase）
+        min_count: 模式最小出现次数（低于此数不转化）
+
+    Returns:
+        转化结果列表：[{"pattern": "...", "badcase_id": "...", "created": bool}]
+    """
+    results = []
+
+    for pattern in report.failure_patterns:
+        if pattern.count < min_count:
+            continue
+
+        # 根据模式类型确定 badcase 分类
+        category = "other"
+        if pattern.pattern_type == "checkpoint_type":
+            if pattern.pattern_value.startswith("content_"):
+                category = "reasoning"
+            elif pattern.pattern_value == "cmd_exit_zero":
+                category = "tool_use"
+            elif pattern.pattern_value == "file_exists":
+                category = "planning"
+            elif pattern.pattern_value in ("json_valid", "regex_match"):
+                category = "format"
+        elif pattern.pattern_type == "status":
+            if pattern.pattern_value == "error":
+                category = "crash"
+            elif pattern.pattern_value == "timeout":
+                category = "timeout"
+            elif pattern.pattern_value == "max_steps":
+                category = "planning"
+
+        # 生成 badcase 标题和描述
+        title = f"[Dreaming] 系统性失败模式: {pattern.pattern_value} (出现{pattern.count}次)"
+        description = (
+            f"【Dreaming 自动发现】\n"
+            f"模式类型: {pattern.pattern_type}\n"
+            f"模式值: {pattern.pattern_value}\n"
+            f"出现次数: {pattern.count}\n"
+            f"影响任务: {', '.join(pattern.affected_tasks[:10])}\n"
+            f"影响后端: {', '.join(pattern.affected_agents[:5])}\n"
+            f"严重度: {pattern.severity}\n\n"
+            f"【改进建议】\n{pattern.suggestion}\n\n"
+            f"【来源】Dreaming 异步进化分析，生成时间: {report.generated_at}"
+        )
+
+        # 检查是否已存在相同模式的 badcase（避免重复创建）
+        existing = store.list_badcases(page=1, page_size=100, keyword=pattern.pattern_value)
+        already_exists = False
+        for b in existing.get("items", []):
+            if pattern.pattern_value in b.get("title", "") and "Dreaming" in b.get("title", ""):
+                already_exists = True
+                results.append({"pattern": pattern.pattern_value, "badcase_id": b["id"], "created": False, "reason": "已存在相同模式的 badcase"})
+                break
+
+        if not already_exists:
+            bid = store.insert_badcase({
+                "run_id": "",
+                "task_id": pattern.affected_tasks[0] if pattern.affected_tasks else "",
+                "agent_id": pattern.affected_agents[0] if pattern.affected_agents else "",
+                "title": title,
+                "description": description,
+                "category": category,
+                "severity": pattern.severity,
+                "status": "analyzing",
+                "root_cause": f"Dreaming 发现的系统性失败模式：{pattern.pattern_type}={pattern.pattern_value}，影响 {len(pattern.affected_tasks)} 个任务",
+                "fix_plan": pattern.suggestion,
+                "tags": json.dumps(["dreaming", "systemic", pattern.pattern_type], ensure_ascii=False),
+            })
+            results.append({"pattern": pattern.pattern_value, "badcase_id": bid, "created": True})
+
+    return results
