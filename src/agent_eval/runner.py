@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from agent_eval.backends import get_backend
+from agent_eval.circuit_breaker import CircuitBreaker, CircuitConfig, DailySampler
 from agent_eval.confidence import calculate_run_confidence
 from agent_eval.judge import judge_llm
 from agent_eval.log import get_logger, run_logger
@@ -27,6 +28,35 @@ from agent_eval.traces import tool_category
 from agent_eval.verifiers import run_checkpoints
 
 logger = get_logger(__name__)
+
+# V3.3 P3：全局熔断器（单例，跨 run 共享统计）
+_circuit_breaker: CircuitBreaker | None = None
+_daily_sampler: DailySampler | None = None
+
+
+def get_circuit_breaker(results_dir: Path | None = None) -> CircuitBreaker:
+    """获取全局熔断器单例。"""
+    global _circuit_breaker
+    if _circuit_breaker is None:
+        stats_path = None
+        if results_dir:
+            stats_path = results_dir.parent / "circuit_breaker.json"
+        _circuit_breaker = CircuitBreaker(
+            config=CircuitConfig(),
+            stats_path=stats_path,
+        )
+    return _circuit_breaker
+
+
+def get_daily_sampler(results_dir: Path | None = None) -> DailySampler:
+    """获取全局每日采样器单例。"""
+    global _daily_sampler
+    if _daily_sampler is None:
+        storage_path = None
+        if results_dir:
+            storage_path = results_dir.parent / "daily_samples.json"
+        _daily_sampler = DailySampler(sample_count=100, storage_path=storage_path)
+    return _daily_sampler
 
 
 @dataclass
@@ -206,6 +236,29 @@ def run_one(
         if result.status == "timeout":
             logger.warning("后端执行超时 (%ss)", agent_kwargs.get("timeout_s"))
 
+        # V3.3 P3：熔断降级——步数超限检查 + 熔断记录
+        cb = get_circuit_breaker(results_dir)
+        step_overflow = not cb.check_steps(len(result.steps))
+        if step_overflow:
+            logger.warning(
+                "步数超限防死循环 | steps=%d > max_steps=%d，标记为 step_overflow",
+                len(result.steps), cb.config.max_steps_per_task,
+            )
+        # 记录熔断统计
+        if result.status == "error":
+            cb.record_failure("error", duration)
+        elif result.status == "timeout":
+            cb.record_failure("timeout", duration)
+        elif step_overflow:
+            cb.record_failure("step_overflow", duration)
+        else:
+            cb.record_success(duration, len(result.steps))
+        # 每日采样审计
+        sampler = get_daily_sampler(results_dir)
+        sampled_for_audit = sampler.should_sample(run_id)
+        if sampled_for_audit:
+            logger.info("每日采样审计 | run_id=%s 已加入人工复核队列", run_id)
+
         # Day 3：执行判定与评分（仅当后端未发生 error 时）
         # V2.2：verifier=llm_judge 的任务在确定性校验点之外，追加一次 LLM 语义判分
         verdicts: list[dict] = []
@@ -241,6 +294,14 @@ def run_one(
         # V2.9：记录使用的经验记忆 ID
         if used_memory_ids:
             metrics["used_memory_ids"] = used_memory_ids
+
+        # V3.3 P3：熔断降级和采样信息写入 metrics
+        metrics["circuit_breaker"] = cb.get_status()
+        if step_overflow:
+            metrics["step_overflow"] = True
+            metrics["step_count"] = len(result.steps)
+        if sampled_for_audit:
+            metrics["sampled_for_audit"] = True
 
         # V2.4：全链路回放轨迹（输入意图 → 检索/工具 → 模型生成）
         # 后端自报 traces（如 minimal-react 的 llm/tool 节点）优先；否则由 steps 兜底合成

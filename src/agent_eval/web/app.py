@@ -638,6 +638,33 @@ def create_app(
             "core_pack": manifest.get("core_pack", ["golden", "regression"]),
         }
 
+    @app.get("/api/circuit-status")
+    def api_circuit_status() -> dict:
+        """V3.3 P3：返回熔断器和监控状态。"""
+        from agent_eval.circuit_breaker import CircuitBreaker, CircuitConfig, DailySampler, GrayReleaseConfig
+
+        runs_dir = results_dir / "runs"
+        stats_path = results_dir.parent / "circuit_breaker.json"
+        cb = CircuitBreaker(config=CircuitConfig(), stats_path=stats_path)
+        sampler = DailySampler(sample_count=100, storage_path=results_dir.parent / "daily_samples.json")
+        gray = GrayReleaseConfig()
+
+        # 统计最近运行的错误率
+        recent_runs, _ = store.list_runs(limit=100)
+        error_count = sum(1 for r in recent_runs if r.get("status") in ("error", "timeout"))
+        recent_error_rate = error_count / len(recent_runs) if recent_runs else 0.0
+
+        return {
+            "circuit_breaker": cb.get_status(),
+            "daily_sampler": sampler.get_status(),
+            "gray_release": gray.get_status(),
+            "recent_stats": {
+                "recent_runs": len(recent_runs),
+                "recent_error_rate": round(recent_error_rate, 3),
+                "recent_errors": error_count,
+            },
+        }
+
     @app.get("/api/costs")
     def api_costs() -> dict:
         """成本核算数据：定价 + (agent, task) 实测 token 基准 + 级别估算。"""

@@ -2035,6 +2035,91 @@
     return '<div class="scatter-wrap">' + svg + summary + '</div>';
   }
 
+  // ---------- 视图：监控中心（V3.3 P3） ----------
+  function viewMonitor() {
+    renderHTML(
+      '<h2 class="page-title">监控中心 <span class="tl-note">在线监控 · 熔断降级 · 灰度发布 · 采样审计</span></h2>' +
+      '<div id="monitor-content"><div class="empty">加载中…</div></div>'
+    );
+    loadMonitor();
+  }
+
+  function loadMonitor() {
+    fetch("/api/circuit-status").then(function (r) { return r.json(); }).then(function (data) {
+      var cb = data.circuit_breaker || {};
+      var sampler = data.daily_sampler || {};
+      var gray = data.gray_release || {};
+      var recent = data.recent_stats || {};
+
+      var stateColor = cb.state === "closed" ? "#22c55e" : cb.state === "open" ? "#ef4444" : "#f59e0b";
+      var stateLabel = cb.state === "closed" ? "正常（closed）" : cb.state === "open" ? "已熔断（open）" : "半开（half_open）";
+
+      var html =
+        // 概览卡片
+        '<div class="kpi-row">' +
+          '<div class="kpi-card"><div class="kpi-label">熔断器状态</div>' +
+          '<div class="kpi-value" style="color:' + stateColor + ';">' + stateLabel + '</div>' +
+          '<div class="kpi-sub">错误率 ' + (cb.error_rate * 100).toFixed(1) + '% / 阈值 ' + (cb.config.error_rate_threshold * 100).toFixed(0) + '%</div></div>' +
+          '<div class="kpi-card"><div class="kpi-label">P99 延迟</div>' +
+          '<div class="kpi-value">' + cb.p99_latency + 's</div>' +
+          '<div class="kpi-sub">阈值 ' + cb.config.p99_latency_threshold_s + 's</div></div>' +
+          '<div class="kpi-card"><div class="kpi-label">总请求数</div>' +
+          '<div class="kpi-value">' + cb.total_requests + '</div>' +
+          '<div class="kpi-sub">成功 ' + cb.success_count + ' / 错误 ' + cb.error_count + '</div></div>' +
+          '<div class="kpi-card"><div class="kpi-label">今日采样</div>' +
+          '<div class="kpi-value">' + sampler.sampled_count + '/' + sampler.target_count + '</div>' +
+          '<div class="kpi-sub">人工复核队列</div></div>' +
+        '</div>' +
+
+        // 熔断器详情
+        '<div class="card"><h3>熔断器详情 <span class="tl-note">错误率>20% 或 P99>30s 自动熔断，冷却5分钟后半开恢复</span></h3>' +
+        '<table class="data-table"><thead><tr><th>指标</th><th>当前值</th><th>阈值</th><th>状态</th></tr></thead><tbody>' +
+        '<tr><td>错误率</td><td>' + (cb.error_rate * 100).toFixed(1) + '%</td><td>≤' + (cb.config.error_rate_threshold * 100).toFixed(0) + '%</td>' +
+        '<td>' + (cb.error_rate <= cb.config.error_rate_threshold ? '<span style="color:#22c55e;">正常</span>' : '<span style="color:#ef4444;">超阈</span>') + '</td></tr>' +
+        '<tr><td>P99 延迟</td><td>' + cb.p99_latency + 's</td><td><' + cb.config.p99_latency_threshold_s + 's</td>' +
+        '<td>' + (cb.p99_latency < cb.config.p99_latency_threshold_s ? '<span style="color:#22c55e;">正常</span>' : '<span style="color:#ef4444;">超阈</span>') + '</td></tr>' +
+        '<tr><td>超时次数</td><td>' + cb.timeout_count + '</td><td>-</td><td>-</td></tr>' +
+        '<tr><td>步数超限次数</td><td>' + cb.step_overflow_count + '</td><td>≤' + cb.config.max_steps_per_task + '步/任务</td><td>-</td></tr>' +
+        '<tr><td>熔断冷却剩余</td><td>' + (cb.cooldown_remaining || 0) + 's</td><td>' + cb.config.cooldown_seconds + 's</td>' +
+        '<td>' + (cb.state === "open" ? '<span style="color:#f59e0b;">冷却中</span>' : '<span style="color:#22c55e;">-</span>') + '</td></tr>' +
+        '</tbody></table></div>' +
+
+        // 最近运行统计
+        '<div class="card"><h3>最近运行统计 <span class="tl-note">最近100次运行</span></h3>' +
+        '<div class="kpi-row">' +
+          '<div class="kpi-card"><div class="kpi-label">运行总数</div><div class="kpi-value">' + recent.recent_runs + '</div></div>' +
+          '<div class="kpi-card"><div class="kpi-label">错误数</div><div class="kpi-value" style="color:#ef4444;">' + recent.recent_errors + '</div></div>' +
+          '<div class="kpi-card"><div class="kpi-label">最近错误率</div><div class="kpi-value">' + (recent.recent_error_rate * 100).toFixed(1) + '%</div></div>' +
+        '</div></div>' +
+
+        // 灰度发布
+        '<div class="card"><h3>灰度发布 <span class="tl-note">1% → 5% → 50% → 100%，每阶段最少48小时</span></h3>' +
+        '<div class="kpi-row">' +
+          '<div class="kpi-card"><div class="kpi-label">当前阶段</div><div class="kpi-value">' + (gray.enabled ? gray.stage : "未启用") + '</div>' +
+          '<div class="kpi-sub">已运行 ' + (gray.elapsed_hours || 0) + ' 小时</div></div>' +
+          '<div class="kpi-card"><div class="kpi-label">最短阶段时长</div><div class="kpi-value">' + gray.min_stage_duration_hours + 'h</div></div>' +
+          '<div class="kpi-card"><div class="kpi-label">可晋级</div>' +
+          '<div class="kpi-value" style="color:' + (gray.can_advance ? "#22c55e" : "#94a3b8") + ';">' + (gray.can_advance ? "是" : "否") + '</div></div>' +
+        '</div></div>' +
+
+        // 每日采样
+        '<div class="card"><h3>每日采样审计 <span class="tl-note">每日自动采样' + sampler.target_count + '条运行记录供人工复核</span></h3>' +
+        '<div class="muted">今日已采样 ' + sampler.sampled_count + ' 条，日期：' + sampler.date + '</div>' +
+        (sampler.samples && sampler.samples.length ?
+          '<div style="margin-top:12px;"><b>采样的 run_id：</b><br/>' +
+          sampler.samples.slice(0, 20).map(function (s) {
+            return '<a href="#/run/' + s + '" style="font-family:monospace;margin-right:12px;">' + s + '</a>';
+          }).join("") +
+          (sampler.samples.length > 20 ? '<br/><span class="muted">... 共 ' + sampler.samples.length + ' 条</span>' : "") +
+          '</div>' : '<div class="muted">暂无采样记录</div>') +
+        '</div>';
+
+      el("monitor-content").innerHTML = html;
+    }).catch(function (e) {
+      el("monitor-content").innerHTML = '<div class="empty">加载失败：' + esc(e.message) + '</div>';
+    });
+  }
+
   // ---------- 视图：报告 ----------
   function viewReport() {
     renderHTML(
@@ -2195,6 +2280,7 @@
     else if (name === "badcases") viewBadcases();
     else if (name === "memories") viewMemories();
     else if (name === "compare") viewCompare();
+    else if (name === "monitor") viewMonitor();
     else if (name === "report") viewReport();
     else if (name === "settings") viewSettings();
     else viewDashboard();
