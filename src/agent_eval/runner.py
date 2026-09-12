@@ -19,6 +19,7 @@ from pathlib import Path
 from agent_eval.backends import get_backend
 from agent_eval.circuit_breaker import CircuitBreaker, CircuitConfig, DailySampler
 from agent_eval.confidence import calculate_run_confidence
+from agent_eval.data_flywheel import analyze_run_failure, should_auto_create_badcase
 from agent_eval.judge import judge_llm
 from agent_eval.log import get_logger, run_logger
 from agent_eval.mcp_env import MCPEnvironment
@@ -371,6 +372,16 @@ def run_one(
             usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0),
             run_dir,
         )
+
+        # V3.4 P4：数据飞轮——失败运行自动创建待标注 badcase
+        try:
+            run_dict = record.to_dict()
+            if should_auto_create_badcase(run_dict):
+                analysis = analyze_run_failure(run_dict)
+                _auto_create_badcase(run_id, task, agent_id, analysis, results_dir)
+        except Exception as e:
+            logger.debug("自动创建badcase失败(非致命): %s", e)
+
         return record
 
 
@@ -386,3 +397,57 @@ def _rel_or_abs(path: Path) -> str:
         return str(path.relative_to(Path.cwd()))
     except ValueError:
         return str(path)
+
+
+def _auto_create_badcase(
+    run_id: str,
+    task: TaskSpec,
+    agent_id: str,
+    analysis: dict,
+    results_dir: Path,
+) -> None:
+    """V3.4 P4：自动创建待标注 badcase（数据飞轮采样入库）。
+
+    仅当数据库存在时才创建（CLI 环境下可能没有 web store）。
+    """
+    try:
+        from agent_eval.web.store import RunStore
+        db_path = results_dir.parent / "run_history.db"
+        if not db_path.exists():
+            logger.debug("数据库不存在，跳过自动创建badcase: %s", db_path)
+            return
+        store = RunStore(db_path)
+        # 检查是否已存在该 run_id 的 badcase
+        existing, _ = store.list_badcases(run_id=run_id, limit=1)
+        if existing:
+            logger.debug("badcase已存在，跳过: run_id=%s", run_id)
+            return
+        # 创建 badcase
+        bid = store.insert_badcase({
+            "run_id": run_id,
+            "task_id": task.id,
+            "agent_id": agent_id,
+            "title": f"[自动采样] {task.id} × {agent_id} - {analysis.get('category', 'failure')}",
+            "description": (
+                f"自动采样入库：任务{task.id}在{agent_id}上执行失败。\n"
+                f"得分: {analysis.get('score', 0):.2f}\n"
+                f"校验点: {analysis.get('failed_checkpoints', 0)}/{analysis.get('total_checkpoints', 0)} 未通过\n"
+                f"步数: {analysis.get('step_count', 0)}\n"
+                f"状态: 待人工标注确认"
+            ),
+            "category": analysis.get("category", "other"),
+            "severity": analysis.get("severity", "P2"),
+            "status": "pending",
+            "root_cause": analysis.get("root_cause", ""),
+            "fix_plan": analysis.get("fix_plan", ""),
+            "tags": ["auto_sampled", "data_flywheel"] + analysis.get("tags", []),
+        })
+        logger.info(
+            "数据飞轮 | 自动创建badcase: bid=%s run_id=%s task=%s agent=%s category=%s severity=%s",
+            bid, run_id, task.id, agent_id,
+            analysis.get("category"), analysis.get("severity"),
+        )
+    except ImportError:
+        logger.debug("web.store不可用，跳过自动创建badcase")
+    except Exception as e:
+        logger.debug("自动创建badcase失败: %s", e)

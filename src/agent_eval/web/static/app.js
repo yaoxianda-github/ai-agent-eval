@@ -2045,7 +2045,12 @@
   }
 
   function loadMonitor() {
-    fetch("/api/circuit-status").then(function (r) { return r.json(); }).then(function (data) {
+    Promise.all([
+      fetch("/api/circuit-status").then(function (r) { return r.json(); }),
+      fetch("/api/flywheel-stats").then(function (r) { return r.json(); }).catch(function () { return null; })
+    ]).then(function (results) {
+      var data = results[0];
+      var flywheel = results[1];
       var cb = data.circuit_breaker || {};
       var sampler = data.daily_sampler || {};
       var gray = data.gray_release || {};
@@ -2053,6 +2058,31 @@
 
       var stateColor = cb.state === "closed" ? "#22c55e" : cb.state === "open" ? "#ef4444" : "#f59e0b";
       var stateLabel = cb.state === "closed" ? "正常（closed）" : cb.state === "open" ? "已熔断（open）" : "半开（half_open）";
+
+      // V3.4 P4：数据飞轮面板
+      var flywheelHtml = "";
+      if (flywheel && flywheel.stats) {
+        var fs = flywheel.stats;
+        var effColor = fs.flywheel_efficiency >= 0.3 ? "#22c55e" : fs.flywheel_efficiency >= 0.1 ? "#f59e0b" : "#ef4444";
+        var reportHtml = (flywheel.report || []).map(function (r) {
+          return '<div class="line" style="font-size:13px;margin:4px 0;">' + esc(r) + '</div>';
+        }).join("");
+        flywheelHtml =
+          '<div class="card"><h3>数据飞轮 <span class="tl-note">采样→标注→回流闭环，线上badcase自动沉淀为回归任务</span></h3>' +
+          '<div class="kpi-row">' +
+            '<div class="kpi-card"><div class="kpi-label">今日采样</div><div class="kpi-value">' + fs.sampled_today + '</div>' +
+            '<div class="kpi-sub">累计 ' + fs.sampled_total + ' 条</div></div>' +
+            '<div class="kpi-card"><div class="kpi-label">待标注</div><div class="kpi-value" style="color:#f59e0b;">' + fs.pending_annotation + '</div>' +
+            '<div class="kpi-sub">标注率 ' + (fs.annotation_rate * 100).toFixed(0) + '%</div></div>' +
+            '<div class="kpi-card"><div class="kpi-label">已回流任务</div><div class="kpi-value" style="color:#22c55e;">' + fs.converted_to_task + '</div>' +
+            '<div class="kpi-sub">回流率 ' + (fs.conversion_rate * 100).toFixed(0) + '%</div></div>' +
+            '<div class="kpi-card"><div class="kpi-label">飞轮效率</div><div class="kpi-value" style="color:' + effColor + ';">' + (fs.flywheel_efficiency * 100).toFixed(0) + '%</div>' +
+            '<div class="kpi-sub">经验记忆 ' + fs.memories_active + '/' + fs.memories_total + ' 活跃</div></div>' +
+          '</div>' +
+          '<div style="margin-top:12px;"><b>健康度报告：</b>' + reportHtml + '</div>' +
+          '<div style="margin-top:12px;"><a href="#/badcases" class="btn small">进入 Badcase 管理 →</a></div>' +
+          '</div>';
+      }
 
       var html =
         // 概览卡片
@@ -2070,6 +2100,9 @@
           '<div class="kpi-value">' + sampler.sampled_count + '/' + sampler.target_count + '</div>' +
           '<div class="kpi-sub">人工复核队列</div></div>' +
         '</div>' +
+
+        // 数据飞轮（V3.4 P4）
+        flywheelHtml +
 
         // 熔断器详情
         '<div class="card"><h3>熔断器详情 <span class="tl-note">错误率>20% 或 P99>30s 自动熔断，冷却5分钟后半开恢复</span></h3>' +

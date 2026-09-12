@@ -680,6 +680,17 @@ def create_app(
             },
         }
 
+    @app.get("/api/flywheel-stats")
+    def api_flywheel_stats() -> dict:
+        """V3.4 P4：数据飞轮统计——采样→标注→回流闭环健康度。"""
+        from agent_eval.data_flywheel import compute_flywheel_stats, generate_flywheel_report
+        stats = compute_flywheel_stats(store, results_dir)
+        report = generate_flywheel_report(stats)
+        return {
+            "stats": stats.to_dict(),
+            "report": report,
+        }
+
     @app.get("/api/backends")
     def api_backends() -> dict:
         return {
