@@ -354,6 +354,7 @@ def create_app(
 
     def _build_matrix(batch: dict) -> dict:
         """按批次聚合 run.json，产出彩色矩阵 + agent 汇总 + 自动结论。"""
+        from agent_eval.confidence import calculate_batch_confidence
         from agent_eval.costing import pricing_for
 
         price = pricing_for()
@@ -385,6 +386,9 @@ def create_app(
                     "cost_cny": cost,
                     "prompt_tokens": pt,
                     "completion_tokens": ct,
+                    "verifier": rec.get("verifier", "deterministic"),
+                    "task_level": rec.get("task_level", "L2"),
+                    "task_id": rec.get("task_id", ""),
                 }
             )
 
@@ -436,12 +440,22 @@ def create_app(
                 "avg_std": round(sum(stds) / len(stds), 3) if stds else 0.0,
             }
 
+        # 批次置信度计算（V3.0）
+        all_batch_runs = []
+        for lst in grid.values():
+            all_batch_runs.extend(lst)
+        batch_confidence = calculate_batch_confidence(
+            all_batch_runs,
+            task_count_total=len(tasks),
+        )
+
         return {
             "agents": agents,
             "tasks": task_ids,
             "cells": cells,
             "totals": totals,
             "conclusion": _matrix_conclusion(totals),
+            "confidence": batch_confidence,
         }
 
     def _matrix_conclusion(totals: dict[str, dict]) -> list[str]:
@@ -651,6 +665,8 @@ def create_app(
             # 实际成本：从 run.json 的 metrics.usage 读取（无 usage 时为 None）
             r["actual_cost_cny"] = None
             r["tokens"] = None
+            r["confidence_score"] = None
+            r["confidence_level"] = None
             p = results_dir / r["run_id"] / "run.json"
             if p.exists():
                 try:
@@ -665,6 +681,11 @@ def create_app(
                             4,
                         )
                         r["tokens"] = {"prompt_tokens": pt, "completion_tokens": ct}
+                    # 置信度（V3.0）
+                    conf = (d.get("metrics") or {}).get("confidence") or {}
+                    if conf:
+                        r["confidence_score"] = conf.get("score")
+                        r["confidence_level"] = conf.get("level")
                 except Exception:  # noqa: BLE001
                     pass
         return {"runs": runs, "total": total, "limit": limit, "offset": offset}

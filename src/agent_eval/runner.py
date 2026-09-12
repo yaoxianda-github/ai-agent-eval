@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from agent_eval.backends import get_backend
+from agent_eval.confidence import calculate_run_confidence
 from agent_eval.judge import judge_llm
 from agent_eval.log import get_logger, run_logger
 from agent_eval.mcp_env import MCPEnvironment
@@ -278,6 +279,23 @@ def run_one(
             error=result.error or "",
             workspace=_rel_or_abs(workspace) if keep_workspace else "",
         )
+
+        # 计算评测置信度（V3.0）
+        try:
+            all_runs_dir = run_dir.parent  # results/runs/
+            confidence = calculate_run_confidence(
+                record.to_dict(),
+                all_runs_dir=all_runs_dir,
+            )
+            metrics["confidence"] = confidence
+            logger.info(
+                "置信度: %.1f (%s) | %s",
+                confidence["score"],
+                confidence["level"],
+                "; ".join(confidence["suggestions"][:2]),
+            )
+        except Exception as e:
+            logger.warning("置信度计算失败: %s", e)
 
         if not keep_workspace:
             shutil.rmtree(workspace, ignore_errors=True)

@@ -172,6 +172,14 @@ table.matrix th { position: sticky; top: 0; z-index: 1; }
 .mx-concl { display: flex; flex-direction: column; gap: 6px; }
 .mx-concl .line { font-size: 13px; padding-left: 22px; position: relative; }
 .mx-concl .line::before { content: "▸"; position: absolute; left: 4px; color: #1F3A5F; }
+
+/* ---------- 评测置信度（V3.0） ---------- */
+.confidence-box { margin-top: 14px; padding: 12px 16px; background: #FAFAF7; border-radius: 8px; }
+.conf-header { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 8px; }
+.conf-dim { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #6B7280; padding: 3px 0; border-bottom: 1px solid #E8E6DF; }
+.conf-dim:last-child { border-bottom: none; }
+.conf-dim b { color: #1F3A5F; font-weight: 600; }
+.info-icon { display: inline-block; width: 16px; height: 16px; line-height: 16px; text-align: center; border-radius: 50%; background: #E5E7EB; color: #6B7280; font-size: 11px; cursor: help; font-style: normal; }
 .mx-drill { font-size: 12.5px; }
 .mx-drill table { font-size: 12.5px; }
 .mx-drill td, .mx-drill th { padding: 6px 10px; }

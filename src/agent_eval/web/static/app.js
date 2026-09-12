@@ -440,6 +440,11 @@
       var rows = d.runs.map(function (r) {
         var costTxt = (r.actual_cost_cny !== null && r.actual_cost_cny !== undefined)
           ? "¥" + r.actual_cost_cny.toFixed(4) : "—";
+        var confTxt = "—";
+        if (r.confidence_score !== null && r.confidence_score !== undefined) {
+          var confColor = r.confidence_level === "high" ? "#22c55e" : r.confidence_level === "medium" ? "#f59e0b" : "#ef4444";
+          confTxt = '<span style="color:' + confColor + ';font-weight:600;">' + r.confidence_score.toFixed(1) + "</span>";
+        }
         return '<tr class="clickable" data-rid="' + esc(r.run_id) + '">' +
           "<td>" + esc(fmtTime(r.created_at)) + "</td>" +
           "<td><b>" + esc(r.run_id) + "</b></td>" +
@@ -447,6 +452,7 @@
           "<td>" + statusBadge(r.status) + "</td>" +
           "<td>" + esc(r.score) + "</td><td>" + fmtDur(r.duration_s) + "</td><td>" + esc(r.steps) + "</td>" +
           "<td>" + costTxt + "</td>" +
+          "<td>" + confTxt + "</td>" +
           "</tr>";
       }).join("");
       var total = Number(d.total || 0);
@@ -459,6 +465,8 @@
         "</div>";
       list.innerHTML = '<table><tr><th>时间</th><th>run_id</th><th>任务</th><th>后端</th><th>状态</th><th>score</th><th>时长</th><th>步数</th><th>实际成本' +
         costTip("实际成本 = 本次评测实际消耗的 token（run.json 的 metrics.usage）按模型单价折算。<br>默认模型 deepseek-chat：输入 ¥2/百万 token、输出 ¥3/百万 token。<br><br>token 埋点（metrics.usage）之前的历史 run 无记录，显示「—」。<br><br>单价可用环境变量 LLM_INPUT_CNY_PER_M / LLM_OUTPUT_CNY_PER_M 覆盖。") +
+        '</th><th>置信度' +
+        costTip("评测置信度 = 运行次数(25%) + 校验点类型(25%) + 任务覆盖度(20%) + 历史稳定性(15%) + 任务级别(15%) 加权计算。<br><br>高置信(≥80)：结果可信，可用于决策<br>中置信(60-79)：有一定参考价值，建议补充验证<br>低置信(<60)：结果不可靠，需增加 runs 或扩大任务集") +
         "</th></tr>" + rows + "</table>" + pager;
       list.querySelectorAll("tr.clickable").forEach(function (tr) {
         tr.onclick = function () { location.hash = "#/run/" + tr.getAttribute("data-rid"); };
@@ -1002,6 +1010,14 @@
       }).join("") || '<div class="muted">（黑盒后端无可视化轨迹）</div>';
       var sc = (r.metrics && r.metrics.score) || 0;
       var wt = (r.metrics && r.metrics.weight) || 0;
+      var conf = (r.metrics && r.metrics.confidence) || null;
+      var confHtml = "";
+      if (conf) {
+        var confColor = conf.level === "high" ? "#22c55e" : conf.level === "medium" ? "#f59e0b" : "#ef4444";
+        var confLabel = conf.level === "high" ? "高置信" : conf.level === "medium" ? "中置信" : "低置信";
+        confHtml = '<div class="kpi"><b style="color:' + confColor + '">' + conf.score.toFixed(1) + ' / ' + confLabel +
+          '</b><span>评测置信度 <span class="info-icon" title="' + esc(conf.suggestions.join("; ")) + '">ⓘ</span></span></div>';
+      }
       renderHTML(
         '<h2 class="page-title">运行详情 ' +
           '<a class="btn secondary" style="float:right;margin-left:8px;" href="#/history">← 返回历史</a>' +
@@ -1012,6 +1028,7 @@
           '<div class="kpi"><b>' + esc(r.task_id) + " / " + esc(r.agent_id) + "</b><span>任务 / 后端</span></div>" +
           '<div class="kpi"><b>' + sc.toFixed(3) + " / " + esc(wt) + "</b><span>score / 权重</span></div>" +
           '<div class="kpi"><b>' + fmtDur(r.duration_s) + "</b><span>时长</span></div>" +
+          confHtml +
         "</div>" +
         (r.error ? '<div class="err-banner">' + esc(r.error) + "</div>" : "") +
         '<div class="card"><h3>判定结果（' + v.length + " 个校验点）</h3>" + (vRows || '<div class="empty">无判定</div>') + "</div>" +
@@ -1601,6 +1618,25 @@
       return true;
     }).map(function (l) { return '<div class="line">' + esc(l) + "</div>"; }).join("");
 
+    // 批次置信度（V3.0）
+    var confHtml = "";
+    if (m.confidence) {
+      var c = m.confidence;
+      var confColor = c.level === "high" ? "#22c55e" : c.level === "medium" ? "#f59e0b" : "#ef4444";
+      var confLabel = c.level === "high" ? "高置信" : c.level === "medium" ? "中置信" : "低置信";
+      var dimsHtml = "";
+      if (c.dimensions) {
+        dimsHtml = Object.keys(c.dimensions).map(function (k) {
+          var d = c.dimensions[k];
+          return '<div class="conf-dim"><span>' + esc(d.detail) + '</span><b>' + d.score.toFixed(0) + '</b></div>';
+        }).join("");
+      }
+      confHtml = '<div class="confidence-box" style="border-left:4px solid ' + confColor + ';">' +
+        '<div class="conf-header"><b style="color:' + confColor + ';">评测置信度 ' + c.score.toFixed(1) + ' / ' + confLabel + '</b>' +
+        '<span class="info-icon" title="' + esc((c.suggestions || []).join("; ")) + '">ⓘ</span></div>' +
+        dimsHtml + '</div>';
+    }
+
     var totHead = showCost
       ? "<tr><th>Agent</th><th class='num'>加权总分</th><th class='num'>任务通过</th><th class='num'>总成本</th><th class='num'>总耗时</th><th class='num'>平均波动σ</th></tr>"
       : "<tr><th>Agent</th><th class='num'>加权总分</th><th class='num'>任务通过</th><th class='num'>总耗时</th></tr>";
@@ -1626,7 +1662,7 @@
 
     el("mx-result").innerHTML =
       '<div class="card"><h3>对比结论 <span class="muted">' + esc(b.label) + " · runs=" + (b.runs || 1) +
-        " · " + fmtTime(b.finished_at || b.created_at) + '</span></h3><div class="mx-concl">' + concl + "</div></div>" +
+        " · " + fmtTime(b.finished_at || b.created_at) + '</span></h3><div class="mx-concl">' + concl + "</div>" + confHtml + "</div>" +
       '<div class="card"><h3>得分矩阵 <span class="muted">格内=最好成绩，颜色=通过率；点击单元格下钻每次运行</span></h3>' +
         '<div class="matrix-scroll"><table class="matrix">' + head + rows + "</table></div>" +
         '<div style="margin-top:12px;">' + exportBtn + "</div></div>" +
