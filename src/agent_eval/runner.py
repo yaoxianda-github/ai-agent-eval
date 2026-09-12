@@ -92,8 +92,21 @@ def run_one(
         # M2：MCP 工具环境——如果任务声明了 mcp_servers，生成配置文件并注入环境变量
         mcp_env = MCPEnvironment(task.mcp_servers, workspace)
         mcp_env_vars = mcp_env.prepare()
+        mcp_health: list[tuple[str, bool, str]] = []
         if mcp_env_vars:
             logger.info("MCP 环境已准备: %d 个 server, 配置文件=%s", len(task.mcp_servers), mcp_env_vars.get("MCP_CONFIG_FILE"))
+            # M2 扩展：MCP server 健康检查——执行前验证 server 能否正常启动
+            mcp_health = mcp_env.health_check(timeout=8.0)
+            healthy = sum(1 for _, ok, _ in mcp_health if ok)
+            unhealthy = [(name, detail) for name, ok, detail in mcp_health if not ok]
+            if unhealthy:
+                logger.warning(
+                    "MCP 健康检查: %d/%d 个 server 不健康: %s",
+                    len(unhealthy), len(mcp_health),
+                    "; ".join(f"{name}: {detail}" for name, detail in unhealthy),
+                )
+            else:
+                logger.info("MCP 健康检查: 全部 %d 个 server 正常", len(mcp_health))
             # 临时注入到当前进程环境，backend 启动的子进程会继承
             _saved_env = {k: os.environ.get(k) for k in mcp_env_vars}
             os.environ.update(mcp_env_vars)
@@ -155,6 +168,13 @@ def run_one(
                 usage["prompt_tokens"] += u.get("prompt_tokens", 0) or 0
                 usage["completion_tokens"] += u.get("completion_tokens", 0) or 0
         metrics["usage"] = usage
+
+        # M2 扩展：MCP server 健康检查结果写入 metrics
+        if mcp_health:
+            metrics["mcp_health"] = [
+                {"name": name, "ok": ok, "detail": detail}
+                for name, ok, detail in mcp_health
+            ]
 
         # V2.4：全链路回放轨迹（输入意图 → 检索/工具 → 模型生成）
         # 后端自报 traces（如 minimal-react 的 llm/tool 节点）优先；否则由 steps 兜底合成
