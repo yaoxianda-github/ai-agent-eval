@@ -1,0 +1,52 @@
+id: RAG-004
+title: RAG-引用准确性：答案标注正确的证据来源
+level: L2
+description: |
+  工作目录下有知识库 kb/，包含云帆服务器 FS-200 产品手册、星辰笔记本 X1 手册、
+  以及通用售后政策文档。
+
+  请使用 search_kb 工具检索「云帆服务器 FS-200 的整机质保期是多少个月」。
+
+  回答要求：
+  1. 给出正确答案（整机质保月数）
+  2. 必须标注引用来源，格式示例：「来源：产品手册-云帆服务器FS200.md」或「[产品手册-云帆服务器FS200.md]」
+  3. 引用的来源必须是实际包含答案的文档，不能引用不相关的文档
+
+  关键考察点：
+  1. 答案是否正确（36 个月）
+  2. 是否标注了引用来源
+  3. 引用的来源是否正确（应该是 FS-200 产品手册，而不是政策文档或 X1 手册）
+
+  将完整回答（含引用）写入 output/answer.txt。
+tags: [rag, citation, attribution, knowledge-base]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/answer.txt
+      desc: 已生成答案文件
+    - id: c2
+      type: content_contains
+      path: output/answer.txt
+      pattern: "36"
+      desc: 答案包含正确质保月数 36
+    - id: c3
+      type: content_contains
+      path: output/answer.txt
+      pattern: "FS200|FS-200|云帆服务器"
+      desc: 答案引用了正确的来源文档（FS-200 产品手册）
+    - id: c4
+      type: content_contains
+      path: output/answer.txt
+      pattern: "来源|引用|参考|\\[|\\]"
+      desc: 答案包含引用标记（来源/引用/参考/方括号等）
+
+verifier: deterministic
+weight: 1.0
+cost_budget_usd: 0.1
+timeout_s: 300
+max_steps: 12

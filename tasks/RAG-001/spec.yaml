@@ -1,0 +1,44 @@
+id: RAG-001
+title: RAG-Query理解：口语化问题的检索词改写
+level: L2
+description: |
+  工作目录下有知识库 kb/（多个产品手册与政策文档）。用户用口语化方式提问：
+  「那个新出的笔记本保修多久啊」。
+
+  请使用 search_kb 工具检索答案，将答案（只含数字，不要其它内容）
+  写入 output/answer.txt。
+
+  关键考察点：
+  1. 能否理解「新出的笔记本」指的是 X2（X1 已停产），而不是旧型号 X1
+  2. 能否理解「保修」指的是「整机质保」
+  3. 能否用正确的检索词（如「星辰 X2 质保」「笔记本 X2 整机质保」）搜索到正确答案
+  4. 注意：X1 的质保是 24 个月，X2 的质保是 36 个月，不要混淆
+
+  检索提示：不要只用「笔记本 保修」这种宽泛词，应包含具体型号和「质保」关键词。
+tags: [rag, query-understanding, retrieval, knowledge-base]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/answer.txt
+      desc: 已生成答案文件
+    - id: c2
+      type: content_contains
+      path: output/answer.txt
+      pattern: "36"
+      desc: 答案包含正确质保月数 36（X2 的整机质保，不是 X1 的 24）
+    - id: c3
+      type: content_not_contains
+      path: output/answer.txt
+      pattern: "24"
+      desc: 答案不包含 24（避免混淆 X1 的旧质保期）
+
+verifier: deterministic
+weight: 1.0
+cost_budget_usd: 0.1
+timeout_s: 300
+max_steps: 12

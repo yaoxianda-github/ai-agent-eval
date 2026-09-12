@@ -1,0 +1,49 @@
+id: RAG-002
+title: RAG-抗干扰检索：从相似产品中精确匹配型号
+level: L2
+description: |
+  工作目录下有知识库 kb/，包含 4 款相似服务器（FS-200/FS-300/FS-400/FS-500）
+  的产品手册，每款的硬盘质保期都不同，还有一份通用售后政策文档。
+
+  请使用 search_kb 工具检索「云帆服务器 FS-300 的硬盘质保期」是多少个月，
+  将答案（只含数字，不要其它内容）写入 output/answer.txt。
+
+  关键考察点：
+  1. 能否从 4 款相似产品中精确检索到 FS-300，而不是其他型号
+  2. 能否区分「整机质保」和「硬盘质保」，不要混淆
+  3. 各型号硬盘质保：FS-200=48个月，FS-300=60个月，FS-400=72个月，FS-500=84个月
+  4. 通用政策文档只写了「最低 36 个月」，不是具体答案
+
+  检索提示：必须包含完整型号「FS-300」和「硬盘质保」，不要只用「服务器 质保」。
+tags: [rag, anti-noise, retrieval, precision, knowledge-base]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/answer.txt
+      desc: 已生成答案文件
+    - id: c2
+      type: content_contains
+      path: output/answer.txt
+      pattern: "60"
+      desc: 答案包含 FS-300 正确硬盘质保月数 60
+    - id: c3
+      type: content_not_contains
+      path: output/answer.txt
+      pattern: "48"
+      desc: 答案不包含 48（FS-200 的硬盘质保，干扰项）
+    - id: c4
+      type: content_not_contains
+      path: output/answer.txt
+      pattern: "72"
+      desc: 答案不包含 72（FS-400 的硬盘质保，干扰项）
+
+verifier: deterministic
+weight: 1.0
+cost_budget_usd: 0.1
+timeout_s: 300
+max_steps: 12

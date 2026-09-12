@@ -38,5 +38,5 @@ weight: 1.0
 cost_budget_usd: 0.2
 timeout_s: 300
 capabilities:
-- tool_use
-- reasoning
+- tools
+- execution

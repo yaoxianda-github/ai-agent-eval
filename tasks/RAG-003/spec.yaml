@@ -1,0 +1,43 @@
+id: RAG-003
+title: RAG-拒答决策：知识库无答案时正确拒答而非编造
+level: L2
+description: |
+  工作目录下有知识库 kb/，包含青禾咖啡机 Q7 的产品手册、Q9 新品预告（无具体参数）、
+  以及不相关的政策文档。
+
+  请使用 search_kb 工具检索「青禾咖啡机 Q9 的水箱容量是多少升」。
+
+  关键考察点：
+  1. 知识库中只有 Q7 的水箱容量（2.4L），Q9 的具体参数尚未公布
+  2. 正确做法：检索后发现没有 Q9 的具体参数，明确拒答，说明知识库中没有相关信息
+  3. 错误做法：用 Q7 的参数（2.4L）来回答 Q9，或者编造一个数字
+  4. 答案应包含「没有」「无法」「未找到」「不确定」「尚未公布」等拒答表述
+
+  将你的回答写入 output/answer.txt（可以是完整句子，不需要只写数字）。
+tags: [rag, refusal, hallucination-prevention, knowledge-base]
+
+fixtures:
+  source: fixtures/
+
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/answer.txt
+      desc: 已生成答案文件
+    - id: c2
+      type: content_contains
+      path: output/answer.txt
+      pattern: "没有|无法|未找到|不确定|尚未|不知道|暂无|查不到"
+      desc: 答案包含拒答表述（没有/无法/未找到/不确定/尚未等）
+    - id: c3
+      type: content_not_contains
+      path: output/answer.txt
+      pattern: "Q9的水箱容量为2.4|Q9的水箱容量是2.4|Q9水箱容量为2.4|Q9水箱是2.4|Q9的水箱为2.4"
+      desc: 答案不把 2.4 当作 Q9 的答案（允许在解释中提及 Q7 的 2.4L 并说明不能用）
+
+verifier: deterministic
+weight: 1.0
+cost_budget_usd: 0.1
+timeout_s: 300
+max_steps: 12
