@@ -167,22 +167,30 @@ def report(
 
 @app.command("convert")
 def convert(
-    source: str = typer.Option(..., "--source", "-s", help="源数据文件路径（SWE-bench JSON/JSONL）"),
-    converter: str = typer.Option("swe-bench", "--converter", "-c", help="转换器名称（swe-bench）"),
+    source: str = typer.Option(..., "--source", "-s", help="源数据文件路径（SWE-bench/GAIA JSON/JSONL）"),
+    converter: str = typer.Option("swe-bench", "--converter", "-c", help="转换器名称（swe-bench/gaia）"),
     output: str = typer.Option("tasks", "--output", "-o", help="输出目录（在此创建 tasks/<id>/spec.yaml）"),
     limit: int = typer.Option(0, "--limit", "-n", help="转换数量上限，0 表示全部"),
     start_index: int = typer.Option(0, "--start-index", help="起始任务序号（用于分批转换）"),
-    id_prefix: str = typer.Option("SW", "--id-prefix", help="任务 ID 前缀"),
+    id_prefix: str = typer.Option("", "--id-prefix", help="任务 ID 前缀（默认按转换器自动设置：swe-bench=SW, gaia=GA）"),
 ) -> None:
     """将其他平台评测用例转换为 ai-agent-eval spec.yaml 格式。
 
     示例：
       agent-eval convert -s swe-bench-lite.json -c swe-bench -o tasks -n 10
-      agent-eval convert --source data.json --converter swe-bench --output tasks --limit 5
+      agent-eval convert --source gaia.json --converter gaia --output tasks --limit 5
     """
     from pathlib import Path
 
     from agent_eval.converters import CONVERTERS, get_converter
+
+    # 转换器默认 ID 前缀映射
+    DEFAULT_PREFIXES = {
+        "swe-bench": "SW",
+        "gaia": "GA",
+    }
+    if not id_prefix:
+        id_prefix = DEFAULT_PREFIXES.get(converter, "T")
 
     source_path = Path(source)
     if not source_path.exists():

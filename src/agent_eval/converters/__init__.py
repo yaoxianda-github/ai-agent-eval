@@ -2,13 +2,16 @@
 
 支持的来源：
 - swe-bench: SWE-bench / SWE-bench-Lite → spec.yaml
+- gaia: GAIA（General AI Assistants）→ spec.yaml
 """
 
 from agent_eval.converters.base import BaseConverter
+from agent_eval.converters.gaia import GAIAConverter
 from agent_eval.converters.swe_bench import SWEBenchConverter
 
 CONVERTERS = {
     "swe-bench": SWEBenchConverter,
+    "gaia": GAIAConverter,
 }
 
 
@@ -19,4 +22,4 @@ def get_converter(name: str) -> BaseConverter:
     return CONVERTERS[name]()
 
 
-__all__ = ["BaseConverter", "SWEBenchConverter", "CONVERTERS", "get_converter"]
+__all__ = ["BaseConverter", "SWEBenchConverter", "GAIAConverter", "CONVERTERS", "get_converter"]
