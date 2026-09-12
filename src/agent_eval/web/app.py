@@ -92,6 +92,108 @@ def _build_regression_description(b: dict) -> str:
     return "\n".join(lines)
 
 
+def _auto_diagnose_run(run_data: dict, failed_checkpoints: list, category: str) -> dict:
+    """根据运行记录自动归因：生成根因分析和修复建议。
+
+    基于失败的 checkpoint 类型、错误信息、运行状态、token 消耗等信号，
+    推断可能的失败原因和修复方向。这是启发式归因，不保证 100% 准确，
+    供人工参考和修正。
+    """
+    status = run_data.get("status", "")
+    error = run_data.get("error", "")
+    metrics = run_data.get("metrics", {})
+    steps = metrics.get("steps", 0)
+    max_steps = run_data.get("max_steps", 0)
+    duration = metrics.get("duration_s", 0)
+
+    root_cause_parts = []
+    fix_parts = []
+
+    # 1. 状态级归因
+    if status == "timeout":
+        root_cause_parts.append("【超时归因】任务在规定时间内未完成。")
+        if steps > 0:
+            root_cause_parts.append(f"已执行 {steps} 步仍未完成，可能存在：")
+            root_cause_parts.append("- 循环依赖：Agent 在相同步骤间反复跳转")
+            root_cause_parts.append("- 工具调用链过长：不必要的多轮工具调用")
+            root_cause_parts.append("- 等待外部响应阻塞：某个工具调用耗时过长")
+        fix_parts.append("【修复方向】")
+        fix_parts.append("- 检查 Agent 的循环检测机制，避免无限重试")
+        fix_parts.append("- 优化任务拆解，减少不必要的工具调用轮次")
+        fix_parts.append("- 为耗时工具调用设置合理的超时和降级策略")
+    elif status == "error":
+        root_cause_parts.append("【异常崩溃归因】Agent 执行过程中发生未捕获异常。")
+        if error:
+            root_cause_parts.append(f"错误信息: {error[:300]}")
+        root_cause_parts.append("可能原因：")
+        root_cause_parts.append("- 工具调用参数错误：Agent 生成的参数不符合工具 schema")
+        root_cause_parts.append("- 后端服务异常：模型 API 或工具服务不可用")
+        root_cause_parts.append("- 数据解析失败：Agent 输出格式无法被解析")
+        fix_parts.append("【修复方向】")
+        fix_parts.append("- 增强工具调用的参数校验和错误恢复机制")
+        fix_parts.append("- 检查后端服务的健康状态和重试策略")
+        fix_parts.append("- 优化输出格式约束，增加格式容错解析")
+    elif status == "max_steps":
+        root_cause_parts.append(f"【步数超限归因】达到最大步数限制（{max_steps} 步）。")
+        root_cause_parts.append("Agent 在有限步数内未能完成任务，可能存在：")
+        root_cause_parts.append("- 规划能力不足：任务拆解不合理，步骤浪费")
+        root_cause_parts.append("- 工具使用效率低：单次工具调用获取信息不充分")
+        root_cause_parts.append("- 缺乏终止判断：Agent 不知道何时可以结束任务")
+        fix_parts.append("【修复方向】")
+        fix_parts.append("- 优化 system prompt，强调高效规划和尽早完成")
+        fix_parts.append("- 增加任务完成度的自我评估机制")
+        fix_parts.append("- 考虑提高 max_steps 或优化任务难度")
+
+    # 2. Checkpoint 级归因
+    if failed_checkpoints:
+        root_cause_parts.append(f"【校验点失败归因】共 {len(failed_checkpoints)} 个校验点未通过：")
+        for v in failed_checkpoints:
+            cid = v.get("checkpoint_id", "?")
+            ctype = v.get("checkpoint_type", "?")
+            detail = v.get("detail", "") or v.get("message", "")
+            root_cause_parts.append(f"- {cid} ({ctype}): {detail[:100]}")
+
+        # 按 checkpoint 类型给出修复建议
+        content_fails = [v for v in failed_checkpoints if v.get("checkpoint_type", "").startswith("content_")]
+        file_fails = [v for v in failed_checkpoints if v.get("checkpoint_type", "") == "file_exists"]
+        cmd_fails = [v for v in failed_checkpoints if v.get("checkpoint_type", "") == "cmd_exit_zero"]
+
+        if content_fails:
+            fix_parts.append("- 内容校验失败：检查 Agent 的输出理解和生成能力，可能需要：")
+            fix_parts.append("  - 增强任务指令的明确性，减少歧义")
+            fix_parts.append("  - 优化输出格式约束，确保关键信息不遗漏")
+            fix_parts.append("  - 检查 RAG 检索质量，确保 Agent 获取了正确的上下文")
+        if file_fails:
+            fix_parts.append("- 文件存在校验失败：Agent 未生成预期的输出文件，可能需要：")
+            fix_parts.append("  - 在任务描述中明确要求生成特定文件")
+            fix_parts.append("  - 检查 Agent 的文件写入工具是否正常工作")
+            fix_parts.append("  - 优化终止条件，确保 Agent 在完成后才结束")
+        if cmd_fails:
+            fix_parts.append("- 命令执行校验失败：Agent 执行的命令返回非零退出码，可能需要：")
+            fix_parts.append("  - 检查 Agent 生成的命令参数是否正确")
+            fix_parts.append("  - 增强命令执行的错误处理和重试机制")
+            fix_parts.append("  - 优化工具使用说明，减少命令生成错误")
+
+    # 3. 效率归因（即使通过了，也可以给出优化建议）
+    if not root_cause_parts:
+        root_cause_parts.append("【归因】未检测到明显的失败模式，建议人工进一步分析运行轨迹。")
+
+    if not fix_parts:
+        fix_parts.append("【修复方向】建议人工查看运行轨迹，定位具体失败原因。")
+
+    # 4. 通用建议
+    fix_parts.append("")
+    fix_parts.append("【通用建议】")
+    fix_parts.append("- 将此 badcase 转化为回归评测用例，持续验证修复效果")
+    fix_parts.append("- 记录修复过程中的关键发现，沉淀为团队经验")
+    fix_parts.append("- 定期回顾类似 badcase，识别系统性问题")
+
+    return {
+        "root_cause": "\n".join(root_cause_parts),
+        "fix_plan": "\n".join(fix_parts),
+    }
+
+
 def create_app(
     tasks_dir: Path | None = None,
     results_dir: Path | None = None,
@@ -958,6 +1060,11 @@ def create_app(
                 parts.append(f"错误信息: {run_data['error'][:200]}")
             description = "\n".join(parts)
 
+        # 自动归因：生成根因分析和修复建议
+        diagnosis = _auto_diagnose_run(run_data, failed_checkpoints, category)
+        root_cause = payload.get("root_cause", diagnosis["root_cause"])
+        fix_plan = payload.get("fix_plan", diagnosis["fix_plan"])
+
         bid = store.insert_badcase({
             "run_id": run_id,
             "task_id": run_data.get("task_id", ""),
@@ -967,8 +1074,11 @@ def create_app(
             "category": category,
             "severity": severity,
             "status": "pending",
+            "root_cause": root_cause,
+            "fix_plan": fix_plan,
         })
-        return {"id": bid, "message": "已从运行记录导入 badcase", "category": category, "severity": severity}
+        return {"id": bid, "message": "已从运行记录导入 badcase", "category": category, "severity": severity,
+                "root_cause": root_cause, "fix_plan": fix_plan}
 
     @app.post("/api/badcases/{bid}/convert-to-task")
     def api_convert_badcase_to_task(bid: str, payload: dict = Body(...)) -> dict:
@@ -1064,6 +1174,112 @@ def create_app(
     def api_list_regression_badcases() -> dict:
         """获取所有已转化为回归评测用例的 badcase 列表。"""
         items = store.list_regression_badcases()
+        return {"items": items, "total": len(items)}
+
+    # ---------- 经验记忆（V2.9） ----------
+    @app.get("/api/memories")
+    def api_list_memories(
+        page: int = 1, page_size: int = 20,
+        status: str = "", keyword: str = "", task_tag: str = "",
+    ) -> dict:
+        """记忆列表（分页+筛选）。"""
+        return store.list_memories(page=page, page_size=page_size,
+                                    status=status, keyword=keyword, task_tag=task_tag)
+
+    @app.get("/api/memories/{mid}")
+    def api_get_memory(mid: str) -> dict:
+        """记忆详情。"""
+        m = store.get_memory(mid)
+        if not m:
+            raise HTTPException(status_code=404, detail=f"记忆不存在: {mid}")
+        return m
+
+    @app.post("/api/memories")
+    def api_create_memory(payload: dict = Body(...)) -> dict:
+        """创建记忆。"""
+        mid = store.insert_memory(payload)
+        return {"id": mid, "message": "记忆已创建"}
+
+    @app.put("/api/memories/{mid}")
+    def api_update_memory(mid: str, payload: dict = Body(...)) -> dict:
+        """更新记忆。"""
+        ok = store.update_memory(mid, **payload)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"记忆不存在: {mid}")
+        return {"id": mid, "message": "记忆已更新"}
+
+    @app.delete("/api/memories/{mid}")
+    def api_delete_memory(mid: str) -> dict:
+        """删除记忆。"""
+        ok = store.delete_memory(mid)
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"记忆不存在: {mid}")
+        return {"id": mid, "message": "记忆已删除"}
+
+    @app.post("/api/memories/from-badcase")
+    def api_create_memory_from_badcase(payload: dict = Body(...)) -> dict:
+        """从 badcase 转化为经验记忆。
+
+        请求体: {"badcase_id": "xxx", "title": "可选", "content": "可选",
+                 "trigger_keywords": ["关键词1"], "task_tags": ["file"], "confidence": 0.8}
+        """
+        bid = str(payload.get("badcase_id", ""))
+        if not bid:
+            raise HTTPException(status_code=400, detail="缺少 badcase_id")
+        b = store.get_badcase(bid)
+        if not b:
+            raise HTTPException(status_code=404, detail=f"badcase 不存在: {bid}")
+
+        # 从 badcase 生成记忆内容
+        title = payload.get("title") or f"[经验] {b.get('title', '')}"
+        content = payload.get("content")
+        if not content:
+            parts = [f"【经验来源】badcase {bid} - {b.get('title', '')}"]
+            parts.append(f"【问题场景】任务 {b.get('task_id', '')} × 后端 {b.get('agent_id', '')}")
+            if b.get("description"):
+                parts.append(f"【问题描述】{b['description']}")
+            if b.get("root_cause"):
+                parts.append(f"【根因分析】{b['root_cause']}")
+            if b.get("fix_plan"):
+                parts.append(f"【修复方案】{b['fix_plan']}")
+            parts.append("【适用场景】遇到类似问题时，参考此经验避免重复犯错。")
+            content = "\n".join(parts)
+
+        trigger_keywords = payload.get("trigger_keywords", [])
+        if not trigger_keywords:
+            # 从任务 ID 和标题提取关键词
+            kw = [b.get("task_id", ""), b.get("category", "")]
+            trigger_keywords = [k for k in kw if k]
+
+        task_tags = payload.get("task_tags", [])
+        confidence = float(payload.get("confidence", 0.7))
+
+        mid = store.insert_memory({
+            "title": title,
+            "content": content,
+            "trigger_keywords": trigger_keywords,
+            "task_tags": task_tags,
+            "source_badcase_id": bid,
+            "confidence": confidence,
+            "status": "active",
+        })
+
+        # 更新 badcase 状态为 fixed（如果还是 pending）
+        if b.get("status") == "pending":
+            store.update_badcase(bid, status="fixed")
+
+        return {"id": mid, "message": "已从 badcase 转化为经验记忆", "badcase_id": bid}
+
+    @app.post("/api/memories/recall")
+    def api_recall_memories(payload: dict = Body(...)) -> dict:
+        """召回记忆：根据任务特征返回最相关的记忆列表（供运行时注入使用）。
+
+        请求体: {"task_tags": ["file", "text"], "keywords": ["日期", "格式"], "limit": 5}
+        """
+        task_tags = payload.get("task_tags", [])
+        keywords = payload.get("keywords", [])
+        limit = int(payload.get("limit", 5))
+        items = store.recall_memories(task_tags=task_tags, keywords=keywords, limit=limit)
         return {"items": items, "total": len(items)}
 
     # ---------- 静态页 ----------

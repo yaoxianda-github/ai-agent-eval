@@ -335,5 +335,77 @@ def workbench(
     uvicorn.run(create_app(), host=host, port=port, log_level="info")
 
 
+@app.command("dreaming")
+def dreaming(
+    days: int = typer.Option(7, "--days", "-d", help="分析最近 N 天的运行记录"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="输出报告文件路径（默认输出到控制台）"),
+    min_pattern: int = typer.Option(2, "--min-pattern", help="模式最小出现次数（低于此数不视为系统性模式）"),
+) -> None:
+    """V2.9：Dreaming 异步进化分析——定期审阅历史运行记录，发现系统性失败模式、低效路径和知识缺口。
+
+    借鉴 Anthropic Dreaming 机制：在空闲时运行，输出结构化的改进建议报告。
+    与同步评测互补：同步评测解决"单次任务做得好不好"，Dreaming 解决"跨任务的系统性模式"。
+    """
+    from pathlib import Path
+
+    from agent_eval.dreaming import analyze_runs
+    from agent_eval.runner import default_results_dir
+
+    results_dir = default_results_dir()
+    typer.echo(f"Dreaming 分析中... 分析最近 {days} 天的运行记录 (目录: {results_dir})")
+
+    report = analyze_runs(results_dir, days=days, min_pattern_count=min_pattern)
+
+    typer.echo("")
+    typer.echo("=" * 60)
+    typer.echo(f"  Dreaming 进化分析报告")
+    typer.echo("=" * 60)
+    typer.echo(f"  生成时间: {report.generated_at}")
+    typer.echo(f"  分析运行数: {report.total_runs}")
+    typer.echo(f"  时间范围: {report.time_range}")
+    typer.echo("=" * 60)
+    typer.echo("")
+
+    if report.failure_patterns:
+        typer.echo(f"【系统性失败模式】共 {len(report.failure_patterns)} 个")
+        for i, p in enumerate(report.failure_patterns[:5], 1):
+            typer.echo(f"  {i}. [{p.severity}] {p.pattern_type}: {p.pattern_value} (出现 {p.count} 次)")
+            typer.echo(f"     影响任务: {', '.join(p.affected_tasks[:3])}")
+            typer.echo(f"     建议: {p.suggestion}")
+        typer.echo("")
+
+    if report.inefficiency_patterns:
+        typer.echo(f"【低效执行模式】共 {len(report.inefficiency_patterns)} 个（显示前5个）")
+        for p in report.inefficiency_patterns[:5]:
+            typer.echo(f"  - {p.task_id} × {p.agent_id}: {p.description}")
+        typer.echo("")
+
+    if report.knowledge_gaps:
+        typer.echo(f"【知识缺口】共 {len(report.knowledge_gaps)} 个")
+        for gap in report.knowledge_gaps[:5]:
+            typer.echo(f"  - {gap}")
+        typer.echo("")
+
+    if report.top_failing_tasks:
+        typer.echo("【失败率最高的任务】（显示前5个）")
+        for task_id, fail_count, fail_rate in report.top_failing_tasks[:5]:
+            typer.echo(f"  - {task_id}: 失败 {fail_count} 次, 失败率 {fail_rate:.1%}")
+        typer.echo("")
+
+    typer.echo("【综合改进建议】")
+    for i, s in enumerate(report.suggestions, 1):
+        typer.echo(f"  {i}. {s}")
+    typer.echo("")
+
+    # 输出到文件
+    if output:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(report.to_markdown(), encoding="utf-8")
+        typer.echo(f"完整报告已写入: {output_path}")
+    else:
+        typer.echo("提示: 使用 --output <文件路径> 可将完整报告写入 Markdown 文件")
+
+
 if __name__ == "__main__":
     app()

@@ -72,6 +72,24 @@ CREATE INDEX IF NOT EXISTS idx_badcases_agent   ON badcases(agent_id);
 CREATE INDEX IF NOT EXISTS idx_badcases_status  ON badcases(status);
 CREATE INDEX IF NOT EXISTS idx_badcases_severity ON badcases(severity);
 CREATE INDEX IF NOT EXISTS idx_badcases_category ON badcases(category);
+
+-- 经验记忆表（V2.9）：从 badcase 沉淀的可复用经验，运行时自动召回注入
+CREATE TABLE IF NOT EXISTS memories (
+    id              TEXT PRIMARY KEY,
+    title           TEXT NOT NULL DEFAULT '',
+    content         TEXT NOT NULL DEFAULT '',
+    trigger_keywords TEXT NOT NULL DEFAULT '[]',  -- JSON 数组：触发关键词
+    task_tags       TEXT NOT NULL DEFAULT '[]',  -- JSON 数组：适用的任务标签（如 file, text, code）
+    source_badcase_id TEXT NOT NULL DEFAULT '',
+    confidence      REAL NOT NULL DEFAULT 0.5,  -- 置信度 0-1
+    status          TEXT NOT NULL DEFAULT 'active',  -- active/inactive
+    usage_count     INTEGER NOT NULL DEFAULT 0,
+    success_count   INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
+CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source_badcase_id);
 """
 
 
@@ -408,6 +426,182 @@ class RunStore:
                 d["tags"] = []
             result.append(d)
         return result
+
+    # ---------- 经验记忆（V2.9 从 badcase 沉淀可复用经验） ----------
+    def insert_memory(self, rec: dict) -> str:
+        """创建经验记忆，返回 memory_id。"""
+        import uuid
+        mid = rec.get("id") or uuid.uuid4().hex[:12]
+        now = datetime.now().isoformat(timespec="seconds")
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO memories
+                   (id, title, content, trigger_keywords, task_tags, source_badcase_id,
+                    confidence, status, usage_count, success_count, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    mid,
+                    rec.get("title", ""),
+                    rec.get("content", ""),
+                    json.dumps(rec.get("trigger_keywords", []), ensure_ascii=False),
+                    json.dumps(rec.get("task_tags", []), ensure_ascii=False),
+                    rec.get("source_badcase_id", ""),
+                    float(rec.get("confidence", 0.5)),
+                    rec.get("status", "active"),
+                    int(rec.get("usage_count", 0)),
+                    int(rec.get("success_count", 0)),
+                    now, now,
+                ),
+            )
+            self._conn.commit()
+        return mid
+
+    def update_memory(self, mid: str, **fields) -> bool:
+        """更新记忆字段，返回是否成功。"""
+        allowed = {"title", "content", "trigger_keywords", "task_tags", "confidence", "status"}
+        sets = []
+        args = []
+        for k, v in fields.items():
+            if k not in allowed:
+                continue
+            if k in ("trigger_keywords", "task_tags"):
+                v = json.dumps(v, ensure_ascii=False)
+            sets.append(f"{k}=?")
+            args.append(v)
+        if not sets:
+            return False
+        sets.append("updated_at=?")
+        args.append(datetime.now().isoformat(timespec="seconds"))
+        args.append(mid)
+        with self._lock:
+            cur = self._conn.execute(f"UPDATE memories SET {', '.join(sets)} WHERE id=?", args)
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def delete_memory(self, mid: str) -> bool:
+        """删除记忆。"""
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM memories WHERE id=?", (mid,))
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def get_memory(self, mid: str) -> dict | None:
+        """获取记忆详情。"""
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM memories WHERE id=?", (mid,)).fetchone()
+            if not row:
+                return None
+            cols = [d[0] for d in self._conn.execute("SELECT * FROM memories LIMIT 1").description]
+        d = dict(zip(cols, row))
+        try:
+            d["trigger_keywords"] = json.loads(d.get("trigger_keywords") or "[]")
+        except (ValueError, TypeError):
+            d["trigger_keywords"] = []
+        try:
+            d["task_tags"] = json.loads(d.get("task_tags") or "[]")
+        except (ValueError, TypeError):
+            d["task_tags"] = []
+        return d
+
+    def list_memories(self, page: int = 1, page_size: int = 20, status: str = "",
+                       keyword: str = "", task_tag: str = "") -> dict:
+        """记忆列表（分页+筛选）。"""
+        where = []
+        args = []
+        if status:
+            where.append("status=?")
+            args.append(status)
+        if keyword:
+            where.append("(title LIKE ? OR content LIKE ?)")
+            args.extend([f"%{keyword}%", f"%{keyword}%"])
+        if task_tag:
+            where.append("task_tags LIKE ?")
+            args.append(f"%{task_tag}%")
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+        with self._lock:
+            total = self._conn.execute(f"SELECT COUNT(*) FROM memories{where_sql}", args).fetchone()[0]
+            rows = self._conn.execute(
+                f"SELECT * FROM memories{where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                args + [page_size, (page - 1) * page_size],
+            ).fetchall()
+            cols = [d[0] for d in self._conn.execute("SELECT * FROM memories LIMIT 1").description]
+        items = []
+        for r in rows:
+            d = dict(zip(cols, r))
+            try:
+                d["trigger_keywords"] = json.loads(d.get("trigger_keywords") or "[]")
+            except (ValueError, TypeError):
+                d["trigger_keywords"] = []
+            try:
+                d["task_tags"] = json.loads(d.get("task_tags") or "[]")
+            except (ValueError, TypeError):
+                d["task_tags"] = []
+            items.append(d)
+        return {"items": items, "total": total, "page": page, "page_size": page_size,
+                "total_pages": (total + page_size - 1) // page_size}
+
+    def recall_memories(self, task_tags: list[str] | None = None,
+                        keywords: list[str] | None = None, limit: int = 5) -> list[dict]:
+        """召回记忆：根据任务标签和关键词匹配，返回最相关的 active 记忆。
+
+        匹配策略：
+        1. task_tags 交集匹配（任务标签重叠越多，相关性越高）
+        2. trigger_keywords 交集匹配（触发关键词重叠越多，相关性越高）
+        3. 按 confidence 和 success_rate 加权排序
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM memories WHERE status='active' ORDER BY confidence DESC"
+            ).fetchall()
+            cols = [d[0] for d in self._conn.execute("SELECT * FROM memories LIMIT 1").description]
+        items = []
+        for r in rows:
+            d = dict(zip(cols, r))
+            try:
+                d["trigger_keywords"] = json.loads(d.get("trigger_keywords") or "[]")
+            except (ValueError, TypeError):
+                d["trigger_keywords"] = []
+            try:
+                d["task_tags"] = json.loads(d.get("task_tags") or "[]")
+            except (ValueError, TypeError):
+                d["task_tags"] = []
+            # 计算相关性分数
+            score = float(d.get("confidence", 0.5))
+            # 成功率加权
+            usage = int(d.get("usage_count", 0))
+            success = int(d.get("success_count", 0))
+            if usage > 0:
+                score *= (0.5 + 0.5 * (success / usage))  # 成功率 0-1，加权到 0.5-1.0
+            # 任务标签匹配
+            if task_tags and d["task_tags"]:
+                overlap = len(set(task_tags) & set(d["task_tags"]))
+                if overlap > 0:
+                    score *= (1 + 0.3 * overlap)
+            # 关键词匹配
+            if keywords and d["trigger_keywords"]:
+                overlap = len(set(keywords) & set(d["trigger_keywords"]))
+                if overlap > 0:
+                    score *= (1 + 0.5 * overlap)
+            d["_relevance_score"] = round(score, 4)
+            items.append(d)
+        # 按相关性排序
+        items.sort(key=lambda x: x["_relevance_score"], reverse=True)
+        return items[:limit]
+
+    def increment_memory_usage(self, mid: str, success: bool) -> None:
+        """记录记忆使用结果，用于后续质量评估。"""
+        with self._lock:
+            if success:
+                self._conn.execute(
+                    "UPDATE memories SET usage_count = usage_count + 1, success_count = success_count + 1, updated_at=? WHERE id=?",
+                    (datetime.now().isoformat(timespec="seconds"), mid),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE memories SET usage_count = usage_count + 1, updated_at=? WHERE id=?",
+                    (datetime.now().isoformat(timespec="seconds"), mid),
+                )
+            self._conn.commit()
 
     def rebuild(self, results_dir: Path) -> int:
         """扫描 results_dir/*/run.json 重建索引，返回已索引 run 数。

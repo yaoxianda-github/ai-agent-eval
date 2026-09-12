@@ -639,6 +639,7 @@
         regressionInfo = '<div class="bc-run-summary" style="background:#ECFDF5;color:#065F46;"><b>✓ 已转化为回归评测用例：</b> <a href="#/tasks" style="color:#065F46;text-decoration:underline;">' + esc(b.regression_task_id) + '</a>（可在任务管理中查看和运行）</div>';
       }
       var convertBtn = b.regression_task_id ? "" : '<button class="btn secondary" id="bc-convert">转化为评测用例</button>';
+      var memoryBtn = '<button class="btn secondary" id="bc-to-memory">转化为经验记忆</button>';
       renderHTML(
         '<h2 class="page-title">Badcase 详情 · ' + esc(b.id) + '</h2>' +
         '<div class="card">' +
@@ -660,6 +661,7 @@
           '<div class="form-row" style="margin-top:16px">' +
             '<button class="btn" id="bc-save">保存修改</button>' +
             convertBtn +
+            memoryBtn +
             runLink +
             '<button class="btn danger" id="bc-delete" style="margin-left:auto">删除</button>' +
           "</div>" +
@@ -734,6 +736,25 @@
           });
         };
       }
+
+      // 转化为经验记忆
+      var memoryBtnEl = el("bc-to-memory");
+      if (memoryBtnEl) {
+        memoryBtnEl.onclick = function () {
+          if (!confirm("确定将此 badcase 转化为经验记忆？转化后将在后续类似任务中自动召回注入。")) return;
+          var body = {
+            badcase_id: bid,
+            trigger_keywords: [b.task_id, b.category].filter(Boolean),
+            task_tags: [],
+            confidence: 0.7,
+          };
+          api("/api/memories/from-badcase", { method: "POST", body: body }).then(function (d) {
+            el("bc-msg").innerHTML = '<div class="success-banner">✓ 已转化为经验记忆 ' + esc(d.id) + '，<a href="#/memory/' + esc(d.id) + '" style="color:#065F46;text-decoration:underline;">查看详情 →</a></div>';
+          }).catch(function (e) {
+            alert("转化失败: " + e.message);
+          });
+        };
+      }
     }).catch(function (e) { renderErr(e.message); });
   }
 
@@ -753,6 +774,128 @@
       el("bc-msg").innerHTML = '<div class="success-banner">已保存 ✓</div>';
       setTimeout(function () { el("bc-msg").innerHTML = ""; }, 2000);
     }).catch(function (e) { el("bc-msg").innerHTML = '<div class="err-banner">' + esc(e.message) + "</div>"; });
+  }
+
+  // ---------- 视图：经验记忆（V2.9） ----------
+  var memPage = 0, memLimit = 20;
+
+  function viewMemories() {
+    renderHTML(
+      '<h2 class="page-title">经验记忆</h2>' +
+      '<div class="card">' +
+        '<div class="form-row">' +
+          '<div class="field"><label>状态</label><select id="mem-status"><option value="">全部</option><option value="active">生效中</option><option value="inactive">已停用</option></select></div>' +
+          '<div class="field" style="flex:2"><label>关键词</label><input id="mem-keyword" placeholder="搜索标题或内容..."></div>' +
+          '<div class="field" style="flex:0 0 100px;"><label>&nbsp;</label><button class="btn secondary" id="mem-filter">筛选</button></div>' +
+        "</div>" +
+        '<div id="mem-stats" class="bc-stats"></div>' +
+        '<div id="mem-list"><div class="empty">加载中…</div></div>' +
+      "</div>"
+    );
+    el("mem-filter").onclick = function () { memPage = 0; loadMemories(); };
+    loadMemories();
+  }
+
+  function loadMemories() {
+    var q = ["page=" + (memPage + 1), "page_size=" + memLimit];
+    var sv = el("mem-status") && el("mem-status").value;
+    var kv = el("mem-keyword") && el("mem-keyword").value;
+    if (sv) q.push("status=" + encodeURIComponent(sv));
+    if (kv) q.push("keyword=" + encodeURIComponent(kv));
+    api("/api/memories?" + q.join("&")).then(function (d) {
+      var list = el("mem-list");
+      var stats = el("mem-stats");
+      if (stats) {
+        var active = d.items.filter(function (m) { return m.status === "active"; }).length;
+        var inactive = d.total - active;
+        stats.innerHTML = '<div class="bc-stat-row"><span class="bc-stat"><b>' + d.total + '</b> 总记忆</span><span class="bc-stat" style="color:#16a34a;"><b>' + active + '</b> 生效中</span><span class="bc-stat" style="color:#6b7280;"><b>' + inactive + '</b> 已停用</span></div>';
+      }
+      if (!d.items || !d.items.length) { list.innerHTML = '<div class="empty">暂无经验记忆。可在 badcase 详情页点击「转化为经验记忆」生成。</div>'; return; }
+      var rows = d.items.map(function (m) {
+        var confPct = Math.round(m.confidence * 100);
+        var successRate = m.usage_count > 0 ? Math.round(m.success_count / m.usage_count * 100) : "-";
+        var statusColor = m.status === "active" ? "#16a34a" : "#9ca3af";
+        var statusLabel = m.status === "active" ? "生效中" : "已停用";
+        return '<tr class="clickable" data-mid="' + esc(m.id) + '">' +
+          "<td>" + esc(fmtTime(m.created_at)) + "</td>" +
+          '<td><b>' + esc(m.title) + "</b><br><span style='color:#6b7280;font-size:12px;'>" + esc(m.content.substring(0, 80)) + "...</span></td>" +
+          "<td>" + confPct + "%</td>" +
+          "<td>" + successRate + (m.usage_count > 0 ? " (" + m.usage_count + "次)" : "") + "</td>" +
+          '<td><span class="badge" style="background:' + statusColor + ';color:#fff">' + statusLabel + "</span></td>" +
+          "</tr>";
+      }).join("");
+      var total = Number(d.total || 0);
+      var pages = Math.max(1, d.total_pages || Math.ceil(total / memLimit));
+      var cur = Math.min(memPage + 1, pages);
+      var pager = '<div class="pager">' +
+        '<button class="btn secondary small" id="mem-prev"' + (memPage <= 0 ? " disabled" : "") + '>‹ 上一页</button>' +
+        '<span class="pager-info">第 ' + cur + " / " + pages + " 页 · 共 " + total + " 条</span>" +
+        '<button class="btn secondary small" id="mem-next"' + (memPage >= pages - 1 ? " disabled" : "") + '>下一页 ›</button>' +
+        "</div>";
+      list.innerHTML = '<table><tr><th>创建时间</th><th>标题/内容</th><th>置信度</th><th>成功率</th><th>状态</th></tr>' + rows + "</table>" + pager;
+      list.querySelectorAll("tr.clickable").forEach(function (tr) {
+        tr.onclick = function () { location.hash = "#/memory/" + tr.getAttribute("data-mid"); };
+      });
+      var prevBtn = el("mem-prev"), nextBtn = el("mem-next");
+      if (prevBtn) prevBtn.onclick = function () { if (memPage > 0) { memPage--; loadMemories(); } };
+      if (nextBtn) nextBtn.onclick = function () { if (memPage < pages - 1) { memPage++; loadMemories(); } };
+    }).catch(function (e) { el("mem-list").innerHTML = '<div class="err-banner">' + esc(e.message) + "</div>"; });
+  }
+
+  function viewMemoryDetail(mid) {
+    api("/api/memories/" + mid).then(function (m) {
+      var stOpts = '<option value="active"' + (m.status === "active" ? " selected" : "") + '>生效中</option><option value="inactive"' + (m.status === "inactive" ? " selected" : "") + '>已停用</option>';
+      var sourceLink = m.source_badcase_id ? '<a href="#/badcase/' + esc(m.source_badcase_id) + '" class="btn secondary small">查看来源 badcase →</a>' : "";
+      var successRate = m.usage_count > 0 ? Math.round(m.success_count / m.usage_count * 100) + "%" : "无数据";
+      renderHTML(
+        '<h2 class="page-title">经验记忆详情 · ' + esc(m.id) + '</h2>' +
+        '<div class="card">' +
+          '<div class="form-row">' +
+            '<div class="field" style="flex:2"><label>标题</label><input id="mem-title" value="' + esc(m.title) + '"></div>' +
+            '<div class="field"><label>置信度 (0-1)</label><input id="mem-conf" type="number" step="0.1" min="0" max="1" value="' + m.confidence + '"></div>' +
+            '<div class="field"><label>状态</label><select id="mem-status">' + stOpts + "</select></div>" +
+          "</div>" +
+          '<div class="field"><label>记忆内容</label><textarea id="mem-content" rows="10">' + esc(m.content) + "</textarea></div>" +
+          '<div class="form-row">' +
+            '<div class="field"><label>触发关键词（逗号分隔）</label><input id="mem-keywords" value="' + esc(m.trigger_keywords.join(", ")) + '"></div>' +
+            '<div class="field"><label>适用任务标签（逗号分隔）</label><input id="mem-tags" value="' + esc(m.task_tags.join(", ")) + '"></div>' +
+          "</div>" +
+          '<div class="bc-run-summary"><b>使用统计：</b> 共使用 ' + m.usage_count + ' 次，成功 ' + m.success_count + ' 次，成功率 ' + successRate + '</div>' +
+          (m.source_badcase_id ? '<div class="bc-run-summary"><b>来源：</b> badcase ' + esc(m.source_badcase_id) + '</div>' : "") +
+          '<div class="form-row" style="margin-top:16px">' +
+            '<button class="btn" id="mem-save">保存修改</button>' +
+            sourceLink +
+            '<button class="btn danger" id="mem-delete" style="margin-left:auto">删除</button>' +
+          "</div>" +
+          '<div id="mem-msg"></div>' +
+        "</div>"
+      );
+      el("mem-save").onclick = function () { saveMemory(mid); };
+      el("mem-delete").onclick = function () {
+        if (confirm("确定删除这条记忆？")) {
+          api("/api/memories/" + mid, { method: "DELETE" }).then(function () {
+            location.hash = "#/memories";
+          }).catch(function (e) { el("mem-msg").innerHTML = '<div class="err-banner">' + esc(e.message) + "</div>"; });
+        }
+      };
+    }).catch(function (e) { renderErr(e.message); });
+  }
+
+  function saveMemory(mid) {
+    var keywords = el("mem-keywords").value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+    var tags = el("mem-tags").value.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+    var body = {
+      title: el("mem-title").value,
+      content: el("mem-content").value,
+      trigger_keywords: keywords,
+      task_tags: tags,
+      confidence: parseFloat(el("mem-conf").value) || 0.5,
+      status: el("mem-status").value,
+    };
+    api("/api/memories/" + mid, { method: "PUT", body: body }).then(function () {
+      el("mem-msg").innerHTML = '<div class="success-banner">已保存 ✓</div>';
+      setTimeout(function () { el("mem-msg").innerHTML = ""; }, 2000);
+    }).catch(function (e) { el("mem-msg").innerHTML = '<div class="err-banner">' + esc(e.message) + "</div>"; });
   }
 
   // ---------- 视图：运行详情 ----------
@@ -1855,11 +1998,13 @@
     });
     if (name === "run") { viewRunDetail(parts[1]); return; }
     if (name === "badcase") { viewBadcaseDetail(parts[1]); return; }
+    if (name === "memory") { viewMemoryDetail(parts[1]); return; }
     if (name === "dashboard") viewDashboard();
     else if (name === "tasks") viewTasks();
     else if (name === "packages") viewPackages();
     else if (name === "history") viewHistory();
     else if (name === "badcases") viewBadcases();
+    else if (name === "memories") viewMemories();
     else if (name === "compare") viewCompare();
     else if (name === "report") viewReport();
     else if (name === "settings") viewSettings();

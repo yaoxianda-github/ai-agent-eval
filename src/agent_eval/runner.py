@@ -52,6 +52,64 @@ def default_results_dir() -> Path:
     return Path("results") / "runs"
 
 
+def _recall_and_inject_memories(task: TaskSpec, config: dict) -> tuple[TaskSpec, list[str]]:
+    """V2.9：根据任务特征召回经验记忆，注入到 system_prompt。
+
+    返回 (修改后的 task, 使用的记忆 ID 列表)。如果记忆注入未启用或无匹配记忆，
+    返回原始 task 和空列表。
+    """
+    mem_cfg = config.get("memory", {}) if config else {}
+    if not mem_cfg.get("enabled", False):
+        return task, []
+
+    try:
+        from agent_eval.web.store import RunStore
+        store = RunStore(Path("results") / "run_history.db")
+    except Exception as e:  # noqa: BLE001
+        logger.debug("记忆系统初始化失败，跳过记忆注入: %s", e)
+        return task, []
+
+    # 构建召回关键词：任务 ID + 标签 + 标题关键词
+    keywords = [task.id]
+    if task.tags:
+        keywords.extend(task.tags)
+    # 从标题提取简单关键词（前几个词）
+    if task.title:
+        title_words = [w for w in task.title.split() if len(w) > 1][:3]
+        keywords.extend(title_words)
+
+    limit = int(mem_cfg.get("limit", 3))
+    try:
+        memories = store.recall_memories(task_tags=task.tags or [], keywords=keywords, limit=limit)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("记忆召回失败: %s", e)
+        return task, []
+
+    if not memories:
+        logger.debug("未召回相关记忆")
+        return task, []
+
+    # 格式化记忆内容
+    mem_blocks = []
+    mem_ids = []
+    for m in memories:
+        mem_ids.append(m["id"])
+        block = f"【经验记忆 · {m['title']}】\n{m['content']}"
+        if m.get("source_badcase_id"):
+            block += f"\n（来源: badcase {m['source_badcase_id']}）"
+        mem_blocks.append(block)
+
+    memory_text = "\n\n---\n以下是从历史经验中召回的相关记忆，请在执行任务时参考：\n" + "\n\n".join(mem_blocks) + "\n---\n"
+
+    # 创建 task 副本，修改 system_prompt
+    import copy
+    new_task = copy.deepcopy(task)
+    new_task.system_prompt = (task.system_prompt or "") + memory_text
+
+    logger.info("记忆注入: 召回 %d 条记忆 (IDs: %s)", len(memories), ", ".join(mem_ids))
+    return new_task, mem_ids
+
+
 def run_one(
     task: TaskSpec,
     agent_id: str,
@@ -121,9 +179,12 @@ def run_one(
         backend = get_backend(agent_id, **agent_kwargs)
         logger.debug("后端已初始化: %s v%s", getattr(backend, "name", agent_id), getattr(backend, "version", "dev"))
 
+        # V2.9：经验记忆注入——根据任务特征召回相关记忆，注入到 system_prompt
+        task_for_run, used_memory_ids = _recall_and_inject_memories(task, config)
+
         try:
             start = time.time()
-            result = backend.run(task, workspace)
+            result = backend.run(task_for_run, workspace)
             duration = round(time.time() - start, 3)
         finally:
             # M2：MCP 环境清理——恢复环境变量，删除配置文件
@@ -175,6 +236,10 @@ def run_one(
                 {"name": name, "ok": ok, "detail": detail}
                 for name, ok, detail in mcp_health
             ]
+
+        # V2.9：记录使用的经验记忆 ID
+        if used_memory_ids:
+            metrics["used_memory_ids"] = used_memory_ids
 
         # V2.4：全链路回放轨迹（输入意图 → 检索/工具 → 模型生成）
         # 后端自报 traces（如 minimal-react 的 llm/tool 节点）优先；否则由 steps 兜底合成
