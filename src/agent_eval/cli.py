@@ -216,6 +216,103 @@ def convert(
     typer.echo(f"\n提示: 记得将新任务 ID 添加到 {output_dir}/manifest.yaml 的 tasks 列表中")
 
 
+# 任务包市场命令组
+taskpack_app = typer.Typer(help="任务包市场：安装/列出/卸载评测任务包")
+app.add_typer(taskpack_app, name="taskpack")
+
+
+@taskpack_app.command("install")
+def taskpack_install(
+    source: str = typer.Argument(..., help="任务包来源（git URL 或本地目录路径）"),
+    name: str = typer.Option("", "--name", "-n", help="覆盖包名（默认从 package.yaml 读取）"),
+    packages_dir: str = typer.Option("", "--packages-dir", help="任务包安装目录（默认 ~/.agent-eval/packages）"),
+) -> None:
+    """安装任务包（从 git 仓库或本地目录）。"""
+    from pathlib import Path
+
+    from agent_eval.taskpack import install_package
+
+    try:
+        pkg = install_package(
+            source,
+            packages_dir=Path(packages_dir) if packages_dir else None,
+            name=name if name else None,
+        )
+        typer.echo(f"安装成功: {pkg.name} v{pkg.version}")
+        typer.echo(f"  作者: {pkg.author or '未知'}")
+        typer.echo(f"  描述: {pkg.description or '无'}")
+        typer.echo(f"  任务数: {len(pkg.tasks)}")
+        typer.echo(f"  安装路径: {pkg.install_path}")
+        typer.echo(f"\n提示: 在 tasks/manifest.yaml 中添加 includes: [{pkg.name}] 以启用此任务包")
+    except (FileNotFoundError, RuntimeError, ValueError) as e:
+        typer.echo(f"错误: {e}")
+        raise typer.Exit(code=1)
+
+
+@taskpack_app.command("list")
+def taskpack_list(
+    packages_dir: str = typer.Option("", "--packages-dir", help="任务包安装目录"),
+) -> None:
+    """列出已安装的所有任务包。"""
+    from pathlib import Path
+
+    from agent_eval.taskpack import list_packages
+
+    packages = list_packages(Path(packages_dir) if packages_dir else None)
+    if not packages:
+        typer.echo("未安装任何任务包")
+        typer.echo("使用 agent-eval taskpack install <git-url或路径> 安装")
+        return
+    typer.echo(f"已安装 {len(packages)} 个任务包:")
+    typer.echo("-" * 70)
+    for pkg in packages:
+        typer.echo(f"  {pkg.name:<20} v{pkg.version:<10} {len(pkg.tasks):>3} 任务  {pkg.description[:30]}")
+
+
+@taskpack_app.command("remove")
+def taskpack_remove(
+    name: str = typer.Argument(..., help="要卸载的任务包名称"),
+    packages_dir: str = typer.Option("", "--packages-dir", help="任务包安装目录"),
+) -> None:
+    """卸载任务包。"""
+    from pathlib import Path
+
+    from agent_eval.taskpack import remove_package
+
+    if remove_package(name, Path(packages_dir) if packages_dir else None):
+        typer.echo(f"已卸载: {name}")
+    else:
+        typer.echo(f"任务包不存在: {name}")
+        raise typer.Exit(code=1)
+
+
+@taskpack_app.command("info")
+def taskpack_info(
+    name: str = typer.Argument(..., help="任务包名称"),
+    packages_dir: str = typer.Option("", "--packages-dir", help="任务包安装目录"),
+) -> None:
+    """查看任务包详细信息。"""
+    from pathlib import Path
+
+    from agent_eval.taskpack import get_package
+
+    pkg = get_package(name, Path(packages_dir) if packages_dir else None)
+    if pkg is None:
+        typer.echo(f"任务包不存在: {name}")
+        raise typer.Exit(code=1)
+    typer.echo(f"名称: {pkg.name}")
+    typer.echo(f"版本: {pkg.version}")
+    typer.echo(f"作者: {pkg.author or '未知'}")
+    typer.echo(f"协议: {pkg.license or '未知'}")
+    typer.echo(f"描述: {pkg.description or '无'}")
+    typer.echo(f"安装路径: {pkg.install_path}")
+    typer.echo(f"任务数: {len(pkg.tasks)}")
+    if pkg.tasks:
+        typer.echo("任务列表:")
+        for t in pkg.tasks:
+            typer.echo(f"  - {t}")
+
+
 @app.command("workbench")
 def workbench(
     host: str = typer.Option("127.0.0.1", "--host", help="监听地址"),

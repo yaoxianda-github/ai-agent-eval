@@ -14,6 +14,10 @@ from typing import Literal, Optional
 
 import yaml
 
+from agent_eval.log import get_logger
+
+logger = get_logger(__name__)
+
 CheckpointType = Literal[
     "file_exists",
     "file_not_exists",
@@ -130,14 +134,35 @@ def load_manifest(tasks_dir: Path) -> dict:
 
 
 def load_task_pack(tasks_dir: Path) -> list[TaskSpec]:
-    """加载 tasks_dir 下 manifest 声明的全部任务。"""
+    """加载 tasks_dir 下 manifest 声明的全部任务。
+
+    支持 manifest includes 字段：引用已安装的任务包，自动合并包内任务。
+    本地任务与 includes 任务 ID 冲突时，本地任务优先。
+    """
+    from agent_eval.taskpack import load_included_tasks
+
     manifest = load_manifest(tasks_dir)
     tasks: list[TaskSpec] = []
+    seen_ids: set[str] = set()
+
+    # 先加载本地任务
     for task_id in manifest.get("tasks", []):
         spec_path = tasks_dir / task_id / "spec.yaml"
         if not spec_path.exists():
             raise FileNotFoundError(f"任务 {task_id} 缺少 spec.yaml: {spec_path}")
         tasks.append(TaskSpec.from_yaml(spec_path))
+        seen_ids.add(task_id)
+
+    # 再加载 includes 引用的任务包（跳过 ID 冲突的）
+    includes = manifest.get("includes", [])
+    if includes:
+        for task_id, spec_path in load_included_tasks(includes):
+            if task_id in seen_ids:
+                logger.warning(f"任务 ID 冲突，本地任务优先: {task_id}（跳过任务包中的同名任务）")
+                continue
+            tasks.append(TaskSpec.from_yaml(spec_path))
+            seen_ids.add(task_id)
+
     return tasks
 
 
