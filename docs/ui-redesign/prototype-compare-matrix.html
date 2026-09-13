@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>对比矩阵 — AgentEval</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-secondary: #fafafa;
+    --bg-tertiary: #f5f5f5;
+    --bg-code: #0a0a0a;
+    --border: #e5e5e5;
+    --border-light: #f0f0f0;
+    --text-primary: #0a0a0a;
+    --text-secondary: #666666;
+    --text-muted: #999999;
+    --success: #16a34a;
+    --warning: #d97706;
+    --danger: #dc2626;
+    --info: #2563eb;
+    --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+    --font-sans: -apple-system, 'SF Pro Display', 'Inter', 'Segoe UI', 'PingFang SC', sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text-primary);
+    font-family: var(--font-sans); line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 导航 */
+  .navbar {
+    position: fixed; top: 0; left: 0; right: 0; height: 64px;
+    background: rgba(255,255,255,0.9); backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border-light);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 48px; z-index: 100;
+  }
+  .nav-left { display: flex; align-items: center; gap: 48px; }
+  .nav-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; }
+  .nav-logo {
+    width: 28px; height: 28px; background: var(--text-primary); border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 900; font-size: 12px; font-family: var(--font-mono);
+  }
+  .nav-links { display: flex; gap: 4px; }
+  .nav-link {
+    padding: 6px 14px; font-size: 13px; font-weight: 500; color: var(--text-secondary);
+    text-decoration: none; border-radius: 6px; transition: all 0.15s; cursor: pointer;
+  }
+  .nav-link:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+  .nav-link.active { color: var(--text-primary); background: var(--bg-tertiary); font-weight: 600; }
+  .nav-right { display: flex; align-items: center; gap: 16px; }
+  .nav-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
+  .status-dot { width: 6px; height: 6px; background: var(--success); border-radius: 50%; }
+
+  .breadcrumb {
+    padding: 88px 48px 0; max-width: 1200px; margin: 0 auto;
+    font-size: 13px; color: var(--text-muted); font-family: var(--font-mono);
+  }
+  .breadcrumb a { color: var(--text-secondary); text-decoration: none; cursor: pointer; }
+  .breadcrumb a:hover { color: var(--text-primary); }
+  .breadcrumb span { margin: 0 8px; }
+
+  .page { padding: 32px 48px 80px; max-width: 1200px; margin: 0 auto; }
+
+  /* 头部 */
+  .page-header { margin-bottom: 40px; }
+  .page-title {
+    font-size: 32px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .page-subtitle { font-size: 14px; color: var(--text-secondary); }
+  .page-meta {
+    display: flex; gap: 24px; margin-top: 16px;
+    font-size: 13px; color: var(--text-muted); font-family: var(--font-mono);
+  }
+
+  /* Agent 对比卡片 */
+  .agent-compare {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+    margin-bottom: 48px;
+  }
+  .agent-card {
+    border: 1px solid var(--border); border-radius: 12px; padding: 24px;
+    transition: all 0.15s; position: relative;
+  }
+  .agent-card:hover { border-color: var(--text-primary); }
+  .agent-card.best { border-color: var(--success); border-width: 2px; }
+  .agent-card.best::before {
+    content: 'BEST'; position: absolute; top: -10px; right: 16px;
+    background: var(--success); color: white; font-size: 10px; font-weight: 800;
+    padding: 2px 8px; border-radius: 4px; font-family: var(--font-mono);
+    letter-spacing: 0.5px;
+  }
+  .agent-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+  .agent-avatar {
+    width: 36px; height: 36px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800; color: white; font-family: var(--font-mono);
+  }
+  .agent-name { font-size: 16px; font-weight: 700; }
+  .agent-model { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
+  .agent-score {
+    font-size: 40px; font-weight: 800; font-family: var(--font-mono);
+    letter-spacing: -1px; line-height: 1; margin-bottom: 4px;
+  }
+  .agent-score-label {
+    font-size: 11px; color: var(--text-muted); text-transform: uppercase;
+    letter-spacing: 0.5px; font-family: var(--font-mono); margin-bottom: 20px;
+  }
+  .agent-metrics { display: flex; flex-direction: column; gap: 10px; }
+  .agent-metric {
+    display: flex; justify-content: space-between; font-size: 13px;
+    padding-bottom: 10px; border-bottom: 1px solid var(--border-light);
+  }
+  .agent-metric:last-child { border-bottom: none; padding-bottom: 0; }
+  .agent-metric .label { color: var(--text-secondary); }
+  .agent-metric .value { font-family: var(--font-mono); font-weight: 600; }
+  .agent-metric .value.best { color: var(--success); }
+
+  /* 板块 */
+  .section-block { margin-bottom: 48px; }
+  .section-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border-light);
+  }
+  .section-title { font-size: 18px; font-weight: 700; }
+  .section-desc { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
+
+  /* 任务对比矩阵 */
+  .matrix-table {
+    width: 100%; border-collapse: collapse;
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  }
+  .matrix-table th {
+    background: var(--bg-secondary); padding: 12px 16px;
+    text-align: left; font-size: 11px; font-weight: 600;
+    color: var(--text-muted); text-transform: uppercase;
+    letter-spacing: 0.5px; font-family: var(--font-mono);
+    border-bottom: 1px solid var(--border);
+  }
+  .matrix-table th.agent-col { text-align: center; min-width: 100px; }
+  .matrix-table td {
+    padding: 12px 16px; font-size: 13px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .matrix-table tr:last-child td { border-bottom: none; }
+  .matrix-table tr:hover { background: var(--bg-secondary); }
+  .matrix-task-id {
+    font-family: var(--font-mono); font-size: 12px; color: var(--info); font-weight: 600;
+  }
+  .matrix-task-name { font-weight: 500; font-size: 13px; }
+  .matrix-tier {
+    font-size: 10px; font-weight: 600; font-family: var(--font-mono);
+    text-transform: uppercase; color: var(--text-muted);
+  }
+  .matrix-cell {
+    text-align: center; font-family: var(--font-mono); font-weight: 700; font-size: 13px;
+  }
+  .matrix-cell.pass { color: var(--success); }
+  .matrix-cell.fail { color: var(--danger); }
+  .matrix-cell.skip { color: var(--text-muted); }
+  .matrix-cell .bar {
+    display: inline-block; width: 40px; height: 4px; background: var(--border);
+    border-radius: 2px; vertical-align: middle; margin-right: 6px; overflow: hidden;
+  }
+  .matrix-cell .bar-fill { height: 100%; border-radius: 2px; }
+
+  /* 能力雷达 */
+  .radar-section {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: start;
+  }
+  .radar-container {
+    background: var(--bg-secondary); border: 1px solid var(--border-light);
+    border-radius: 12px; padding: 32px; display: flex;
+    align-items: center; justify-content: center; min-height: 360px;
+  }
+  .radar-svg { width: 100%; max-width: 320px; }
+  .radar-legend { display: flex; flex-direction: column; gap: 16px; }
+  .legend-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px; background: var(--bg-secondary);
+    border: 1px solid var(--border-light); border-radius: 8px;
+  }
+  .legend-color {
+    width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0;
+  }
+  .legend-info { flex: 1; }
+  .legend-name { font-size: 13px; font-weight: 600; }
+  .legend-score { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
+
+  /* 成本对比 */
+  .cost-table {
+    width: 100%; border-collapse: collapse;
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  }
+  .cost-table th {
+    background: var(--bg-secondary); padding: 14px 20px;
+    text-align: left; font-size: 11px; font-weight: 600;
+    color: var(--text-muted); text-transform: uppercase;
+    letter-spacing: 0.5px; font-family: var(--font-mono);
+    border-bottom: 1px solid var(--border);
+  }
+  .cost-table td {
+    padding: 16px 20px; font-size: 14px;
+    border-bottom: 1px solid var(--border-light);
+    font-family: var(--font-mono);
+  }
+  .cost-table tr:last-child td { border-bottom: none; }
+  .cost-table tr:hover { background: var(--bg-secondary); }
+  .cost-total {
+    font-weight: 700; background: var(--bg-secondary);
+  }
+
+  /* 门禁状态 */
+  .gate-card {
+    border: 1px solid var(--border); border-radius: 12px; padding: 24px;
+    margin-bottom: 32px;
+  }
+  .gate-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  .gate-title { font-size: 16px; font-weight: 700; }
+  .gate-status {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 14px; border-radius: 100px;
+    font-size: 12px; font-weight: 700; font-family: var(--font-mono);
+  }
+  .gate-status.pass { background: #f0fdf4; color: var(--success); }
+  .gate-status.warn { background: #fffbeb; color: var(--warning); }
+  .gate-status.fail { background: #fef2f2; color: var(--danger); }
+  .gate-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .gate-metric {
+    padding: 14px; background: var(--bg-secondary); border-radius: 8px;
+    border: 1px solid var(--border-light);
+  }
+  .gate-metric-name { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; }
+  .gate-metric-value {
+    font-size: 14px; font-weight: 700; font-family: var(--font-mono);
+  }
+  .gate-metric-value.ok { color: var(--success); }
+  .gate-metric-value.fail { color: var(--danger); }
+
+  @media (max-width: 1024px) {
+    .agent-compare { grid-template-columns: 1fr; }
+    .radar-section { grid-template-columns: 1fr; }
+    .gate-metrics { grid-template-columns: 1fr; }
+    .nav-links { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 导航 -->
+<nav class="navbar">
+  <div class="nav-left">
+    <div class="nav-brand"><div class="nav-logo">AE</div><span>AgentEval</span></div>
+    <div class="nav-links">
+      <a class="nav-link">概览</a>
+      <a class="nav-link">任务</a>
+      <a class="nav-link">运行</a>
+      <a class="nav-link active">对比</a>
+      <a class="nav-link">监控</a>
+      <a class="nav-link">Badcase</a>
+      <a class="nav-link">设置</a>
+    </div>
+  </div>
+  <div class="nav-right">
+    <div class="nav-status"><div class="status-dot"></div><span>online</span></div>
+  </div>
+</nav>
+
+<div class="breadcrumb">
+  <a>对比历史</a><span>/</span><span>full × 2agent × runs1</span>
+</div>
+
+<div class="page">
+
+  <!-- 头部 -->
+  <div class="page-header">
+    <div class="page-title">
+      full × 2agent × runs1
+    </div>
+    <div class="page-subtitle">多 Agent 横向对比 · 37 个任务 · 1 次重复</div>
+    <div class="page-meta">
+      <span>运行ID: a1b2c3d4e5f6</span>
+      <span>开始: 2026-09-09 22:30:59</span>
+      <span>耗时: 12m 34s</span>
+    </div>
+  </div>
+
+  <!-- 质量门禁 -->
+  <div class="gate-card">
+    <div class="gate-header">
+      <div class="gate-title">质量门禁评估</div>
+      <span class="gate-status warn">⚠ 1 项未达标</span>
+    </div>
+    <div class="gate-metrics">
+      <div class="gate-metric">
+        <div class="gate-metric-name">核心任务通过率 (≥90%)</div>
+        <div class="gate-metric-value ok">92.1% ✓</div>
+      </div>
+      <div class="gate-metric">
+        <div class="gate-metric-name">整体准确率 (≥85%)</div>
+        <div class="gate-metric-value ok">89.5% ✓</div>
+      </div>
+      <div class="gate-metric">
+        <div class="gate-metric-name">P95 延迟 (&lt;10s)</div>
+        <div class="gate-metric-value ok">6.8s ✓</div>
+      </div>
+      <div class="gate-metric">
+        <div class="gate-metric-name">单任务 Token (≤5k)</div>
+        <div class="gate-metric-value ok">3.8k ✓</div>
+      </div>
+      <div class="gate-metric">
+        <div class="gate-metric-name">安全性通过率 (=100%)</div>
+        <div class="gate-metric-value ok">100% ✓</div>
+      </div>
+      <div class="gate-metric">
+        <div class="gate-metric-name">最低置信度 (≥60)</div>
+        <div class="gate-metric-value fail">58 ✕</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Agent 对比卡片 -->
+  <div class="agent-compare">
+    <div class="agent-card best">
+      <div class="agent-header">
+        <div class="agent-avatar" style="background:#0a0a0a">DS</div>
+        <div>
+          <div class="agent-name">DeepSeek</div>
+          <div class="agent-model">deepseek-chat</div>
+        </div>
+      </div>
+      <div class="agent-score" style="color:var(--success)">91.3</div>
+      <div class="agent-score-label">综合得分 / 100</div>
+      <div class="agent-metrics">
+        <div class="agent-metric"><span class="label">通过率</span><span class="value best">92.1%</span></div>
+        <div class="agent-metric"><span class="label">平均耗时</span><span class="value best">38s</span></div>
+        <div class="agent-metric"><span class="label">Token/任务</span><span class="value best">3.2k</span></div>
+        <div class="agent-metric"><span class="label">置信度</span><span class="value">88 · 高</span></div>
+        <div class="agent-metric"><span class="label">预估成本</span><span class="value best">$0.042</span></div>
+      </div>
+    </div>
+
+    <div class="agent-card">
+      <div class="agent-header">
+        <div class="agent-avatar" style="background:#d97706">CC</div>
+        <div>
+          <div class="agent-name">Claude Code</div>
+          <div class="agent-model">claude-opus-4.8</div>
+        </div>
+      </div>
+      <div class="agent-score">88.7</div>
+      <div class="agent-score-label">综合得分 / 100</div>
+      <div class="agent-metrics">
+        <div class="agent-metric"><span class="label">通过率</span><span class="value">89.5%</span></div>
+        <div class="agent-metric"><span class="label">平均耗时</span><span class="value">52s</span></div>
+        <div class="agent-metric"><span class="label">Token/任务</span><span class="value">4.8k</span></div>
+        <div class="agent-metric"><span class="label">置信度</span><span class="value">85 · 高</span></div>
+        <div class="agent-metric"><span class="label">预估成本</span><span class="value">$0.156</span></div>
+      </div>
+    </div>
+
+    <div class="agent-card">
+      <div class="agent-header">
+        <div class="agent-avatar" style="background:#2563eb">HM</div>
+        <div>
+          <div class="agent-name">Hermes</div>
+          <div class="agent-model">claude-opus-4.8</div>
+        </div>
+      </div>
+      <div class="agent-score" style="color:var(--warning)">84.1</div>
+      <div class="agent-score-label">综合得分 / 100</div>
+      <div class="agent-metrics">
+        <div class="agent-metric"><span class="label">通过率</span><span class="value">85.3%</span></div>
+        <div class="agent-metric"><span class="label">平均耗时</span><span class="value">61s</span></div>
+        <div class="agent-metric"><span class="label">Token/任务</span><span class="value">5.1k</span></div>
+        <div class="agent-metric"><span class="label">置信度</span><span class="value">72 · 中</span></div>
+        <div class="agent-metric"><span class="label">预估成本</span><span class="value">$0.168</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 任务对比矩阵 -->
+  <div class="section-block">
+    <div class="section-header">
+      <div class="section-title">任务级对比矩阵</div>
+      <div class="section-desc">点击单元格查看任务详情</div>
+    </div>
+    <table class="matrix-table">
+      <thead>
+        <tr>
+          <th>任务</th>
+          <th>Tier</th>
+          <th class="agent-col">DeepSeek</th>
+          <th class="agent-col">Claude Code</th>
+          <th class="agent-col">Hermes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <div class="matrix-task-id">T001</div>
+            <div class="matrix-task-name">文件读写基础操作</div>
+          </td>
+          <td><span class="matrix-tier">Golden</span></td>
+          <td class="matrix-cell pass">✓ 98%</td>
+          <td class="matrix-cell pass">✓ 95%</td>
+          <td class="matrix-cell pass">✓ 90%</td>
+        </tr>
+        <tr>
+          <td>
+            <div class="matrix-task-id">T015</div>
+            <div class="matrix-task-name">多步工具调用编排</div>
+          </td>
+          <td><span class="matrix-tier">Golden</span></td>
+          <td class="matrix-cell pass">✓ 96%</td>
+          <td class="matrix-cell pass">✓ 92%</td>
+          <td class="matrix-cell pass">✓ 88%</td>
+        </tr>
+        <tr>
+          <td>
+            <div class="matrix-task-id">T023</div>
+            <div class="matrix-task-name">异常输入容错处理</div>
+          </td>
+          <td><span class="matrix-tier">Boundary</span></td>
+          <td class="matrix-cell pass">✓ 78%</td>
+          <td class="matrix-cell fail">✕ 65%</td>
+          <td class="matrix-cell fail">✕ 52%</td>
+        </tr>
+        <tr>
+          <td>
+            <div class="matrix-task-id">T031</div>
+            <div class="matrix-task-name">历史 Bug 复现 - 编码</div>
+          </td>
+          <td><span class="matrix-tier">Regression</span></td>
+          <td class="matrix-cell pass">✓ 100%</td>
+          <td class="matrix-cell pass">✓ 100%</td>
+          <td class="matrix-cell pass">✓ 98%</td>
+        </tr>
+        <tr>
+          <td>
+            <div class="matrix-task-id">RAG-002</div>
+            <div class="matrix-task-name">抗干扰检索能力</div>
+          </td>
+          <td><span class="matrix-tier">Boundary</span></td>
+          <td class="matrix-cell fail">✕ 52%</td>
+          <td class="matrix-cell fail">✕ 46%</td>
+          <td class="matrix-cell fail">✕ 38%</td>
+        </tr>
+        <tr>
+          <td>
+            <div class="matrix-task-id">T037</div>
+            <div class="matrix-task-name">线上流量采样 - 对话</div>
+          </td>
+          <td><span class="matrix-tier">Random</span></td>
+          <td class="matrix-cell pass">✓ 85%</td>
+          <td class="matrix-cell pass">✓ 82%</td>
+          <td class="matrix-cell pass">✓ 76%</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 能力雷达 + 成本 -->
+  <div class="section-block">
+    <div class="section-header">
+      <div class="section-title">能力维度分析</div>
+    </div>
+    <div class="radar-section">
+      <div class="radar-container">
+        <svg class="radar-svg" viewBox="0 0 300 300">
+          <!-- 背景网格 -->
+          <polygon points="150,30 260,95 260,205 150,270 40,205 40,95" fill="none" stroke="#e5e5e5" stroke-width="1"/>
+          <polygon points="150,70 225,110 225,190 150,230 75,190 75,110" fill="none" stroke="#e5e5e5" stroke-width="1"/>
+          <polygon points="150,110 190,125 190,175 150,190 110,175 110,125" fill="none" stroke="#e5e5e5" stroke-width="1"/>
+          <!-- 轴线 -->
+          <line x1="150" y1="30" x2="150" y2="270" stroke="#e5e5e5" stroke-width="1"/>
+          <line x1="40" y1="95" x2="260" y2="205" stroke="#e5e5e5" stroke-width="1"/>
+          <line x1="40" y1="205" x2="260" y2="95" stroke="#e5e5e5" stroke-width="1"/>
+          <!-- DeepSeek 区域 -->
+          <polygon points="150,45 245,105 240,195 150,250 55,200 60,100"
+                   fill="rgba(10,10,10,0.1)" stroke="#0a0a0a" stroke-width="2"/>
+          <!-- Claude Code 区域 -->
+          <polygon points="150,55 235,115 225,185 150,235 65,195 70,110"
+                   fill="rgba(217,119,6,0.1)" stroke="#d97706" stroke-width="2"/>
+          <!-- Hermes 区域 -->
+          <polygon points="150,75 215,130 200,175 150,210 85,180 90,125"
+                   fill="rgba(37,99,235,0.1)" stroke="#2563eb" stroke-width="2"/>
+          <!-- 标签 -->
+          <text x="150" y="20" text-anchor="middle" font-size="10" fill="#666" font-family="monospace">文件操作</text>
+          <text x="275" y="90" text-anchor="start" font-size="10" fill="#666" font-family="monospace">工具调用</text>
+          <text x="275" y="215" text-anchor="start" font-size="10" fill="#666" font-family="monospace">代码生成</text>
+          <text x="150" y="288" text-anchor="middle" font-size="10" fill="#666" font-family="monospace">推理能力</text>
+          <text x="25" y="215" text-anchor="end" font-size="10" fill="#666" font-family="monospace">异常处理</text>
+          <text x="25" y="90" text-anchor="end" font-size="10" fill="#666" font-family="monospace">RAG检索</text>
+        </svg>
+      </div>
+      <div class="radar-legend">
+        <div class="legend-item">
+          <div class="legend-color" style="background:#0a0a0a"></div>
+          <div class="legend-info">
+            <div class="legend-name">DeepSeek</div>
+            <div class="legend-score">工具调用 96 · 代码生成 94 · 推理 90</div>
+          </div>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background:#d97706"></div>
+          <div class="legend-info">
+            <div class="legend-name">Claude Code</div>
+            <div class="legend-score">推理 92 · 代码生成 88 · 工具调用 85</div>
+          </div>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background:#2563eb"></div>
+          <div class="legend-info">
+            <div class="legend-name">Hermes</div>
+            <div class="legend-score">推理 85 · 文件操作 82 · 异常处理 70</div>
+          </div>
+        </div>
+        <div style="padding:16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;">
+          <div style="font-size:12px;font-weight:700;color:var(--success);margin-bottom:4px">💡 洞察</div>
+          <div style="font-size:12px;color:var(--text-secondary);line-height:1.6">
+            DeepSeek 在工具调用和代码生成上领先；Claude Code 推理能力最强；
+            三者在 RAG 检索上都偏弱，建议优先优化检索策略。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 成本对比 -->
+  <div class="section-block">
+    <div class="section-header">
+      <div class="section-title">成本对比</div>
+      <div class="section-desc">基于实际 Token 消耗 × 模型单价</div>
+    </div>
+    <table class="cost-table">
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Prompt Tokens</th>
+          <th>Completion Tokens</th>
+          <th>总 Token</th>
+          <th>预估成本</th>
+          <th>单任务成本</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="font-weight:700">DeepSeek</td>
+          <td>68,400</td>
+          <td>42,100</td>
+          <td>110,500</td>
+          <td style="color:var(--success);font-weight:700">$0.042</td>
+          <td>$0.0011</td>
+        </tr>
+        <tr>
+          <td style="font-weight:700">Claude Code</td>
+          <td>98,200</td>
+          <td>56,800</td>
+          <td>155,000</td>
+          <td style="font-weight:700">$0.156</td>
+          <td>$0.0042</td>
+        </tr>
+        <tr>
+          <td style="font-weight:700">Hermes</td>
+          <td>105,600</td>
+          <td>62,400</td>
+          <td>168,000</td>
+          <td style="font-weight:700">$0.168</td>
+          <td>$0.0045</td>
+        </tr>
+        <tr class="cost-total">
+          <td>合计</td>
+          <td>272,200</td>
+          <td>161,300</td>
+          <td>433,500</td>
+          <td style="color:var(--info)">$0.366</td>
+          <td>—</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+</body>
+</html>

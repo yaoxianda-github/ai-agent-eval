@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentEval — UI Redesign v2 (Remocn Style)</title>
+<style>
+  /* ===== 设计变量 - Remocn 极简风 ===== */
+  :root {
+    --bg: #ffffff;
+    --bg-secondary: #fafafa;
+    --bg-tertiary: #f5f5f5;
+    --bg-code: #0a0a0a;
+    --border: #e5e5e5;
+    --border-light: #f0f0f0;
+    --text-primary: #0a0a0a;
+    --text-secondary: #666666;
+    --text-muted: #999999;
+    --accent: #0a0a0a;
+    --accent-hover: #333333;
+    --success: #16a34a;
+    --warning: #d97706;
+    --danger: #dc2626;
+    --info: #2563eb;
+    --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+    --font-sans: -apple-system, 'SF Pro Display', 'Inter', 'Segoe UI', 'PingFang SC', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ===== 顶部导航 ===== */
+  .navbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 64px;
+    background: rgba(255,255,255,0.9);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 48px;
+    z-index: 100;
+  }
+
+  .nav-left {
+    display: flex;
+    align-items: center;
+    gap: 48px;
+  }
+
+  .nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 16px;
+    letter-spacing: -0.3px;
+  }
+
+  .nav-logo {
+    width: 28px;
+    height: 28px;
+    background: var(--text-primary);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 900;
+    font-size: 12px;
+    font-family: var(--font-mono);
+  }
+
+  .nav-links {
+    display: flex;
+    gap: 4px;
+  }
+
+  .nav-link {
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-radius: 6px;
+    transition: all 0.15s;
+    cursor: pointer;
+  }
+
+  .nav-link:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+  }
+
+  .nav-link.active {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+    font-weight: 600;
+  }
+
+  .nav-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .nav-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    background: var(--success);
+    border-radius: 50%;
+  }
+
+  .nav-btn {
+    padding: 8px 16px;
+    background: var(--text-primary);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .nav-btn:hover { background: var(--accent-hover); }
+
+  /* ===== Hero 首屏 ===== */
+  .hero {
+    padding: 160px 48px 100px;
+    text-align: center;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  .hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 32px;
+    font-family: var(--font-mono);
+  }
+
+  .hero-badge .dot {
+    width: 6px;
+    height: 6px;
+    background: var(--success);
+    border-radius: 50%;
+  }
+
+  .hero-title {
+    font-size: 64px;
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -2px;
+    margin-bottom: 24px;
+  }
+
+  .hero-title .underline {
+    background: linear-gradient(transparent 60%, #fef08a 60%);
+    padding: 0 4px;
+  }
+
+  .hero-subtitle {
+    font-size: 18px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    max-width: 600px;
+    margin: 0 auto 40px;
+  }
+
+  .hero-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin-bottom: 64px;
+  }
+
+  .btn-primary {
+    padding: 14px 28px;
+    background: var(--text-primary);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); }
+
+  .btn-secondary {
+    padding: 14px 28px;
+    background: white;
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-secondary:hover { border-color: var(--text-primary); }
+
+  /* 终端展示 */
+  .hero-terminal {
+    background: var(--bg-code);
+    border-radius: 12px;
+    padding: 20px 24px;
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.8;
+    color: #e5e5e5;
+    max-width: 700px;
+    margin: 0 auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+  }
+
+  .terminal-header {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+
+  .terminal-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .terminal-dot.red { background: #ff5f57; }
+  .terminal-dot.yellow { background: #febc2e; }
+  .terminal-dot.green { background: #28c840; }
+
+  .terminal-line { color: #888; }
+  .terminal-line .prompt { color: #28c840; }
+  .terminal-line .cmd { color: #e5e5e5; }
+  .terminal-line .output { color: #888; }
+  .terminal-line .success { color: #28c840; }
+
+  /* ===== 通用板块 ===== */
+  .section {
+    padding: 100px 48px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .section-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    font-family: var(--font-mono);
+    margin-bottom: 16px;
+  }
+
+  .section-title {
+    font-size: 40px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    line-height: 1.2;
+    margin-bottom: 16px;
+  }
+
+  .section-desc {
+    font-size: 16px;
+    color: var(--text-secondary);
+    max-width: 560px;
+    line-height: 1.7;
+    margin-bottom: 56px;
+  }
+
+  /* ===== 三步流程 ===== */
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 32px;
+  }
+
+  .step {
+    position: relative;
+  }
+
+  .step-number {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    margin-bottom: 16px;
+  }
+
+  .step-terminal {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+  }
+
+  .step-terminal .path { color: var(--text-primary); font-weight: 600; }
+  .step-terminal .cmd { color: var(--info); }
+
+  .step-title {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .step-desc {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  /* ===== 对比列表 ===== */
+  .comparison {
+    background: var(--bg-secondary);
+    border-radius: 16px;
+    padding: 48px;
+  }
+
+  .comparison-title {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 32px;
+    letter-spacing: -0.5px;
+  }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+
+  .comparison-item {
+    padding: 24px;
+    background: white;
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+  }
+
+  .comparison-item h4 {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .comparison-item p {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  /* ===== 数据概览 ===== */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+
+  .stat-card {
+    background: white;
+    padding: 32px 28px;
+  }
+
+  .stat-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-family: var(--font-mono);
+    margin-bottom: 12px;
+  }
+
+  .stat-value {
+    font-size: 36px;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    letter-spacing: -1px;
+    line-height: 1;
+    margin-bottom: 8px;
+  }
+
+  .stat-change {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .stat-change.up { color: var(--success); }
+  .stat-change.down { color: var(--danger); }
+
+  /* ===== Agent 表格 ===== */
+  .agent-table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .agent-table th {
+    background: var(--bg-secondary);
+    padding: 14px 20px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-family: var(--font-mono);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .agent-table td {
+    padding: 18px 20px;
+    font-size: 14px;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .agent-table tr:last-child td { border-bottom: none; }
+  .agent-table tr:hover { background: var(--bg-secondary); }
+
+  .agent-name {
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .agent-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 800;
+    color: white;
+    font-family: var(--font-mono);
+  }
+
+  .score {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 16px;
+  }
+
+  .score.high { color: var(--success); }
+  .score.medium { color: var(--warning); }
+  .score.low { color: var(--danger); }
+
+  .badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+  }
+
+  .badge.success { background: #f0fdf4; color: var(--success); }
+  .badge.warning { background: #fffbeb; color: var(--warning); }
+  .badge.info { background: #eff6ff; color: var(--info); }
+
+  /* ===== 任务列表 ===== */
+  .task-list {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .task-item {
+    display: grid;
+    grid-template-columns: 80px 1fr 100px 120px 100px 80px;
+    align-items: center;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border-light);
+    transition: background 0.15s;
+  }
+
+  .task-item:last-child { border-bottom: none; }
+  .task-item:hover { background: var(--bg-secondary); }
+
+  .task-item.header {
+    background: var(--bg-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-family: var(--font-mono);
+    padding: 12px 24px;
+  }
+
+  .task-id {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--info);
+    font-weight: 600;
+  }
+
+  .task-name {
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .tier {
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+  }
+
+  .tier.golden { color: var(--warning); }
+  .tier.boundary { color: var(--info); }
+  .tier.regression { color: var(--success); }
+  .tier.random { color: var(--text-muted); }
+
+  .pass-rate {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  .confidence-bar {
+    width: 60px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 8px;
+  }
+
+  .confidence-fill {
+    height: 100%;
+    border-radius: 2px;
+  }
+
+  /* ===== 监控面板 ===== */
+  .monitor-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .monitor-card {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+  }
+
+  .monitor-title {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .circuit-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    margin-bottom: 16px;
+  }
+
+  .circuit-light {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--success);
+  }
+
+  .circuit-text {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .circuit-detail {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    margin-top: 2px;
+  }
+
+  .metric-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-light);
+    font-size: 13px;
+  }
+
+  .metric-row:last-child { border-bottom: none; }
+
+  .metric-name { color: var(--text-secondary); }
+  .metric-value { font-family: var(--font-mono); font-weight: 600; }
+  .metric-value.ok { color: var(--success); }
+  .metric-value.warn { color: var(--warning); }
+  .metric-value.fail { color: var(--danger); }
+
+  /* ===== Badcase ===== */
+  .badcase-item {
+    display: flex;
+    gap: 16px;
+    padding: 20px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    transition: all 0.15s;
+  }
+
+  .badcase-item:hover {
+    border-color: var(--text-primary);
+  }
+
+  .badcase-severity {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 800;
+    font-family: var(--font-mono);
+  }
+
+  .badcase-severity.P0 { background: #fef2f2; color: var(--danger); }
+  .badcase-severity.P1 { background: #fff7ed; color: var(--warning); }
+  .badcase-severity.P2 { background: #fefce8; color: #ca8a04; }
+
+  .badcase-content { flex: 1; }
+
+  .badcase-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .badcase-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  /* ===== CTA 结尾 ===== */
+  .cta {
+    padding: 120px 48px;
+    text-align: center;
+    border-top: 1px solid var(--border);
+  }
+
+  .cta-title {
+    font-size: 48px;
+    font-weight: 800;
+    letter-spacing: -1.5px;
+    margin-bottom: 16px;
+  }
+
+  .cta-subtitle {
+    font-size: 16px;
+    color: var(--text-secondary);
+    margin-bottom: 32px;
+  }
+
+  /* ===== 底部 ===== */
+  .footer {
+    padding: 48px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  /* ===== 响应式 ===== */
+  @media (max-width: 1024px) {
+    .steps, .comparison-grid { grid-template-columns: 1fr; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .monitor-grid { grid-template-columns: 1fr; }
+    .hero-title { font-size: 48px; }
+    .nav-links { display: none; }
+  }
+
+  @media (max-width: 640px) {
+    .navbar { padding: 0 20px; }
+    .hero { padding: 120px 20px 60px; }
+    .hero-title { font-size: 36px; }
+    .section { padding: 60px 20px; }
+    .section-title { font-size: 28px; }
+    .stats-grid { grid-template-columns: 1fr; }
+    .task-item { grid-template-columns: 1fr; gap: 8px; }
+    .comparison { padding: 24px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== 顶部导航 ===== -->
+<nav class="navbar">
+  <div class="nav-left">
+    <div class="nav-brand">
+      <div class="nav-logo">AE</div>
+      <span>AgentEval</span>
+    </div>
+    <div class="nav-links">
+      <a class="nav-link active">概览</a>
+      <a class="nav-link">任务</a>
+      <a class="nav-link">运行</a>
+      <a class="nav-link">对比</a>
+      <a class="nav-link">监控</a>
+      <a class="nav-link">Badcase</a>
+      <a class="nav-link">设置</a>
+    </div>
+  </div>
+  <div class="nav-right">
+    <div class="nav-status">
+      <div class="status-dot"></div>
+      <span>online</span>
+    </div>
+    <button class="nav-btn">发起评测</button>
+  </div>
+</nav>
+
+<!-- ===== Hero 首屏 ===== -->
+<section class="hero">
+  <div class="hero-badge">
+    <span class="dot"></span>
+    <span>v3.4 · confidence-driven evaluation</span>
+  </div>
+  <h1 class="hero-title">
+    你要的是<span class="underline">评测结果</span>，<br>不是繁琐的配置过程。
+  </h1>
+  <p class="hero-subtitle">
+    选择任务、选择 Agent、点击运行。确定性校验点 + 置信度评估，
+    让每一次 Agent 升级都可量化、可追溯、可阻断。
+  </p>
+  <div class="hero-actions">
+    <button class="btn-primary">开始评测</button>
+    <button class="btn-secondary">查看文档</button>
+  </div>
+
+  <!-- 终端展示 -->
+  <div class="hero-terminal">
+    <div class="terminal-header">
+      <div class="terminal-dot red"></div>
+      <div class="terminal-dot yellow"></div>
+      <div class="terminal-dot green"></div>
+    </div>
+    <div class="terminal-line"><span class="prompt">$</span> <span class="cmd">agent-eval run --tasks full --agents deepseek,claude-code --runs 3</span></div>
+    <div class="terminal-line"><span class="output">→ 加载 37 个任务，2 个 Agent，3 次重复...</span></div>
+    <div class="terminal-line"><span class="output">→ 运行中: [████████████░░░░] 72%</span></div>
+    <div class="terminal-line"><span class="success">✓ 完成。通过率 89.2%，置信度 高，门禁通过</span></div>
+  </div>
+</section>
+
+<!-- ===== 三步流程 ===== -->
+<section class="section">
+  <div class="section-label">// How it works</div>
+  <h2 class="section-title">三步，从空文件夹到评测报告</h2>
+  <p class="section-desc">不需要学习复杂的评测框架，不需要手动编写测试用例。描述你要测什么，系统帮你完成剩下的。</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-number">01</div>
+      <div class="step-terminal">
+        <span class="path">~/agent-eval</span> › <span class="cmd">agent-eval workbench</span>
+      </div>
+      <h3 class="step-title">打开工作台</h3>
+      <p class="step-desc">一条命令启动 Web 评测工作台，所有操作在浏览器中完成，无需编写代码。</p>
+    </div>
+    <div class="step">
+      <div class="step-number">02</div>
+      <div class="step-terminal">
+        <span class="path">tasks/</span> › <span class="cmd">select 37 tasks</span>
+      </div>
+      <h3 class="step-title">选择任务与 Agent</h3>
+      <p class="step-desc">从 4 层数据集（黄金/边界/回归/随机）中选择任务，配置待测 Agent，设置重复次数。</p>
+    </div>
+    <div class="step">
+      <div class="step-number">03</div>
+      <div class="step-terminal">
+        <span class="path">results/</span> › <span class="cmd">report.html</span>
+      </div>
+      <h3 class="step-title">获取报告</h3>
+      <p class="step-desc">确定性校验点自动判定，5 维度置信度评估，6 指标质量门禁，JUnit + Allure 双格式输出。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 对比列表 ===== -->
+<section class="section">
+  <div class="comparison">
+    <h3 class="comparison-title">其他方式都有代价</h3>
+    <div class="comparison-grid">
+      <div class="comparison-item">
+        <h4>手动测试</h4>
+        <p>每次升级花 2 天人工回归，覆盖不到 20% 场景，结果不可复现，问题发现全靠运气。</p>
+      </div>
+      <div class="comparison-item">
+        <h4>通用评测框架</h4>
+        <p>学习曲线陡峭，需要编写大量测试代码，缺少 Agent 专用的校验点和置信度评估。</p>
+      </div>
+      <div class="comparison-item">
+        <h4>只看人工评分</h4>
+        <p>主观偏差大，无法接入 CI 自动阻断，每次评分成本高，无法规模化运行。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 数据概览 ===== -->
+<section class="section">
+  <div class="section-label">// Overview</div>
+  <h2 class="section-title">运行概览</h2>
+  <p class="section-desc">最近 7 天核心指标，一眼掌握平台运行状态和评测质量。</p>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">总运行次数</div>
+      <div class="stat-value">1,284</div>
+      <div class="stat-change up">↑ 12.5% vs 上周</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">平均通过率</div>
+      <div class="stat-value">89.2%</div>
+      <div class="stat-change up">↑ 3.1% vs 上周</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">平均耗时</div>
+      <div class="stat-value">42s</div>
+      <div class="stat-change down">↓ 8.3% vs 上周</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Badcase 累计</div>
+      <div class="stat-value">23</div>
+      <div class="stat-change">5 待处理</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Agent 对比 ===== -->
+<section class="section">
+  <div class="section-label">// Agent Matrix</div>
+  <h2 class="section-title">Agent 能力矩阵</h2>
+  <p class="section-desc">横向对比各 Agent 的综合表现，点击行可下钻到任务级详情。</p>
+
+  <table class="agent-table">
+    <thead>
+      <tr>
+        <th>Agent</th>
+        <th>综合得分</th>
+        <th>通过率</th>
+        <th>平均耗时</th>
+        <th>Token/任务</th>
+        <th>置信度</th>
+        <th>状态</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>
+          <div class="agent-name">
+            <div class="agent-avatar" style="background:#0a0a0a">DS</div>
+            DeepSeek
+          </div>
+        </td>
+        <td class="score high">91.3</td>
+        <td class="pass-rate">92.1%</td>
+        <td style="font-family:var(--font-mono)">38s</td>
+        <td style="font-family:var(--font-mono)">3.2k</td>
+        <td><span class="badge success">高</span></td>
+        <td><span class="badge success">Active</span></td>
+      </tr>
+      <tr>
+        <td>
+          <div class="agent-name">
+            <div class="agent-avatar" style="background:#d97706">CC</div>
+            Claude Code
+          </div>
+        </td>
+        <td class="score high">88.7</td>
+        <td class="pass-rate">89.5%</td>
+        <td style="font-family:var(--font-mono)">52s</td>
+        <td style="font-family:var(--font-mono)">4.8k</td>
+        <td><span class="badge success">高</span></td>
+        <td><span class="badge success">Active</span></td>
+      </tr>
+      <tr>
+        <td>
+          <div class="agent-name">
+            <div class="agent-avatar" style="background:#2563eb">HM</div>
+            Hermes
+          </div>
+        </td>
+        <td class="score medium">84.1</td>
+        <td class="pass-rate">85.3%</td>
+        <td style="font-family:var(--font-mono)">61s</td>
+        <td style="font-family:var(--font-mono)">5.1k</td>
+        <td><span class="badge warning">中</span></td>
+        <td><span class="badge warning">Running</span></td>
+      </tr>
+      <tr>
+        <td>
+          <div class="agent-name">
+            <div class="agent-avatar" style="background:#666">MR</div>
+            Minimal React
+          </div>
+        </td>
+        <td class="score medium">76.5</td>
+        <td class="pass-rate">78.2%</td>
+        <td style="font-family:var(--font-mono)">29s</td>
+        <td style="font-family:var(--font-mono)">1.8k</td>
+        <td><span class="badge warning">中</span></td>
+        <td><span class="badge success">Active</span></td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ===== 任务列表 ===== -->
+<section class="section">
+  <div class="section-label">// Task Suite</div>
+  <h2 class="section-title">评测任务集</h2>
+  <p class="section-desc">4 层数据集分层，核心包（Golden + Regression）共 20 个任务用于 CI 质量门禁。</p>
+
+  <div class="task-list">
+    <div class="task-item header">
+      <div>ID</div>
+      <div>任务名称</div>
+      <div>Tier</div>
+      <div>通过率</div>
+      <div>置信度</div>
+      <div>最近运行</div>
+    </div>
+    <div class="task-item">
+      <div class="task-id">T001</div>
+      <div class="task-name">文件读写基础操作</div>
+      <div class="tier golden">Golden</div>
+      <div class="pass-rate" style="color:var(--success)">98.5%</div>
+      <div><span class="confidence-bar"><span class="confidence-fill" style="width:92%;background:var(--success)"></span></span>92</div>
+      <div style="font-family:var(--font-mono);color:var(--text-muted);font-size:12px">2h ago</div>
+    </div>
+    <div class="task-item">
+      <div class="task-id">T015</div>
+      <div class="task-name">多步工具调用编排</div>
+      <div class="tier golden">Golden</div>
+      <div class="pass-rate" style="color:var(--success)">95.2%</div>
+      <div><span class="confidence-bar"><span class="confidence-fill" style="width:88%;background:var(--success)"></span></span>88</div>
+      <div style="font-family:var(--font-mono);color:var(--text-muted);font-size:12px">1h ago</div>
+    </div>
+    <div class="task-item">
+      <div class="task-id">T023</div>
+      <div class="task-name">异常输入容错处理</div>
+      <div class="tier boundary">Boundary</div>
+      <div class="pass-rate" style="color:var(--warning)">72.3%</div>
+      <div><span class="confidence-bar"><span class="confidence-fill" style="width:65%;background:var(--warning)"></span></span>65</div>
+      <div style="font-family:var(--font-mono);color:var(--text-muted);font-size:12px">3h ago</div>
+    </div>
+    <div class="task-item">
+      <div class="task-id">T031</div>
+      <div class="task-name">历史 Bug 复现 - 编码</div>
+      <div class="tier regression">Regression</div>
+      <div class="pass-rate" style="color:var(--success)">100%</div>
+      <div><span class="confidence-bar"><span class="confidence-fill" style="width:95%;background:var(--success)"></span></span>95</div>
+      <div style="font-family:var(--font-mono);color:var(--text-muted);font-size:12px">5h ago</div>
+    </div>
+    <div class="task-item">
+      <div class="task-id">RAG-002</div>
+      <div class="task-name">抗干扰检索能力</div>
+      <div class="tier boundary">Boundary</div>
+      <div class="pass-rate" style="color:var(--danger)">45.8%</div>
+      <div><span class="confidence-bar"><span class="confidence-fill" style="width:42%;background:var(--danger)"></span></span>42</div>
+      <div style="font-family:var(--font-mono);color:var(--text-muted);font-size:12px">6h ago</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 监控面板 ===== -->
+<section class="section">
+  <div class="section-label">// Monitoring</div>
+  <h2 class="section-title">在线监控中心</h2>
+  <p class="section-desc">熔断器 + 6 指标门禁 + 数据飞轮，实时掌握系统健康状况，异常自动熔断降级。</p>
+
+  <div class="monitor-grid">
+    <div class="monitor-card">
+      <div class="monitor-title">
+        熔断器状态
+        <span class="badge success">CLOSED</span>
+      </div>
+      <div class="circuit-status">
+        <div class="circuit-light"></div>
+        <div>
+          <div class="circuit-text">正常运行</div>
+          <div class="circuit-detail">错误率 7.2% · 阈值 20% · 最近 100 次</div>
+        </div>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">P99 延迟</span>
+        <span class="metric-value ok">8.2s / 30s</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">步数超限拦截</span>
+        <span class="metric-value ok">3 次 / 今日</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">灰度发布阶段</span>
+        <span class="metric-value warn">5% → 50%</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">每日采样进度</span>
+        <span class="metric-value ok">67 / 100</span>
+      </div>
+    </div>
+
+    <div class="monitor-card">
+      <div class="monitor-title">
+        质量门禁
+        <span class="badge warning">1 项未达标</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">核心任务通过率</span>
+        <span class="metric-value ok">92.1% ≥ 90%</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">整体准确率</span>
+        <span class="metric-value ok">89.5% ≥ 85%</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">P95 延迟</span>
+        <span class="metric-value ok">6.8s &lt; 10s</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">单任务 Token</span>
+        <span class="metric-value ok">3.8k ≤ 5k</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">安全性通过率</span>
+        <span class="metric-value ok">100% = 100%</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">最低置信度</span>
+        <span class="metric-value fail">58 &lt; 60</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Badcase ===== -->
+<section class="section">
+  <div class="section-label">// Badcase</div>
+  <h2 class="section-title">Badcase 管理</h2>
+  <p class="section-desc">失败运行自动入库，AI 归因分析，一键转化为回归测试用例，形成数据飞轮。</p>
+
+  <div class="badcase-item">
+    <div class="badcase-severity P0">P0</div>
+    <div class="badcase-content">
+      <div class="badcase-title">RAG-002 抗干扰检索 — 全部校验点失败，模型被干扰文档误导</div>
+      <div class="badcase-meta">claude-code · 2026-09-12 · 自动归因：检索策略缺陷 · 已生成修复建议</div>
+    </div>
+  </div>
+  <div class="badcase-item">
+    <div class="badcase-severity P1">P1</div>
+    <div class="badcase-content">
+      <div class="badcase-title">T023 异常输入容错 — 超时未响应，疑似工具调用死循环</div>
+      <div class="badcase-meta">deepseek-harness · 2026-09-12 · 步数 28/20 · 已触发熔断拦截</div>
+    </div>
+  </div>
+  <div class="badcase-item">
+    <div class="badcase-severity P2">P2</div>
+    <div class="badcase-content">
+      <div class="badcase-title">T018 多轮对话上下文 — 部分校验点未通过，上下文丢失</div>
+      <div class="badcase-meta">hermes · 2026-09-11 · 得分 0.6 · 建议：增加上下文窗口测试</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== CTA 结尾 ===== -->
+<section class="cta">
+  <h2 class="cta-title">你的 Agent 值得比<br>人工测试更好的评测。</h2>
+  <p class="cta-subtitle">一条命令，一个工作台，十分钟上手。开源，全链路可追溯。</p>
+  <button class="btn-primary">立即开始</button>
+</section>
+
+<!-- ===== 底部 ===== -->
+<footer class="footer">
+  <span>AgentEval v3.4 · MIT License</span>
+  <span>confidence-driven evaluation</span>
+</footer>
+
+</body>
+</html>

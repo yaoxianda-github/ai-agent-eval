@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>运行详情 — AgentEval</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-secondary: #fafafa;
+    --bg-tertiary: #f5f5f5;
+    --bg-code: #0a0a0a;
+    --border: #e5e5e5;
+    --border-light: #f0f0f0;
+    --text-primary: #0a0a0a;
+    --text-secondary: #666666;
+    --text-muted: #999999;
+    --success: #16a34a;
+    --warning: #d97706;
+    --danger: #dc2626;
+    --info: #2563eb;
+    --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+    --font-sans: -apple-system, 'SF Pro Display', 'Inter', 'Segoe UI', 'PingFang SC', sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 导航 */
+  .navbar {
+    position: fixed; top: 0; left: 0; right: 0; height: 64px;
+    background: rgba(255,255,255,0.9); backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border-light);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 48px; z-index: 100;
+  }
+  .nav-left { display: flex; align-items: center; gap: 48px; }
+  .nav-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; }
+  .nav-logo {
+    width: 28px; height: 28px; background: var(--text-primary); border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 900; font-size: 12px; font-family: var(--font-mono);
+  }
+  .nav-links { display: flex; gap: 4px; }
+  .nav-link {
+    padding: 6px 14px; font-size: 13px; font-weight: 500; color: var(--text-secondary);
+    text-decoration: none; border-radius: 6px; transition: all 0.15s; cursor: pointer;
+  }
+  .nav-link:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+  .nav-link.active { color: var(--text-primary); background: var(--bg-tertiary); font-weight: 600; }
+  .nav-right { display: flex; align-items: center; gap: 16px; }
+  .nav-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
+  .status-dot { width: 6px; height: 6px; background: var(--success); border-radius: 50%; }
+
+  /* 面包屑 */
+  .breadcrumb {
+    padding: 88px 48px 0; max-width: 1200px; margin: 0 auto;
+    font-size: 13px; color: var(--text-muted); font-family: var(--font-mono);
+  }
+  .breadcrumb a { color: var(--text-secondary); text-decoration: none; cursor: pointer; }
+  .breadcrumb a:hover { color: var(--text-primary); }
+  .breadcrumb span { margin: 0 8px; }
+
+  /* 页面主体 */
+  .page { padding: 32px 48px 80px; max-width: 1200px; margin: 0 auto; }
+
+  /* 运行头部 */
+  .run-header { margin-bottom: 40px; }
+  .run-title-row {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .run-title {
+    font-size: 32px; font-weight: 800; letter-spacing: -0.5px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .run-id {
+    font-family: var(--font-mono); font-size: 14px; color: var(--text-muted);
+    background: var(--bg-secondary); padding: 4px 10px; border-radius: 4px;
+  }
+  .run-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 14px; border-radius: 100px; font-size: 12px; font-weight: 600;
+    font-family: var(--font-mono);
+  }
+  .run-badge.success { background: #f0fdf4; color: var(--success); }
+  .run-badge.warning { background: #fffbeb; color: var(--warning); }
+  .run-badge.danger { background: #fef2f2; color: var(--danger); }
+  .run-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  .run-meta {
+    display: flex; gap: 32px; font-size: 13px; color: var(--text-secondary);
+    font-family: var(--font-mono);
+  }
+  .run-meta-item { display: flex; align-items: center; gap: 8px; }
+  .run-meta-item .label { color: var(--text-muted); }
+
+  .run-actions { display: flex; gap: 8px; }
+  .btn {
+    padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: all 0.15s; border: 1px solid transparent;
+  }
+  .btn-primary { background: var(--text-primary); color: white; }
+  .btn-primary:hover { background: #333; }
+  .btn-secondary { background: white; color: var(--text-primary); border-color: var(--border); }
+  .btn-secondary:hover { border-color: var(--text-primary); }
+
+  /* 指标卡片 */
+  .metrics-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+    background: var(--border); border-radius: 12px; overflow: hidden;
+    border: 1px solid var(--border); margin-bottom: 48px;
+  }
+  .metric-card { background: white; padding: 28px 24px; }
+  .metric-label {
+    font-size: 11px; color: var(--text-muted); text-transform: uppercase;
+    letter-spacing: 0.5px; font-family: var(--font-mono); margin-bottom: 10px;
+  }
+  .metric-value {
+    font-size: 32px; font-weight: 800; font-family: var(--font-mono);
+    letter-spacing: -1px; line-height: 1; margin-bottom: 6px;
+  }
+  .metric-value.success { color: var(--success); }
+  .metric-value.warning { color: var(--warning); }
+  .metric-value.danger { color: var(--danger); }
+  .metric-sub { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
+
+  /* 板块 */
+  .section-block { margin-bottom: 48px; }
+  .section-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border-light);
+  }
+  .section-title { font-size: 18px; font-weight: 700; }
+  .section-count {
+    font-size: 12px; color: var(--text-muted); font-family: var(--font-mono);
+  }
+
+  /* 校验点列表 */
+  .checkpoint-list { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .checkpoint-item {
+    display: grid; grid-template-columns: 40px 1fr 120px 80px;
+    align-items: center; padding: 16px 20px;
+    border-bottom: 1px solid var(--border-light); transition: background 0.15s;
+  }
+  .checkpoint-item:last-child { border-bottom: none; }
+  .checkpoint-item:hover { background: var(--bg-secondary); }
+  .checkpoint-icon {
+    width: 24px; height: 24px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800; color: white;
+  }
+  .checkpoint-icon.pass { background: var(--success); }
+  .checkpoint-icon.fail { background: var(--danger); }
+  .checkpoint-icon.skip { background: var(--text-muted); }
+  .checkpoint-name { font-size: 14px; font-weight: 500; }
+  .checkpoint-type {
+    font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);
+    text-transform: uppercase;
+  }
+  .checkpoint-time {
+    font-size: 12px; color: var(--text-muted); font-family: var(--font-mono);
+    text-align: right;
+  }
+
+  /* 时间线轨迹 */
+  .timeline { position: relative; padding-left: 32px; }
+  .timeline::before {
+    content: ''; position: absolute; left: 11px; top: 8px; bottom: 8px;
+    width: 2px; background: var(--border);
+  }
+  .timeline-item { position: relative; padding-bottom: 24px; }
+  .timeline-item:last-child { padding-bottom: 0; }
+  .timeline-dot {
+    position: absolute; left: -32px; top: 4px; width: 24px; height: 24px;
+    border-radius: 50%; background: white; border: 2px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; font-family: var(--font-mono);
+  }
+  .timeline-dot.tool { border-color: var(--info); color: var(--info); }
+  .timeline-dot.think { border-color: var(--warning); color: var(--warning); }
+  .timeline-dot.output { border-color: var(--success); color: var(--success); }
+  .timeline-dot.error { border-color: var(--danger); color: var(--danger); }
+  .timeline-content {
+    background: var(--bg-secondary); border: 1px solid var(--border-light);
+    border-radius: 8px; padding: 16px;
+  }
+  .timeline-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .timeline-type {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.5px; font-family: var(--font-mono);
+  }
+  .timeline-type.tool { color: var(--info); }
+  .timeline-type.think { color: var(--warning); }
+  .timeline-type.output { color: var(--success); }
+  .timeline-type.error { color: var(--danger); }
+  .timeline-time { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
+  .timeline-text { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+  .timeline-code {
+    background: var(--bg-code); color: #e5e5e5; border-radius: 6px;
+    padding: 12px; font-family: var(--font-mono); font-size: 12px;
+    margin-top: 8px; overflow-x: auto; line-height: 1.6;
+  }
+
+  /* 产物文件 */
+  .artifact-list { display: flex; flex-direction: column; gap: 8px; }
+  .artifact-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 16px; background: var(--bg-secondary);
+    border: 1px solid var(--border-light); border-radius: 8px;
+    transition: all 0.15s; cursor: pointer;
+  }
+  .artifact-item:hover { border-color: var(--text-primary); }
+  .artifact-icon {
+    width: 32px; height: 32px; border-radius: 6px; background: var(--bg-tertiary);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; font-family: var(--font-mono); color: var(--text-secondary);
+  }
+  .artifact-info { flex: 1; }
+  .artifact-name { font-size: 13px; font-weight: 600; font-family: var(--font-mono); }
+  .artifact-size { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
+  .artifact-action {
+    font-size: 12px; color: var(--info); font-weight: 600; cursor: pointer;
+  }
+
+  /* 双栏布局 */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+
+  /* 日志 */
+  .log-box {
+    background: var(--bg-code); color: #ccc; border-radius: 10px;
+    padding: 20px; font-family: var(--font-mono); font-size: 12px;
+    line-height: 1.8; max-height: 400px; overflow-y: auto;
+  }
+  .log-line { color: #888; }
+  .log-line .time { color: #666; }
+  .log-line .info { color: #2563eb; }
+  .log-line .success { color: var(--success); }
+  .log-line .warn { color: var(--warning); }
+  .log-line .error { color: var(--danger); }
+
+  @media (max-width: 1024px) {
+    .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+    .two-col { grid-template-columns: 1fr; }
+    .nav-links { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 导航 -->
+<nav class="navbar">
+  <div class="nav-left">
+    <div class="nav-brand"><div class="nav-logo">AE</div><span>AgentEval</span></div>
+    <div class="nav-links">
+      <a class="nav-link">概览</a>
+      <a class="nav-link">任务</a>
+      <a class="nav-link active">运行</a>
+      <a class="nav-link">对比</a>
+      <a class="nav-link">监控</a>
+      <a class="nav-link">Badcase</a>
+      <a class="nav-link">设置</a>
+    </div>
+  </div>
+  <div class="nav-right">
+    <div class="nav-status"><div class="status-dot"></div><span>online</span></div>
+  </div>
+</nav>
+
+<!-- 面包屑 -->
+<div class="breadcrumb">
+  <a>运行历史</a><span>/</span><span>fede15ceb8ff</span>
+</div>
+
+<!-- 主体 -->
+<div class="page">
+
+  <!-- 运行头部 -->
+  <div class="run-header">
+    <div class="run-title-row">
+      <div>
+        <div class="run-title">
+          full × 2agent × runs1
+          <span class="run-id">fede15ceb8ff</span>
+        </div>
+        <div style="margin-top: 12px;">
+          <span class="run-badge success"><span class="dot"></span>COMPLETED</span>
+        </div>
+      </div>
+      <div class="run-actions">
+        <button class="btn btn-secondary">导出报告</button>
+        <button class="btn btn-primary">重新运行</button>
+      </div>
+    </div>
+    <div class="run-meta">
+      <div class="run-meta-item"><span class="label">Agent:</span> deepseek-harness, claude-code</div>
+      <div class="run-meta-item"><span class="label">任务:</span> 37 / 37</div>
+      <div class="run-meta-item"><span class="label">开始:</span> 2026-09-09 22:30:59</div>
+      <div class="run-meta-item"><span class="label">耗时:</span> 12m 34s</div>
+    </div>
+  </div>
+
+  <!-- 核心指标 -->
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <div class="metric-label">通过率</div>
+      <div class="metric-value success">89.2%</div>
+      <div class="metric-sub">33 / 37 通过</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">平均耗时</div>
+      <div class="metric-value">42s</div>
+      <div class="metric-sub">P95: 68s · P99: 92s</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Token 消耗</div>
+      <div class="metric-value">142k</div>
+      <div class="metric-sub">prompt: 98k · completion: 44k</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">置信度</div>
+      <div class="metric-value success">86</div>
+      <div class="metric-sub">高 · 5维度加权</div>
+    </div>
+  </div>
+
+  <!-- 校验点结果 -->
+  <div class="section-block">
+    <div class="section-header">
+      <div class="section-title">校验点结果</div>
+      <div class="section-count">35 passed · 2 failed · 0 skipped</div>
+    </div>
+    <div class="checkpoint-list">
+      <div class="checkpoint-item">
+        <div class="checkpoint-icon pass">✓</div>
+        <div>
+          <div class="checkpoint-name">文件创建成功</div>
+          <div class="checkpoint-type">file_exists · deterministic</div>
+        </div>
+        <div class="checkpoint-time">1.2s</div>
+        <div style="text-align:right;font-size:12px;color:var(--success);font-family:var(--font-mono);font-weight:600">PASS</div>
+      </div>
+      <div class="checkpoint-item">
+        <div class="checkpoint-icon pass">✓</div>
+        <div>
+          <div class="checkpoint-name">输出内容包含关键词 "evaluation"</div>
+          <div class="checkpoint-type">content_contains · deterministic</div>
+        </div>
+        <div class="checkpoint-time">0.8s</div>
+        <div style="text-align:right;font-size:12px;color:var(--success);font-family:var(--font-mono);font-weight:600">PASS</div>
+      </div>
+      <div class="checkpoint-item">
+        <div class="checkpoint-icon pass">✓</div>
+        <div>
+          <div class="checkpoint-name">JSON 格式校验通过</div>
+          <div class="checkpoint-type">json_valid · deterministic</div>
+        </div>
+        <div class="checkpoint-time">0.3s</div>
+        <div style="text-align:right;font-size:12px;color:var(--success);font-family:var(--font-mono);font-weight:600">PASS</div>
+      </div>
+      <div class="checkpoint-item">
+        <div class="checkpoint-icon fail">✕</div>
+        <div>
+          <div class="checkpoint-name">RAG 检索结果相关性 ≥ 0.8</div>
+          <div class="checkpoint-type">llm_judge · semantic</div>
+        </div>
+        <div class="checkpoint-time">3.4s</div>
+        <div style="text-align:right;font-size:12px;color:var(--danger);font-family:var(--font-mono);font-weight:600">FAIL</div>
+      </div>
+      <div class="checkpoint-item">
+        <div class="checkpoint-icon pass">✓</div>
+        <div>
+          <div class="checkpoint-name">工具调用次数 ≤ 10</div>
+          <div class="checkpoint-type">metric_threshold · deterministic</div>
+        </div>
+        <div class="checkpoint-time">0.1s</div>
+        <div style="text-align:right;font-size:12px;color:var(--success);font-family:var(--font-mono);font-weight:600">PASS</div>
+      </div>
+      <div class="checkpoint-item">
+        <div class="checkpoint-icon fail">✕</div>
+        <div>
+          <div class="checkpoint-name">异常输入时返回友好错误信息</div>
+          <div class="checkpoint-type">llm_judge · semantic</div>
+        </div>
+        <div class="checkpoint-time">2.8s</div>
+        <div style="text-align:right;font-size:12px;color:var(--danger);font-family:var(--font-mono);font-weight:600">FAIL</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 双栏：轨迹 + 产物 -->
+  <div class="two-col">
+    <!-- 执行轨迹 -->
+    <div class="section-block">
+      <div class="section-header">
+        <div class="section-title">执行轨迹</div>
+        <div class="section-count">8 steps</div>
+      </div>
+      <div class="timeline">
+        <div class="timeline-item">
+          <div class="timeline-dot think">1</div>
+          <div class="timeline-content">
+            <div class="timeline-header">
+              <span class="timeline-type think">THINK</span>
+              <span class="timeline-time">0.0s</span>
+            </div>
+            <div class="timeline-text">分析任务需求，确定需要创建评测报告文件并写入结果数据。</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot tool">2</div>
+          <div class="timeline-content">
+            <div class="timeline-header">
+              <span class="timeline-type tool">TOOL</span>
+              <span class="timeline-time">1.2s</span>
+            </div>
+            <div class="timeline-text">调用 write_file 工具创建报告文件</div>
+            <div class="timeline-code">write_file(path="report.md", content="# 评测报告\n...")</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot tool">3</div>
+          <div class="timeline-content">
+            <div class="timeline-header">
+              <span class="timeline-type tool">TOOL</span>
+              <span class="timeline-time">2.5s</span>
+            </div>
+            <div class="timeline-text">调用 read_file 验证文件内容</div>
+            <div class="timeline-code">read_file(path="report.md") → "# 评测报告\n..."</div>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot output">4</div>
+          <div class="timeline-content">
+            <div class="timeline-header">
+              <span class="timeline-type output">OUTPUT</span>
+              <span class="timeline-time">3.1s</span>
+            </div>
+            <div class="timeline-text">任务完成，输出最终结果：报告已生成，包含 37 个任务的评测结果。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 产物文件 -->
+    <div class="section-block">
+      <div class="section-header">
+        <div class="section-title">产物文件</div>
+        <div class="section-count">4 files</div>
+      </div>
+      <div class="artifact-list">
+        <div class="artifact-item">
+          <div class="artifact-icon">MD</div>
+          <div class="artifact-info">
+            <div class="artifact-name">report.md</div>
+            <div class="artifact-size">12.4 KB</div>
+          </div>
+          <div class="artifact-action">查看</div>
+        </div>
+        <div class="artifact-item">
+          <div class="artifact-icon">JSON</div>
+          <div class="artifact-info">
+            <div class="artifact-name">run.json</div>
+            <div class="artifact-size">8.7 KB</div>
+          </div>
+          <div class="artifact-action">查看</div>
+        </div>
+        <div class="artifact-item">
+          <div class="artifact-icon">XML</div>
+          <div class="artifact-info">
+            <div class="artifact-name">junit-result.xml</div>
+            <div class="artifact-size">5.2 KB</div>
+          </div>
+          <div class="artifact-action">下载</div>
+        </div>
+        <div class="artifact-item">
+          <div class="artifact-icon">LOG</div>
+          <div class="artifact-info">
+            <div class="artifact-name">agent-trace.log</div>
+            <div class="artifact-size">24.1 KB</div>
+          </div>
+          <div class="artifact-action">下载</div>
+        </div>
+      </div>
+
+      <!-- 置信度详情 -->
+      <div style="margin-top: 32px;">
+        <div class="section-header">
+          <div class="section-title">置信度明细</div>
+        </div>
+        <div style="background:var(--bg-secondary);border:1px solid var(--border-light);border-radius:8px;padding:20px;">
+          <div style="display:flex;justify-content:space-between;margin-bottom:12px;font-size:13px;">
+            <span style="color:var(--text-secondary)">运行次数 (25%)</span>
+            <span style="font-family:var(--font-mono);font-weight:600">92</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:12px;font-size:13px;">
+            <span style="color:var(--text-secondary)">校验点类型 (25%)</span>
+            <span style="font-family:var(--font-mono);font-weight:600">88</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:12px;font-size:13px;">
+            <span style="color:var(--text-secondary)">任务覆盖度 (20%)</span>
+            <span style="font-family:var(--font-mono);font-weight:600">85</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:12px;font-size:13px;">
+            <span style="color:var(--text-secondary)">历史稳定性 (15%)</span>
+            <span style="font-family:var(--font-mono);font-weight:600">80</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:13px;">
+            <span style="color:var(--text-secondary)">任务级别 (15%)</span>
+            <span style="font-family:var(--font-mono);font-weight:600">78</span>
+          </div>
+          <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:flex;justify-content:space-between;">
+            <span style="font-weight:700;font-size:14px">综合置信度</span>
+            <span style="font-family:var(--font-mono);font-weight:800;font-size:18px;color:var(--success)">86 · 高</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 运行日志 -->
+  <div class="section-block">
+    <div class="section-header">
+      <div class="section-title">运行日志</div>
+      <div class="section-count">last 50 lines</div>
+    </div>
+    <div class="log-box">
+      <div class="log-line"><span class="time">[22:30:59]</span> <span class="info">INFO</span> Starting evaluation run fede15ceb8ff</div>
+      <div class="log-line"><span class="time">[22:30:59]</span> <span class="info">INFO</span> Loading task pack: full (37 tasks)</div>
+      <div class="log-line"><span class="time">[22:30:59]</span> <span class="info">INFO</span> Agents: deepseek-harness, claude-code</div>
+      <div class="log-line"><span class="time">[22:31:02]</span> <span class="info">INFO</span> [T001] deepseek-harness started</div>
+      <div class="log-line"><span class="time">[22:31:05]</span> <span class="success">OK</span> [T001] deepseek-harness passed (3 checkpoints)</div>
+      <div class="log-line"><span class="time">[22:31:06]</span> <span class="info">INFO</span> [T001] claude-code started</div>
+      <div class="log-line"><span class="time">[22:31:10]</span> <span class="success">OK</span> [T001] claude-code passed (3 checkpoints)</div>
+      <div class="log-line"><span class="time">[22:31:12]</span> <span class="info">INFO</span> [T002] deepseek-harness started</div>
+      <div class="log-line"><span class="time">[22:31:18]</span> <span class="warn">WARN</span> [T002] deepseek-harness: high token usage (4.2k)</div>
+      <div class="log-line"><span class="time">[22:31:20]</span> <span class="success">OK</span> [T002] deepseek-harness passed</div>
+      <div class="log-line"><span class="time">[22:35:42]</span> <span class="error">FAIL</span> [RAG-002] claude-code failed: relevance score 0.42 &lt; 0.8</div>
+      <div class="log-line"><span class="time">[22:35:43]</span> <span class="info">INFO</span> Auto-creating badcase for RAG-002</div>
+      <div class="log-line"><span class="time">[22:43:33]</span> <span class="success">OK</span> Run completed: 33/37 passed, 89.2%</div>
+      <div class="log-line"><span class="time">[22:43:33]</span> <span class="info">INFO</span> Confidence score: 86 (high)</div>
+      <div class="log-line"><span class="time">[22:43:34]</span> <span class="info">INFO</span> Gate evaluation: PASSED (5/6 metrics)</div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
