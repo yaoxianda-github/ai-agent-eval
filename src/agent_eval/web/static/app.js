@@ -2232,13 +2232,96 @@
           "<tr><td>任务目录 tasks_dir</td><td>" + esc(meta.tasks_dir) + "</td></tr>" +
           "<tr><td>结果目录 results_dir</td><td>" + esc(meta.results_dir) + "</td></tr>" +
           "<tr><td>报告目录 report_dir</td><td>" + esc(meta.report_dir) + "</td></tr></table></div>" +
-        '<div class="card"><h3>环境变量（后端 Agent 使用）</h3>' +
-          '<table class="env-table"><tr><td>DEEPSEEK_API_KEY</td><td>DeepSeek API 密钥（minimal-react 默认读取）</td></tr>' +
-          "<tr><td>LLM_API_KEY / LLM_BASE_URL</td><td>自定义 OpenAI 兼容端点（可选覆盖）</td></tr>" +
-          "<tr><td>AGENT_EVAL_TASKS</td><td>任务包目录覆盖（默认 ./tasks）</td></tr></table></div>" +
+        '<div class="card"><h3>API Key 快速配置 <span class="info-icon" title="配置写入项目根目录 .env 文件（已在 .gitignore 中排除）。保存后需重启服务生效。">ⓘ</span></h3>' +
+          '<div id="env-config-list"><div class="empty">加载中...</div></div>' +
+          '<div style="margin-top:16px;display:flex;gap:8px;align-items:center;">' +
+            '<button class="btn" id="btn-save-env">保存配置</button>' +
+            '<span id="env-save-msg" style="font-size:13px;"></span>' +
+          "</div>" +
+          '<div class="warn-banner" style="margin-top:12px;">保存后需重启服务才能生效（环境变量在进程启动时读取）。</div>' +
+        "</div>" +
         '<div class="card"><h3>启动方式</h3><pre class="code">pip install -e ".[web]"&#10;python -m agent_eval.web --port 8000&#10;# 浏览器打开 http://127.0.0.1:8000</pre></div>'
       );
+      loadEnvConfig();
     }).catch(function (e) { renderErr(e.message); });
+  }
+
+  // V3.6：加载环境变量配置状态
+  function loadEnvConfig() {
+    api("/api/settings/env").then(function (data) {
+      var items = data.items || [];
+      var html = "";
+      items.forEach(function (item) {
+        var statusColor = item.configured ? "#16a34a" : "#9ca3af";
+        var statusText = item.configured ? "已配置 (" + item.source + ")" : "未配置";
+        var inputType = item.category === "api_key" ? "password" : "text";
+        var placeholder = item.configured ? "已配置，留空保持不变" : "请输入 " + item.label;
+        html += '<div class="env-config-item" style="padding:12px 0;border-bottom:1px solid var(--border-light);">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+            '<label style="font-weight:600;font-size:14px;">' + esc(item.label) +
+              ' <code style="font-size:11px;color:#6b7280;background:var(--bg-secondary);padding:1px 6px;border-radius:4px;">' + esc(item.key) + '</code>' +
+            "</label>" +
+            '<span style="font-size:12px;color:' + statusColor + ';">' + statusText + "</span>" +
+          "</div>" +
+          '<div style="font-size:12px;color:#6b7280;margin-bottom:8px;">' + esc(item.desc) +
+            (item.used_by && item.used_by.length ? ' · 适用: ' + item.used_by.map(esc).join(", ") : "") +
+          "</div>" +
+          '<input type="' + inputType + '" id="env-' + item.key + '" placeholder="' + placeholder +
+            '" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:var(--font-mono);">' +
+          (item.configured ? '<button class="btn secondary" style="margin-top:6px;padding:4px 10px;font-size:12px;" onclick="clearEnvField(\'' + item.key + '\')">清除此配置</button>' : "") +
+        "</div>";
+      });
+      document.getElementById("env-config-list").innerHTML = html;
+
+      // 绑定保存按钮
+      var saveBtn = document.getElementById("btn-save-env");
+      if (saveBtn) {
+        saveBtn.onclick = function () { saveEnvConfig(items); };
+      }
+    }).catch(function (e) {
+      document.getElementById("env-config-list").innerHTML = '<div class="err-banner">加载失败: ' + esc(e.message) + "</div>";
+    });
+  }
+
+  // 清除某个环境变量输入框
+  window.clearEnvField = function (key) {
+    var el = document.getElementById("env-" + key);
+    if (el) { el.value = ""; el.placeholder = "已标记为清除（保存后生效）"; el.style.borderColor = "#ef4444"; }
+  };
+
+  // 保存环境变量配置
+  function saveEnvConfig(items) {
+    var values = {};
+    var hasChange = false;
+    items.forEach(function (item) {
+      var el = document.getElementById("env-" + item.key);
+      if (el && el.value !== undefined) {
+        var val = el.value.trim();
+        // 只有输入了内容或标记为清除（边框变红）时才提交
+        if (val !== "" || el.style.borderColor === "rgb(239, 68, 68)") {
+          values[item.key] = val;
+          hasChange = true;
+        }
+      }
+    });
+    if (!hasChange) {
+      document.getElementById("env-save-msg").innerHTML = '<span style="color:#6b7280;">没有修改需要保存</span>';
+      return;
+    }
+    var saveBtn = document.getElementById("btn-save-env");
+    saveBtn.disabled = true;
+    saveBtn.textContent = "保存中...";
+    api("/api/settings/env", { method: "POST", body: { values: values } }).then(function (d) {
+      document.getElementById("env-save-msg").innerHTML = '<span style="color:#16a34a;">✓ ' + esc(d.message) + "</span>";
+      saveBtn.textContent = "保存配置";
+      saveBtn.disabled = false;
+      // 重新加载状态
+      setTimeout(function () { loadEnvConfig(); }, 1000);
+    }).catch(function (e) {
+      document.getElementById("env-save-msg").innerHTML = '<span style="color:#ef4444;">保存失败: ' + esc(e.message) + "</span>";
+      saveBtn.textContent = "保存配置";
+      saveBtn.disabled = false;
+    });
   }
 
   // ---------- 任务包市场（M3 Web 集成） ----------

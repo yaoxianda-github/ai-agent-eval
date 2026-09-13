@@ -287,6 +287,10 @@ pre.code {
   padding: 12px 14px; background: var(--success-bg); color: #065f46;
   border-radius: 8px; margin-top: 12px; font-size: 13px;
 }
+.warn-banner {
+  padding: 10px 14px; background: #fef3c7; color: #92400e;
+  border-radius: 8px; font-size: 13px; border: 1px solid #fde68a;
+}
 
 /* ---------- 文件列表 ---------- */
 .file-row {

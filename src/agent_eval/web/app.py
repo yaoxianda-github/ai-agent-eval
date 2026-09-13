@@ -616,6 +616,29 @@ def create_app(
             "report_dir": str(report_dir),
         }
 
+    # V3.6：环境变量配置管理（API Key 快速配置）
+    @app.get("/api/settings/env")
+    def api_get_env_settings() -> dict:
+        """获取所有白名单环境变量的配置状态（不返回实际值）。"""
+        from agent_eval.config_manager import get_env_status
+        return {"items": get_env_status()}
+
+    @app.post("/api/settings/env")
+    def api_save_env_settings(payload: dict) -> dict:
+        """保存环境变量到 .env 文件。
+
+        请求体: {"values": {"DEEPSEEK_API_KEY": "sk-xxx", ...}}
+        空字符串表示清除该变量。
+        """
+        from agent_eval.config_manager import ENV_WHITELIST, write_env_file
+        values = payload.get("values", {})
+        # 过滤白名单
+        filtered = {k: v for k, v in values.items() if k in ENV_WHITELIST}
+        if not filtered:
+            raise HTTPException(status_code=400, detail="没有有效的环境变量（必须在白名单内）")
+        write_env_file(filtered)
+        return {"saved": list(filtered.keys()), "message": "已保存到 .env 文件，重启服务后生效"}
+
     @app.get("/api/tasks")
     def api_tasks() -> dict:
         from agent_eval.costing import estimate_cost, load_benchmark
