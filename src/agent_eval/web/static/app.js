@@ -1064,6 +1064,31 @@
         confHtml = '<div class="kpi"><b style="color:' + confColor + '">' + conf.score.toFixed(1) + ' / ' + confLabel +
           '</b><span>评测置信度 <span class="info-icon" title="' + esc(conf.suggestions.join("; ")) + '">ⓘ</span></span></div>';
       }
+      // V3.5 P0：lock.json 配置快照展示
+      var lockHtml = "";
+      if (r.lock) {
+        var L = r.lock;
+        var agentModel = L.agent.model || "(default)";
+        var specHash = L.task.spec_hash ? L.task.spec_hash.substring(0, 8) : "—";
+        var cpHash = L.ground_truth.checkpoints_hash ? L.ground_truth.checkpoints_hash.substring(0, 8) : "—";
+        lockHtml = '<div class="card"><h3>配置快照（lock.json）' +
+          '<span class="info-icon" style="margin-left:8px;" title="不可变证据链：运行开始前封存的完整配置快照，用于归因"结果变差是模型退化还是配置变化"。参考 ageval lock.json 设计。">ⓘ</span></h3>' +
+          '<div class="config-grid">' +
+            '<div class="config-item"><span class="config-label">Agent</span><span class="config-value">' + esc(L.agent.id) + ' @ ' + esc(L.agent.version) + '</span></div>' +
+            '<div class="config-item"><span class="config-label">模型</span><span class="config-value">' + esc(agentModel) + '</span></div>' +
+            '<div class="config-item"><span class="config-label">任务</span><span class="config-value">' + esc(L.task.id) + ' (' + esc(L.task.level) + (L.task.tier ? ' / ' + esc(L.task.tier) : '') + ')</span></div>' +
+            '<div class="config-item"><span class="config-label">spec 哈希</span><span class="config-value"><code>' + specHash + '</code></span></div>' +
+            '<div class="config-item"><span class="config-label">校验点</span><span class="config-value">' + L.ground_truth.checkpoints_count + ' 个 · <code>' + cpHash + '</code></span></div>' +
+            '<div class="config-item"><span class="config-label">评分器</span><span class="config-value">' + esc(L.ground_truth.verifier) + ' · 权重 ' + L.ground_truth.weight + '</span></div>' +
+            '<div class="config-item"><span class="config-label">超时/步数</span><span class="config-value">' + L.config.timeout_s + 's / ' + (L.config.max_steps || '∞') + '</span></div>' +
+            '<div class="config-item"><span class="config-label">MCP 工具</span><span class="config-value">' + L.tools.mcp_servers_count + ' 个' + (L.tools.mcp_server_names.length ? ' (' + esc(L.tools.mcp_server_names.join(', ')) + ')' : '') + '</span></div>' +
+            '<div class="config-item"><span class="config-label">运行时间</span><span class="config-value">' + esc(L.timestamp) + '</span></div>' +
+            '<div class="config-item"><span class="config-label">环境</span><span class="config-value">' + esc(L.environment.platform) + ' / Python ' + esc(L.environment.python_version) + '</span></div>' +
+          '</div>' +
+          '<details style="margin-top:12px;"><summary style="cursor:pointer;color:#6b7280;font-size:13px;">查看完整 lock.json</summary>' +
+          '<pre class="code" style="margin-top:8px;max-height:300px;overflow:auto;">' + esc(JSON.stringify(L, null, 2)) + '</pre></details>' +
+          '</div>';
+      }
       renderHTML(
         '<h2 class="page-title">运行详情 ' +
           '<a class="btn secondary" style="float:right;margin-left:8px;" href="#/history">← 返回历史</a>' +
@@ -1077,6 +1102,7 @@
           confHtml +
         "</div>" +
         (r.error ? '<div class="err-banner">' + esc(r.error) + "</div>" : "") +
+        lockHtml +
         '<div class="card"><h3>判定结果（' + v.length + " 个校验点）</h3>" + (vRows || '<div class="empty">无判定</div>') + "</div>" +
         executionAnalysis(r) +
         '<div class="card"><h3>轨迹回放 <span class="tl-note">输入意图 → 知识/检索 → 模型生成 → 工具执行</span></h3>' + traceTimeline(r.traces, r) + "</div>" +

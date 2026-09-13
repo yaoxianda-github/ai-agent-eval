@@ -269,6 +269,15 @@ def create_app(
                 0, {"kind": "intent", "ts": 0.0, "content": task_desc, "task_id": rec.get("task_id")}
             )
             rec["traces"] = [_clean_surrogates(t) for t in synthesized]
+        # V3.5 P0：读取 lock.json 证据链配置快照（如果存在）
+        lock_path = results_dir / run_id / "lock.json"
+        if lock_path.exists():
+            try:
+                rec["lock"] = json.loads(lock_path.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                rec["lock"] = None
+        else:
+            rec["lock"] = None
         return rec
 
     def _workspace(run_id: str) -> Path:

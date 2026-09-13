@@ -185,6 +185,20 @@ tr.clickable:hover { background: var(--bg-secondary); }
 }
 .kpi span { font-size: 12px; color: var(--text-muted); }
 
+/* V3.5 P0：lock.json 配置快照网格 */
+.config-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px; margin-top: 12px;
+}
+.config-item {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 14px; background: var(--bg);
+  border: 1px solid var(--border-light); border-radius: 8px;
+}
+.config-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.config-value { font-size: 13px; color: var(--text-primary); font-family: var(--font-mono); word-break: break-all; }
+.config-value code { background: var(--bg-secondary); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+
 /* ---------- 列表项 ---------- */
 .verdict-item {
   padding: 10px 0; border-bottom: 1px solid var(--border-light); font-size: 13px;
