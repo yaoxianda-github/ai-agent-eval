@@ -8,9 +8,12 @@ V2.6：统一日志体系——run_one 包裹 run_logger，每次运行同时写
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import platform
 import shutil
+import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -169,6 +172,9 @@ def run_one(
         workspace = run_dir / "workspace"
         workspace.mkdir(parents=True, exist_ok=True)
 
+        # V3.5 P0：不可变证据链——运行开始前封存配置快照到 lock.json
+        _generate_lock_json(run_id, task, agent_id, config, run_dir)
+
         logger.info(
             "run 开始 | run_id=%s task=%s(%s) agent=%s timeout=%ss max_steps=%s",
             run_id, task.id, task.level, agent_id,
@@ -178,6 +184,9 @@ def run_one(
 
         _copy_fixtures(task, workspace)
         logger.debug("fixtures 已复制到 workspace=%s", workspace)
+
+        # V3.5 P0：gold 答案防泄露检查——确保 workspace 中不包含答案文件
+        _check_gold_isolation(task, workspace)
 
         # M2：MCP 工具环境——如果任务声明了 mcp_servers，生成配置文件并注入环境变量
         mcp_env = MCPEnvironment(task.mcp_servers, workspace)
@@ -383,6 +392,147 @@ def run_one(
             logger.debug("自动创建badcase失败(非致命): %s", e)
 
         return record
+
+
+def _generate_lock_json(
+    run_id: str,
+    task: TaskSpec,
+    agent_id: str,
+    config: dict,
+    run_dir: Path,
+) -> dict:
+    """V3.5 P0：生成不可变证据链 lock.json。
+
+    在运行开始前记录完整配置快照，解决"评测结果变差是模型退化还是配置变化"的归因问题。
+    参考 ageval 的 lock.json 设计：每次运行封存配置拓扑快照，确保结果可追溯、可复现。
+    """
+    # spec.yaml 内容哈希（任务版本指纹）
+    spec_hash = ""
+    if task.spec_path and task.spec_path.exists():
+        spec_hash = hashlib.sha256(task.spec_path.read_bytes()).hexdigest()[:16]
+
+    # checkpoints 哈希（ground_truth 版本指纹）
+    cp_str = json.dumps([asdict(cp) for cp in task.checkpoints], sort_keys=True, ensure_ascii=False)
+    checkpoints_hash = hashlib.sha256(cp_str.encode("utf-8")).hexdigest()[:16]
+
+    # agent 版本和模型
+    agent_version = "dev"
+    model = config.get("agent", {}).get("model", "")
+    try:
+        backend = get_backend(agent_id, **config.get("agent", {}))
+        agent_version = getattr(backend, "version", "dev")
+        if not model:
+            model = getattr(backend, "model", "") or ""
+    except Exception:  # noqa: BLE001
+        pass
+
+    # agent_eval 版本
+    try:
+        from agent_eval import __version__ as ae_version
+    except ImportError:
+        ae_version = "dev"
+
+    lock = {
+        "run_id": run_id,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "agent_eval_version": ae_version,
+        "agent": {
+            "id": agent_id,
+            "version": agent_version,
+            "model": model,
+        },
+        "task": {
+            "id": task.id,
+            "title": task.title,
+            "level": task.level,
+            "tier": task.tier,
+            "spec_path": str(task.spec_path) if task.spec_path else "",
+            "spec_hash": spec_hash,
+            "tags": task.tags,
+            "capabilities": task.capabilities,
+        },
+        "ground_truth": {
+            "verifier": task.verifier,
+            "weight": task.weight,
+            "checkpoints_count": len(task.checkpoints),
+            "checkpoints_hash": checkpoints_hash,
+            "checkpoint_ids": [cp.id for cp in task.checkpoints],
+        },
+        "config": {
+            "timeout_s": config.get("agent", {}).get("timeout_s", task.timeout_s),
+            "max_steps": config.get("agent", {}).get("max_steps") or task.max_steps,
+            "memory_enabled": config.get("memory", {}).get("enabled", False),
+            "memory_limit": config.get("memory", {}).get("limit", 3),
+            "raw_config": config,
+        },
+        "tools": {
+            "mcp_servers_count": len(task.mcp_servers),
+            "mcp_server_names": [s.get("name", s.get("command", "")) for s in task.mcp_servers],
+        },
+        "environment": {
+            "python_version": sys.version.split()[0],
+            "platform": platform.system(),
+            "platform_release": platform.release(),
+            "platform_machine": platform.machine(),
+            "cwd": os.getcwd(),
+        },
+    }
+
+    # 写入 lock.json（运行开始前封存，不可变）
+    lock_path = run_dir / "lock.json"
+    lock_path.write_text(json.dumps(lock, ensure_ascii=False, indent=2), encoding="utf-8")
+    logger.info("lock.json 已封存 | spec_hash=%s cp_hash=%s agent=%s@%s model=%s",
+                spec_hash, checkpoints_hash, agent_id, agent_version, model or "(default)")
+    return lock
+
+
+def _check_gold_isolation(task: TaskSpec, workspace: Path) -> list[str]:
+    """V3.5 P0：gold 答案防泄露检查。
+
+    在 fixtures 复制到 workspace 后，检查是否存在可能泄露答案的文件：
+    - output/ 目录中的预期输出文件
+    - 文件名包含 gold/answer/expected/solution 的文件
+    - verify_*.py / test_*.py 等测试脚本（应该在 scripts/ 目录，不应在 workspace）
+
+    返回警告列表（非致命，仅记录日志）。参考 ageval 的 gold 延迟上传设计：
+    参考答案在 Agent 执行阶段环境内完全不可见，evaluate 阶段才加载。
+    """
+    warnings: list[str] = []
+    if not workspace.exists():
+        return warnings
+
+    # 可疑文件名关键词
+    leak_keywords = ["gold", "answer", "expected", "solution", "verify_", "test_"]
+    # 可疑目录名
+    leak_dirs = ["output", "evaluation", "gold", "answers"]
+
+    for item in workspace.rglob("*"):
+        if item.is_file():
+            name_lower = item.name.lower()
+            # 检查文件名关键词
+            for kw in leak_keywords:
+                if kw in name_lower:
+                    rel = item.relative_to(workspace)
+                    warnings.append(f"可疑答案文件: {rel} (匹配关键词 '{kw}')")
+                    break
+        elif item.is_dir():
+            name_lower = item.name.lower()
+            for d in leak_dirs:
+                if d == name_lower:
+                    rel = item.relative_to(workspace)
+                    # output 目录可能是 agent 预期要创建的，只警告不阻断
+                    if d == "output":
+                        warnings.append(f"注意: workspace 中已存在 output/ 目录 ({rel})，agent 可能看到预期结构")
+                    else:
+                        warnings.append(f"可疑答案目录: {rel}")
+                    break
+
+    if warnings:
+        logger.warning("gold 隔离检查发现 %d 个潜在泄露点:\n  %s",
+                       len(warnings), "\n  ".join(warnings))
+    else:
+        logger.debug("gold 隔离检查通过: workspace 中未发现可疑答案文件")
+    return warnings
 
 
 def _copy_fixtures(task: TaskSpec, workspace: Path) -> None:
