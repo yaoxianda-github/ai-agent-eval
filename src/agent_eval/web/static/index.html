@@ -3,27 +3,35 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI Agent 评测工作台</title>
+<title>AgentEval — AI Agent 评测工作台</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <div class="shell">
-  <aside class="sidebar">
-    <div class="brand">AI Agent 评测工作台</div>
-    <nav class="nav" id="nav">
-      <a href="#/dashboard" data-view="dashboard">工作台</a>
-      <a href="#/tasks" data-view="tasks">任务管理</a>
-      <a href="#/packages" data-view="packages">任务包市场</a>
-      <a href="#/history" data-view="history">运行历史</a>
-      <a href="#/badcases" data-view="badcases">Badcase 管理</a>
-      <a href="#/memories" data-view="memories">经验记忆</a>
-      <a href="#/compare" data-view="compare">对比矩阵</a>
-      <a href="#/monitor" data-view="monitor">监控中心</a>
-      <a href="#/report" data-view="report">报告</a>
-      <a href="#/settings" data-view="settings">设置</a>
-    </nav>
-    <div class="side-meta" id="side-meta"></div>
-  </aside>
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="brand">
+        <div class="brand-logo">AE</div>
+        <span class="brand-name">AgentEval</span>
+      </div>
+      <nav class="nav" id="nav">
+        <a href="#/dashboard" data-view="dashboard">概览</a>
+        <a href="#/tasks" data-view="tasks">任务</a>
+        <a href="#/packages" data-view="packages">任务包</a>
+        <a href="#/history" data-view="history">运行</a>
+        <a href="#/badcases" data-view="badcases">Badcase</a>
+        <a href="#/memories" data-view="memories">经验</a>
+        <a href="#/compare" data-view="compare">对比</a>
+        <a href="#/monitor" data-view="monitor">监控</a>
+        <a href="#/report" data-view="report">报告</a>
+        <a href="#/settings" data-view="settings">设置</a>
+      </nav>
+    </div>
+    <div class="topbar-right">
+      <div class="side-meta" id="side-meta"></div>
+      <div class="nav-status"><span class="status-dot"></span><span>online</span></div>
+    </div>
+  </header>
   <main class="content" id="view"></main>
 </div>
 <script src="/static/app.js"></script>
