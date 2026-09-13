@@ -721,7 +721,7 @@
           "</div>" +
           '<div id="bc-msg"></div>' +
           // 转化对话框
-          '<div id="bc-convert-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;">' +
+          '<div id="bc-convert-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">' +
             '<div style="background:#fff;padding:24px;border-radius:8px;width:560px;max-width:90vw;">' +
               '<h3 style="margin-top:0;">转化为回归评测用例</h3>' +
               '<div class="field"><label>新任务 ID（如 T-REG-001）</label><input id="bc-new-task-id" placeholder="T-REG-001"></div>' +
@@ -765,10 +765,17 @@
         convertBtnEl.onclick = function () {
           el("bc-convert-modal").style.display = "flex";
         };
-        el("bc-convert-cancel").onclick = function () {
+      }
+      // 弹窗按钮事件始终绑定（无论"转化为评测用例"按钮是否存在）
+      var cancelBtn = el("bc-convert-cancel");
+      if (cancelBtn) {
+        cancelBtn.onclick = function () {
           el("bc-convert-modal").style.display = "none";
         };
-        el("bc-convert-confirm").onclick = function () {
+      }
+      var confirmBtn = el("bc-convert-confirm");
+      if (confirmBtn) {
+        confirmBtn.onclick = function () {
           var newTaskId = el("bc-new-task-id").value.trim();
           if (!newTaskId) { alert("请输入新任务 ID"); return; }
           var body = {
@@ -777,15 +784,15 @@
             description: el("bc-new-desc").value,
             add_to_manifest: el("bc-add-manifest").checked,
           };
-          el("bc-convert-confirm").disabled = true;
-          el("bc-convert-confirm").textContent = "转化中...";
+          confirmBtn.disabled = true;
+          confirmBtn.textContent = "转化中...";
           api("/api/badcases/" + bid + "/convert-to-task", { method: "POST", body: body }).then(function (d) {
             el("bc-convert-modal").style.display = "none";
             el("bc-msg").innerHTML = '<div class="success-banner">✓ 已转化为回归评测用例 ' + esc(d.new_task_id) + '，页面即将刷新...</div>';
             setTimeout(function () { viewBadcaseDetail(bid); }, 1500);
           }).catch(function (e) {
-            el("bc-convert-confirm").disabled = false;
-            el("bc-convert-confirm").textContent = "确认转化";
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = "确认转化";
             alert("转化失败: " + e.message);
           });
         };
