@@ -336,11 +336,12 @@
         return filtered.map(function (t) {
           var ce = t.cost_estimate;
           var costTxt = ce ? (ce.source === "measured" ? "" : "~") + "¥" + ce.cost_cny.toFixed(4) : "—";
+          var modTxt = t.last_modified ? fmtTime(t.last_modified) : "—";
           return "<tr><td>" + esc(t.id) + "</td><td>" + esc(t.title) + "</td><td>" + tierBadge(t.tier) +
             "</td><td>" + usageBadge(t.tier) + "</td><td>" + esc(t.level) +
             "</td><td>" + esc(t.verifier) + "</td><td>" + esc(t.weight) + "</td><td>" +
             (t.checkpoints ? t.checkpoints.length : 0) + " 个</td><td>" + esc(t.timeout_s) + "s</td><td>" +
-            costTxt + "</td></tr>";
+            modTxt + "</td><td>" + costTxt + "</td></tr>";
         }).join("");
       }
 
@@ -355,7 +356,7 @@
               '</label><select id="usage-filter"><option value="">全部用途</option><option value="dev">开发集</option><option value="eval">评测集</option></select></div>' +
           "</div>" +
           '<div id="task-table">' +
-          '<table><tr><th>ID</th><th>标题</th><th>分层</th><th>用途</th><th>级别</th><th>判定</th><th>权重</th><th>校验点</th><th>超时</th><th>预计成本/run' +
+          '<table><tr><th>ID</th><th>标题</th><th>分层</th><th>用途</th><th>级别</th><th>判定</th><th>权重</th><th>校验点</th><th>超时</th><th>最后修改</th><th>预计成本/run' +
           costTip("预计成本 = 单次 run 的 token 消耗 × 模型单价。<br>默认模型 deepseek-chat：输入 ¥2/百万 token、输出 ¥3/百万 token（缓存未命中口径）。<br><br>有实测：取该后端（minimal-react）在此任务的历史 run 的 metrics.usage 均值；<br>无实测：按任务级别 L1-L5 估算，数值前标「~」。<br><br>单价可用环境变量 LLM_INPUT_CNY_PER_M / LLM_OUTPUT_CNY_PER_M 覆盖。") +
           "</th></tr>" +
           renderRows("", "") + "</table></div></div>" +
@@ -370,7 +371,7 @@
       function applyFilters() {
         var tier = el("tier-filter").value;
         var usage = el("usage-filter").value;
-        el("task-table").innerHTML = '<table><tr><th>ID</th><th>标题</th><th>分层</th><th>用途</th><th>级别</th><th>判定</th><th>权重</th><th>校验点</th><th>超时</th><th>预计成本/run</th></tr>' + renderRows(tier, usage) + "</table>";
+        el("task-table").innerHTML = '<table><tr><th>ID</th><th>标题</th><th>分层</th><th>用途</th><th>级别</th><th>判定</th><th>权重</th><th>校验点</th><th>超时</th><th>最后修改</th><th>预计成本/run</th></tr>' + renderRows(tier, usage) + "</table>";
       }
       el("tier-filter").onchange = applyFilters;
       el("usage-filter").onchange = applyFilters;

@@ -1531,6 +1531,14 @@ def create_app(
 def _task_to_dict(t) -> dict:
     d = asdict(t)
     d["spec_path"] = str(t.spec_path) if t.spec_path else None
+    # V3.7 P2：变更审计——返回 spec.yaml 最后修改时间
+    if t.spec_path and t.spec_path.exists():
+        try:
+            d["last_modified"] = datetime.fromtimestamp(t.spec_path.stat().st_mtime).isoformat()
+        except OSError:
+            d["last_modified"] = None
+    else:
+        d["last_modified"] = None
     return d
 
 
