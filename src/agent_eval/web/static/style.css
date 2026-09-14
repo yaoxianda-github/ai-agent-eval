@@ -431,6 +431,29 @@ table.matrix th { position: sticky; top: 0; z-index: 1; }
   display: inline-block; width: 16px; height: 16px; line-height: 16px;
   text-align: center; border-radius: 50%; background: var(--bg-tertiary);
   color: var(--text-secondary); font-size: 11px; cursor: help; font-style: normal;
+  transition: background 0.15s, color 0.15s;
+}
+.info-icon:hover { background: var(--accent-color); color: #fff; }
+.info-icon.active { background: var(--accent-color); color: #fff; }
+
+/* 自定义 tooltip 气泡（点击 info-icon/cap-hint 显示） */
+.tooltip-bubble {
+  position: absolute; z-index: 9999;
+  background: var(--bg-primary); color: var(--text-primary);
+  border: 1px solid var(--border-color); border-radius: 8px;
+  padding: 10px 14px; font-size: 12px; line-height: 1.6;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  max-width: 320px; pointer-events: none;
+  animation: tooltipFadeIn 0.15s ease-out;
+}
+.tooltip-bubble::after {
+  content: ''; position: absolute; top: -6px; left: 16px;
+  border-left: 6px solid transparent; border-right: 6px solid transparent;
+  border-bottom: 6px solid var(--bg-primary);
+}
+@keyframes tooltipFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* ---------- 数据集分层 ---------- */

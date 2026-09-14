@@ -2754,5 +2754,55 @@
   // 轨迹回放时间线：inline onclick 需要全局可达（IIFE 作用域内不可达）
   window.tlFilter = tlFilter;
   window.tlToggle = tlToggle;
+
+  // ---------- 自定义 tooltip（点击 info-icon/cap-hint 显示） ----------
+  var activeTooltip = null;
+  function hideTooltip() {
+    if (activeTooltip) {
+      activeTooltip.el.remove();
+      if (activeTooltip.trigger) activeTooltip.trigger.classList.remove("active");
+      activeTooltip = null;
+    }
+  }
+  function showTooltip(trigger) {
+    hideTooltip();
+    var text = trigger.getAttribute("title") || trigger.getAttribute("data-tooltip") || "";
+    if (!text) return;
+    trigger.setAttribute("data-tooltip", text);
+    trigger.removeAttribute("title"); // 移除原生 title 避免双重显示
+    var bubble = document.createElement("div");
+    bubble.className = "tooltip-bubble";
+    bubble.textContent = text;
+    document.body.appendChild(bubble);
+    var rect = trigger.getBoundingClientRect();
+    var bubbleRect = bubble.getBoundingClientRect();
+    var left = rect.left + window.scrollX;
+    var top = rect.bottom + window.scrollY + 8;
+    // 防止超出右边界
+    if (left + bubbleRect.width > window.innerWidth - 12) {
+      left = window.innerWidth - bubbleRect.width - 12;
+    }
+    bubble.style.left = left + "px";
+    bubble.style.top = top + "px";
+    trigger.classList.add("active");
+    activeTooltip = { el: bubble, trigger: trigger };
+  }
+  document.addEventListener("click", function (e) {
+    var trigger = e.target.closest(".info-icon, .cap-hint");
+    if (trigger) {
+      e.stopPropagation();
+      if (activeTooltip && activeTooltip.trigger === trigger) {
+        hideTooltip();
+      } else {
+        showTooltip(trigger);
+      }
+    } else {
+      hideTooltip();
+    }
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") hideTooltip();
+  });
+
   router();
 })();
