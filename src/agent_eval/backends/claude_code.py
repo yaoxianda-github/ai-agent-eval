@@ -421,10 +421,40 @@ class ClaudeCodeBackend(Backend):
         resolved_key, key_source = self.resolve_api_key(["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"])
         self.api_key = api_key or resolved_key
         self._api_key_source = key_source if not api_key else "explicit"
+        # 读取代理地址：优先级 环境变量 ANTHROPIC_BASE_URL > ~/.claude/settings.json > 官方地址
+        self.base_url = self._resolve_base_url()
         self.timeout_s = timeout_s
         self.cmd = cmd or _find_claude_cmd()
         self.allowed_tools = allowed_tools or _DEFAULT_ALLOWED_TOOLS
         self.max_budget_usd = max_budget_usd
+
+    @staticmethod
+    def _resolve_base_url() -> str:
+        """解析 Anthropic API 代理地址。
+
+        优先级：
+        1. 环境变量 ANTHROPIC_BASE_URL
+        2. ~/.claude/settings.json 中的 env.ANTHROPIC_BASE_URL
+        3. 默认官方地址 https://api.anthropic.com
+        """
+        # 1. 环境变量
+        env_url = os.environ.get("ANTHROPIC_BASE_URL")
+        if env_url:
+            return env_url.rstrip("/")
+        # 2. ~/.claude/settings.json
+        settings_path = Path.home() / ".claude" / "settings.json"
+        if settings_path.exists():
+            try:
+                import json as _json
+                settings = _json.loads(settings_path.read_text(encoding="utf-8"))
+                settings_env = settings.get("env", {})
+                settings_url = settings_env.get("ANTHROPIC_BASE_URL")
+                if settings_url:
+                    return settings_url.rstrip("/")
+            except Exception:
+                pass
+        # 3. 默认官方地址
+        return "https://api.anthropic.com"
 
     def run(self, task, workspace) -> BackendResult:
         if not self.cmd:
@@ -452,6 +482,7 @@ class ClaudeCodeBackend(Backend):
 
         env = os.environ.copy()
         env["ANTHROPIC_API_KEY"] = self.api_key
+        env["ANTHROPIC_BASE_URL"] = self.base_url
         env.setdefault("CLAUDE_CODE_TELEMETRY_DISABLED", "1")
         # 认证隔离：实测 claude 即使 --bare 也依赖 ~/.claude 里的状态，
         # 空/新配置目录（无论 CLAUDE_CONFIG_DIR 还是 HOME）都会返回 403。
@@ -606,7 +637,7 @@ class ClaudeCodeBackend(Backend):
                     import httpx2 as _httpx
                 start = _time.time()
                 resp = _httpx.post(
-                    "https://api.anthropic.com/v1/messages",
+                    self.base_url + "/v1/messages",
                     headers={
                         "x-api-key": key,
                         "anthropic-version": "2023-06-01",
