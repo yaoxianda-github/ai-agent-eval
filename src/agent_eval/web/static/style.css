@@ -359,8 +359,8 @@ pre.code {
 .matrix-header-controls { 
   display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
 }
-.matrix-header-controls .inline-field { display: flex; flex-direction: column; gap: 6px; }
-.matrix-header-controls .inline-field label { font-size: 12px; color: var(--text-secondary); margin: 0; }
+.matrix-header-controls .inline-field { display: flex; align-items: center; gap: 8px; }
+.matrix-header-controls .inline-field label { font-size: 12px; color: var(--text-secondary); margin: 0; white-space: nowrap; }
 .matrix-agent-section { display: flex; flex-direction: column; gap: 10px; }
 .matrix-agent-section > label { font-weight: 600; font-size: 13px; color: var(--text-primary); display: flex; align-items: center; }
 .mx-history-bar {
