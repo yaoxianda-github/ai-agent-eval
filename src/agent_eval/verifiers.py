@@ -68,9 +68,9 @@ def _run_checkpoint(cp, workspace: Path) -> dict:
         detail = f"{cp.desc}：{detail}" if cp.desc else detail
     else:
         logger.warning("未知校验点类型: %s (id=%s)", name, cp.id)
-        return {"id": cp.id, "type": name, "passed": False, "detail": f"未知校验点类型: {name}"}
+        return {"id": cp.id, "type": name, "passed": False, "detail": f"未知校验点类型: {name}", "stage": getattr(cp, "stage", "final_answer")}
     logger.debug("校验点 %s (%s): %s", cp.id, name, "PASS" if passed else "FAIL")
-    return {"id": cp.id, "type": name, "passed": passed, "detail": detail}
+    return {"id": cp.id, "type": name, "passed": passed, "detail": detail, "stage": getattr(cp, "stage", "final_answer")}
 
 
 def _label(cp, passed: bool) -> str:

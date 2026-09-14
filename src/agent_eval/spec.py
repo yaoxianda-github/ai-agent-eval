@@ -34,6 +34,21 @@ LEVELS = {"L1", "L2", "L3", "L4", "L5"}
 VERIFIERS = {"deterministic", "llm_judge"}
 # HarnessDev 论文归纳的六类 Harness 控制能力
 CAPABILITIES = {"execution", "tools", "context", "state", "lifecycle", "verification"}
+# V3.7：评测分层——校验点所属阶段（单元/链路/端到端三层评测体系）
+CHECKPOINT_STAGES = {
+    "retrieval",      # 检索/读取阶段：文件读取、信息获取、知识召回
+    "reasoning",      # 推理/规划阶段：任务理解、步骤规划、逻辑判断
+    "tool_use",       # 工具执行阶段：命令执行、文件写入、API调用
+    "final_answer",   # 最终输出阶段：结果文件、报告生成、格式校验
+    "integration",    # 链路集成阶段：多步骤配合、端到端流程
+}
+STAGE_LABELS = {
+    "retrieval": "检索/读取",
+    "reasoning": "推理/规划",
+    "tool_use": "工具执行",
+    "final_answer": "最终输出",
+    "integration": "链路集成",
+}
 
 
 @dataclass
@@ -44,6 +59,7 @@ class Checkpoint:
     path: str = ""
     pattern: str = ""
     cmd: str = ""
+    stage: str = "final_answer"  # V3.7：校验点所属评测阶段，默认最终输出
 
 
 @dataclass
@@ -77,6 +93,7 @@ class TaskSpec:
                 path=cp.get("path", ""),
                 pattern=cp.get("pattern", ""),
                 cmd=cp.get("cmd", ""),
+                stage=cp.get("stage", "final_answer"),
             )
             for cp in data.get("ground_truth", {}).get("checkpoints", [])
         ]
@@ -121,6 +138,8 @@ class TaskSpec:
                 errors.append("存在缺少 id 的校验点")
             if cp.type not in CheckpointType.__args__:
                 errors.append(f"校验点 {cp.id} 类型非法: {cp.type}")
+            if cp.stage not in CHECKPOINT_STAGES:
+                errors.append(f"校验点 {cp.id} stage 非法: {cp.stage}，必须为 {sorted(CHECKPOINT_STAGES)} 之一")
         for cap in self.capabilities:
             if cap not in CAPABILITIES:
                 errors.append(f"capabilities 包含非法值 '{cap}'，必须为 {sorted(CAPABILITIES)} 之一")

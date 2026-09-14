@@ -33,6 +33,7 @@ ground_truth:
     type: file_exists
     path: output/result.md
     desc: Agent 必须输出结果文件
+    stage: final_answer
 verifier: deterministic
 weight: 1.0
 cost_budget_usd: 0.2

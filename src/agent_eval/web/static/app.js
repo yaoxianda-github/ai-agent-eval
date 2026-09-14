@@ -1042,11 +1042,45 @@
         return;
       }
       var v = r.verdicts || [];
-      var vRows = v.map(function (v) {
-        return '<div class="verdict-item"><span class="badge ' + (v.passed ? "pass" : "fail") + '">' +
-          (v.passed ? "PASS" : "FAIL") + "</span> <b>" + esc(v.id) + "</b> · " + esc(v.type) +
-          " · " + esc(v.detail) + "</div>";
-      }).join("");
+      // V3.7：按评测阶段分组展示校验点（检索/推理/工具/输出/集成）
+      var STAGE_LABELS = {
+        retrieval: "检索/读取", reasoning: "推理/规划", tool_use: "工具执行",
+        final_answer: "最终输出", integration: "链路集成"
+      };
+      var STAGE_ORDER = ["retrieval", "reasoning", "tool_use", "final_answer", "integration"];
+      var stageGroups = {};
+      v.forEach(function (vd) {
+        var st = vd.stage || "final_answer";
+        if (!stageGroups[st]) stageGroups[st] = [];
+        stageGroups[st].push(vd);
+      });
+      var vRows = "";
+      STAGE_ORDER.forEach(function (st) {
+        var items = stageGroups[st];
+        if (!items || !items.length) return;
+        var passCount = items.filter(function (x) { return x.passed; }).length;
+        var allPass = passCount === items.length;
+        var stageColor = allPass ? "#16a34a" : "#dc2626";
+        vRows += '<div class="stage-group" style="margin-bottom:16px;">' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
+            '<span style="font-weight:600;font-size:14px;color:' + stageColor + ';">' + STAGE_LABELS[st] + '</span>' +
+            '<span style="font-size:12px;color:#6b7280;">' + passCount + '/' + items.length + ' 通过</span>' +
+          "</div>";
+        items.forEach(function (vd) {
+          vRows += '<div class="verdict-item"><span class="badge ' + (vd.passed ? "pass" : "fail") + '">' +
+            (vd.passed ? "PASS" : "FAIL") + "</span> <b>" + esc(vd.id) + "</b> · " + esc(vd.type) +
+            " · " + esc(vd.detail) + "</div>";
+        });
+        vRows += "</div>";
+      });
+      // 如果没有任何阶段分组（旧数据），回退到平铺展示
+      if (!vRows) {
+        vRows = v.map(function (vd) {
+          return '<div class="verdict-item"><span class="badge ' + (vd.passed ? "pass" : "fail") + '">' +
+            (vd.passed ? "PASS" : "FAIL") + "</span> <b>" + esc(vd.id) + "</b> · " + esc(vd.type) +
+            " · " + esc(vd.detail) + "</div>";
+        }).join("");
+      }
       var steps = (r.steps || []).map(function (s, i) {
         var obsTxt = strOf(s.observation);
         var obsHtml = "";

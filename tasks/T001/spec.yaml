@@ -15,21 +15,25 @@ ground_truth:
       type: file_exists
       path: output/report.md
       desc: 已生成变更报告
+      stage: final_answer
     - id: c2
       type: content_not_contains
       path: input/*.md
       pattern: "2026/\\d{1,2}/\\d{1,2}"
       desc: 所有 md 文件不再残留斜杠日期
+      stage: tool_use
     - id: c3
       type: content_contains
       path: input/*.md
       pattern: "2026-\\d{2}-\\d{2}"
       desc: 所有 md 文件已使用 ISO 日期
+      stage: tool_use
     - id: c4
       type: content_contains
       path: output/report.md
       pattern: "2026-"
       desc: 报告中包含转换记录
+      stage: final_answer
 
 verifier: deterministic
 weight: 1.0
