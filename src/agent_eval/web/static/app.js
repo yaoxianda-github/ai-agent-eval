@@ -2186,7 +2186,7 @@
       var line = "<tr><td>" + esc(r.run_id) + "</td><td>" + esc(r.status) + "</td><td>" + r.score +
         "</td><td>" + pctText(r.pass_rate) + "</td><td>" + fmtDur(r.duration_s) + "</td>";
       if (showCost) line += "<td>¥" + r.cost_cny + "</td>";
-      line += '<td><a href="#/run/' + esc(r.run_id) + '">轨迹详情 →</a></td></tr>';
+      line += '<td><a class="btn btn-primary" href="#/run/' + esc(r.run_id) + '">轨迹详情</a></td></tr>';
       return line;
     }).join("");
     box.innerHTML =

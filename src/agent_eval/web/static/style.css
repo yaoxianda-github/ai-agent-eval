@@ -140,6 +140,7 @@ h2.page-title {
   font-family: inherit;
 }
 .btn:hover { opacity: 0.85; }
+a.btn { text-decoration: none; display: inline-block; }
 .btn.secondary {
   background: var(--bg); color: var(--text-primary);
   border-color: var(--border);
