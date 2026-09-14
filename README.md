@@ -13,20 +13,25 @@
 ## 特性
 
 * **任务包即契约（task-spec@v1）**：任务作者只写 `spec.yaml` + fixtures，不碰框架代码；判定点声明式描述，得分 = 权重 × 校验点通过率
-* **统一后端接口 + 注册表**：新增一个被测 Agent = 新增一个 `Backend` 子类并注册，框架本体不动
+* **统一后端接口 + 注册表**：新增一个被测 Agent = 新增一个 `Backend` 子类并注册，框架本体不动；已接入 10+ 后端（minimal-react / deepseek-harness / claude-code / aider / codex / hermes / kimi / qoder / trae / workbuddy）
 * **确定性判定优先**：5 种校验点（文件存在 / 内容含 / 不含 / 命令退出码 0），分数可下钻到 run → 轨迹回放 → 判分依据 → 原始产物
 * **判定看产物、不看 Agent 自报**：即使 Agent 未正确收尾，只要产物符合校验点即得分
+* **API Key 智能管理（V2.8）**：Web 设置页一键配置 API Key 写入 `.env`，优先级高于系统环境变量；`.env` Key 无效时自动回退到 `~/.zshrc` 系统配置（fallback）；发起对比前自动预检所有 Agent 的 Key 连通性，无效则警告并阻止发起
+* **claude-code 代理支持（V2.8）**：自动读取 `~/.claude/settings.json` 中的 `ANTHROPIC_BASE_URL` 代理配置，支持讯飞等第三方代理中转
+* **对比批次随时取消（V2.8）**：多 Agent 对比运行中，"开始对比"按钮自动变成红色"取消对比"，点击立即停止批次，已完成的运行结果保留
 * **轨迹回放（V2.4）**：运行详情以时间线展示全链路——输入意图 → 知识/检索 → 模型生成 → 工具执行，支持类型过滤与展开，开发/产品自助定位问题
 * **RAG 真实检索环节（V2.4/V2.5）**：`search_kb` 工具（BM25 检索）使评测集具备真实知识检索语义；T701/T702 带干扰项知识库
 * **黑盒后端模型层（V2.4）**：deepseek-harness 结束后解析 dsh session，还原模型 reasoning / 工具决策 / 最终输出，黑盒不再"黑"
 * **CI 质量门禁（V2.3/M1）**：`agent-eval ci` 无头运行，输出 JUnit XML + Allure + 汇总 JSON，core 包通过率不达标退出码非 0——GitHub 分支保护 required check 直接阻断合并
 * **多 Agent 横向对比门禁（V2.3）**：gate 配置 `agents:` 列表，每 Agent 独立跑同一任务集，全部达标才 PASS，报告输出 agent × task 结果矩阵
 * **多 Agent 对比矩阵（V2.7，Open Core 首个 Pro 能力）**：工作台一键发起「N 个 Agent × 任务集 × runs」对比批次，实时进度、彩色得分矩阵（点击下钻到每次 run 与轨迹）、加权总分/通过率/真实成本/耗时/稳定性 σ 汇总、自动结论与 CSV 导出；社区版限 2 Agent、隐藏成本稳定性列、禁导出，导入 License 解锁 Pro
+* **Badcase 管理（V2.8）**：独立菜单模块积累评测 badcase，支持标记、分类、转化为回归用例，形成"发现→修复→回归"闭环
 * **真实成本核算（V2.3）**：任务级预计成本（token 成本模型）+ 运行实际成本（DeepSeek 余额差分，批量精度 ¥0.09），工作台与 CI 报告均展示
 * **LLM-as-a-Judge 语义判分（V2.2）**：`verifier: llm_judge` 的开放任务由 LLM 按 rubric 判分，verdict 附带 score 与 reasoning
 * **可选 Langfuse 分析层（V2.2）**：默认零依赖 no-op；设置 `AGENT_EVAL_TRACE=langfuse` + 凭据后自动记录每次 LLM 调用
+* **统一日志体系（V2.6）**：控制台 + 文件双输出，单文件超 10MB 按时间戳切割归档，每次运行独立 `run.log`
 * **自包含 HTML 报告**：`agent-eval report` 聚合全部 run，离线可打开
-* **Web 评测工作台**：本地 FastAPI + 单页前端，浏览器全程操作——任务管理（含成本提示）、运行、轨迹回放、对比、报告
+* **Web 评测工作台**：本地 FastAPI + 单页前端，浏览器全程操作——任务管理（含成本提示）、运行、轨迹回放、对比、Badcase、报告、设置
 
 ## 快速开始
 
@@ -36,12 +41,18 @@
 # 1) 安装（开发模式）
 pip install -e ".[dev]"
 
-# 2) 配置 API Key（DeepSeek）
-#    macOS/Linux：export DEEPSEEK_API_KEY="sk-..."
-#    Windows：setx DEEPSEEK_API_KEY "sk-..."（需重开终端）
+# 2) 配置 API Key（推荐方式：启动工作台后在设置页面可视化配置）
+#    方式A：Web 设置页 → API Key 快速配置 → 写入项目 .env（优先级最高）
+#    方式B：环境变量
+#      macOS/Linux：export DEEPSEEK_API_KEY="sk-..."
+#      Windows：setx DEEPSEEK_API_KEY "sk-..."（需重开终端）
+#    方式C：写入 ~/.zshrc（系统级，作为 fallback 兜底）
+#
+#    智能回退：.env 中 Key 无效时自动回退到系统环境变量；claude-code 自动
+#    读取 ~/.claude/settings.json 中的 ANTHROPIC_BASE_URL 代理配置
 
 # 3) 三条命令
-agent-eval list-tasks                          # 列出任务包中的任务（23 个）
+agent-eval list-tasks                          # 列出任务包中的任务
 agent-eval run --task T001 --agent minimal-react              # 跑单个任务
 agent-eval run --task T001 --agent minimal-react --runs 3     # 多 run 采样（对抗非确定性）
 agent-eval report                              # 聚合全部 run 生成报告（reports/report.html）
@@ -59,15 +70,26 @@ agent-eval workbench                          # 浏览器打开 http://127.0.0.1
 
 ## 后端（Backend）
 
-| 后端 | 说明 | 轨迹 |
-| --- | --- | --- |
-| `minimal-react` | 自研最小 ReAct Agent（LLM + JSON action 协议 + 6 工具含 `search_kb`），白盒基线 | 步骤级 + llm 节点（model/input/output/tokens） |
-| `deepseek-harness` | DeepSeek 官方开源 harness（dsh，headless 模式），真实产品黑盒 | dsh 单步 + **session 解析**（reasoning/工具决策/final/tool） |
-| `aider` | 第三方开源 CLI（AI 结对编程），真实产品黑盒 | 单次调用输出 |
+已接入 10+ 后端，统一 `Backend` 抽象接口：
+
+| 后端 | 说明 | 轨迹 | API Key |
+| --- | --- | --- | --- |
+| `minimal-react` | 自研最小 ReAct Agent（LLM + JSON action 协议 + 6 工具含 `search_kb`），白盒基线 | 步骤级 + llm 节点（model/input/output/tokens） | `DEEPSEEK_API_KEY` |
+| `deepseek-harness` | DeepSeek 官方开源 harness（dsh，headless 模式），真实产品黑盒 | dsh 单步 + **session 解析**（reasoning/工具决策/final/tool） | `DEEPSEEK_API_KEY` |
+| `claude-code` | Anthropic Claude Code CLI（--bare 隔离模式），支持 opus 4.8 / sonnet | 单次调用输出 + token 用量 | `ANTHROPIC_API_KEY`（支持代理） |
+| `aider` | 第三方开源 CLI（AI 结对编程），真实产品黑盒 | 单次调用输出 | `DEEPSEEK_API_KEY` |
+| `codex-agent` | OpenAI Codex CLI | 单次调用输出 | `OPENAI_API_KEY` |
+| `hermes-agent` | 自研 Hermes Agent（支持 opus 4.8） | 步骤级轨迹 | `ANTHROPIC_API_KEY` |
+| `kimi-code` | Moonshot Kimi Code Agent | 单次调用输出 | `MOONSHOT_API_KEY` |
+| `qoder-agent` | 阿里通义千问 Qoder Agent | 单次调用输出 | `DASHSCOPE_API_KEY` |
+| `trae-agent` | 字节 Trae Agent | 单次调用输出 | 对应平台 Key |
+| `workbuddy` | 豆包 WorkBuddy Agent | 单次调用输出 | 对应平台 Key |
 
 新增后端：在 `src/agent_eval/backends/` 下定义 `Backend` 子类，然后在 `backends/__init__.py` 注册即可。
 
 dsh 后端注意：使用**评测专用隔离 DSH_HOME**（`~/.cache/agent-eval/dsh-home`），凭据只来自环境变量 `DEEPSEEK_API_KEY`——避免 `~/.dsh` 用户个人凭据污染（旧凭据会导致 403 预扣失败）。
+
+claude-code 后端注意：`--bare` 模式严格只认 `ANTHROPIC_API_KEY`，自动读取 `~/.claude/settings.json` 中的 `ANTHROPIC_BASE_URL` 代理配置（支持讯飞等第三方中转）。
 
 ## 任务包
 
@@ -149,14 +171,28 @@ gate:
 | 页面 | 能力 |
 | --- | --- |
 | 工作台 | 选任务/后端/模型/超时/采样次数 → 启动运行 → 轮询进度 → 结果 + 多 run 统计 |
-| 任务管理 | 23 任务列表 + 新建任务表单（动态校验点编辑器）+ 每任务预计成本（含成本口径提示） |
+| 任务管理 | 任务列表 + 新建任务表单（动态校验点编辑器）+ 每任务预计成本（含成本口径提示） |
 | 运行历史 | SQLite 索引，分页浏览，按任务/后端/状态筛选，实际成本列 |
 | 运行详情 | 判定结果 + **轨迹回放时间线** + 步骤轨迹 + 产物文件预览（含路径穿越防护） |
-| 对比矩阵 | 发起「N Agent × 任务集 × runs」对比批次，实时进度 + 彩色得分矩阵（下钻每次 run/轨迹）+ 加权总分/通过率/成本/耗时/σ 汇总 + 自动结论 + CSV 导出（V2.7） |
+| 对比矩阵 | 发起「N Agent × 任务集 × runs」对比批次，**运行中可随时取消**，实时进度 + 彩色得分矩阵（下钻每次 run/轨迹）+ 加权总分/通过率/成本/耗时/σ 汇总 + 自动结论 + CSV 导出（V2.7） |
+| Badcase 管理 | 独立模块积累评测 badcase，支持标记/分类/转化为回归用例，形成"发现→修复→回归"闭环（V2.8） |
 | 报告 | 复用引擎 reporter 生成自包含 HTML，iframe 内嵌查看 |
-| 设置 | 目录/版本 + 环境变量说明 |
+| 设置 | 目录/版本 + **API Key 快速配置**（可视化写入 .env，支持 DEEPSEEK/ANTHROPIC/OPENAI 等）+ 环境变量说明 + 叹号提示完整配置路径 |
 
 启动：`pip install -e ".[web]"` → `agent-eval workbench` → 打开 http://127.0.0.1:8000
+
+### API Key 智能管理（V2.8）
+
+三层配置优先级，自动回退：
+
+1. **项目 `.env` 文件**（最高优先级）：Web 设置页可视化配置，写入项目根目录 `.env`（已在 `.gitignore`，不会误提交）
+2. **系统环境变量**（fallback 兜底）：`~/.zshrc` / `~/.bashrc` 中 export 的变量
+3. **CLI 配置文件**：claude-code 自动读取 `~/.claude/settings.json` 中的 `ANTHROPIC_BASE_URL` 代理地址
+
+智能特性：
+- **自动回退**：`.env` 中 Key 无效（401）时，自动尝试系统环境变量中的 Key，有效则切换并返回 `switched_to_fallback` 标记
+- **发起前预检**：对比矩阵发起前自动检查所有选中 Agent 的 API Key 连通性，无效则警告并阻止发起，避免全量失败
+- **代理支持**：claude-code 自动识别并使用第三方代理（如讯飞中转），无需手动配置 base_url
 
 ### 轨迹回放（V2.4）
 
@@ -254,4 +290,5 @@ ai-agent-eval/
 * ✅ V2.5：search_kb 升级 BM25 · T701/T702 纳入 core 卡口（12 任务）
 * ✅ V2.6：统一日志体系（控制台 + 文件双输出、按 10MB 时间戳切割归档、每次运行独立 run.log）
 * ✅ V2.7：商业化功能 A——多 Agent 对比矩阵（批次模型 + 彩色矩阵 + 下钻 + 汇总 + 导出）· License 收费墙（Open Core）
+* ✅ V2.8：API Key 智能管理（Web 可视化配置 + .env 优先 + 系统 fallback + 发起前预检）· claude-code 代理支持 · 对比批次随时取消 · Badcase 管理模块 · 10+ 后端接入（claude-code / codex / hermes / kimi / qoder / trae / workbuddy）
 * 🔜 下一步：团队回归看板（功能 B）· 桌面端黑盒采集器 · 插件注册表 · Docker 沙箱隔离 · pip 发布 · 混合检索/向量检索增强
