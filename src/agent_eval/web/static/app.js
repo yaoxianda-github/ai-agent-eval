@@ -2023,9 +2023,12 @@
     function tick() {
       api("/api/batches/" + bid).then(function (b) {
         mxState.current = b;
-        if (b.status === "done") {
+        var btn = el("mx-start");
+        if (b.status === "done" || b.status === "cancelled") {
           clearInterval(mxState.timer); mxState.timer = null;
           mxState.matrix = b.summary || null;
+          // 恢复按钮状态
+          if (btn) { btn.disabled = false; btn.textContent = "开始对比"; btn.classList.remove("danger"); btn.dataset.cancelling = ""; btn.onclick = startBatch; }
           // 刷新历史下拉
           api("/api/batches").then(function (d) {
             mxState.batches = d.batches || [];
@@ -2040,6 +2043,20 @@
           });
           renderBatchResult();
         } else {
+          // 运行中：按钮变成取消对比
+          if (btn && !btn.dataset.cancelling) {
+            btn.disabled = false;
+            btn.textContent = "取消对比";
+            btn.classList.add("danger");
+            btn.dataset.cancelling = "1";
+            btn.onclick = function () {
+              if (!confirm("确定要取消当前对比批次吗？已完成的运行结果将保留。")) return;
+              btn.disabled = true; btn.textContent = "取消中…";
+              api("/api/batches/" + bid + "/cancel", { method: "POST" })
+                .then(function () { btn.textContent = "取消中…"; })
+                .catch(function (e) { btn.disabled = false; btn.textContent = "取消对比"; alert("取消失败：" + e.message); });
+            };
+          }
           renderProgress(b);
         }
       }).catch(function () { /* 轮询偶发失败忽略，下轮重试 */ });

@@ -588,14 +588,23 @@ def create_app(
         notes.append(f"{stable_a} 平均波动 σ={stable['avg_std']}（越小越稳定）")
         return notes
 
+    # 批次取消标志：key=batch_id, value=True 表示请求取消
+    _batch_cancel_flags: dict[str, bool] = {}
+
     def _execute_batch(batch_id: str, agents: list[str], task_ids: list[str],
                        runs: int, model: str) -> None:
         plan = [(a, t, i) for a in agents for t in task_ids for i in range(runs)]
         total = len(plan)
         done = 0
+        cancelled = False
         logger.info("对比批次开始 | batch=%s agents=%s tasks=%d runs=%d 共%d次",
                     batch_id, agents, len(task_ids), runs, total)
         for agent_id, task_id, _i in plan:
+            # 检查取消标志
+            if _batch_cancel_flags.get(batch_id):
+                cancelled = True
+                logger.info("对比批次被取消 | batch=%s 已完成%d/%d次", batch_id, done, total)
+                break
             rid = uuid.uuid4().hex[:12]
             try:
                 task = _task_map()[task_id]
@@ -631,12 +640,15 @@ def create_app(
             store.update_batch(batch_id, done_runs=done)
         batch = store.get_batch(batch_id)
         matrix = _build_matrix(batch) if batch else {}
+        final_status = "cancelled" if cancelled else "done"
         store.update_batch(
-            batch_id, status="done",
+            batch_id, status=final_status,
             finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             summary=matrix,
         )
-        logger.info("对比批次完成 | batch=%s", batch_id)
+        # 清理取消标志
+        _batch_cancel_flags.pop(batch_id, None)
+        logger.info("对比批次%s | batch=%s", "被取消" if cancelled else "完成", batch_id)
         # 社区版只保留最近 N 个批次（Pro retain=0 不限）
         ent = license_mod.get_entitlements()
         retain = int(ent.get("retain_batches", 1) or 0)
@@ -1039,9 +1051,21 @@ def create_app(
         if not b:
             raise HTTPException(status_code=404, detail="批次不存在")
         # running 时实时聚合已完成部分，done 时用落库 summary
-        if b["status"] != "done":
+        if b["status"] not in ("done", "cancelled"):
             b["summary"] = _build_matrix(b)
         return b
+
+    @app.post("/api/batches/{batch_id}/cancel")
+    def cancel_batch(batch_id: str) -> dict:
+        """取消正在运行的对比批次。"""
+        b = store.get_batch(batch_id)
+        if not b:
+            raise HTTPException(status_code=404, detail="批次不存在")
+        if b["status"] not in ("running", "pending"):
+            raise HTTPException(status_code=400, detail=f"批次状态为 {b['status']}，无法取消")
+        _batch_cancel_flags[batch_id] = True
+        logger.info("对比批次取消请求已发出 | batch=%s", batch_id)
+        return {"batch_id": batch_id, "status": "cancelling", "message": "取消请求已发出，将在当前运行完成后停止"}
 
     @app.get("/api/matrix")
     def get_matrix(batch_id: str = Query(...)) -> dict:

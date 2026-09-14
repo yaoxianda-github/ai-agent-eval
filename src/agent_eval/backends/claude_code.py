@@ -593,20 +593,54 @@ class ClaudeCodeBackend(Backend):
             }
         start = _time.time()
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=self.api_key)
-            resp = client.messages.create(
-                model=self.model,
-                max_tokens=1,
-                messages=[{"role": "user", "content": "hi"}],
+            try:
+                import httpx as _httpx
+            except ImportError:
+                import httpx2 as _httpx
+            resp = _httpx.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": self.api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "max_tokens": 1,
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+                timeout=15,
+                verify=False,
             )
             latency_ms = round((_time.time() - start) * 1000, 1)
-            return {
-                "ok": True,
-                "status": "ok",
-                "message": f"API Key 有效，模型 {self.model} 响应正常（{latency_ms}ms）",
-                "latency_ms": latency_ms,
-            }
+            if resp.status_code == 200:
+                return {
+                    "ok": True,
+                    "status": "ok",
+                    "message": f"API Key 有效，模型 {self.model} 响应正常（{latency_ms}ms）",
+                    "latency_ms": latency_ms,
+                }
+            elif resp.status_code == 401:
+                return {
+                    "ok": False,
+                    "status": "invalid",
+                    "message": f"API Key 无效（401 Authentication Error）：{resp.text[:200]}",
+                    "latency_ms": latency_ms,
+                }
+            elif resp.status_code == 429:
+                return {
+                    "ok": False,
+                    "status": "rate_limited",
+                    "message": f"API 限流（429）：{resp.text[:200]}",
+                    "latency_ms": latency_ms,
+                }
+            else:
+                return {
+                    "ok": False,
+                    "status": "error",
+                    "message": f"API 调用失败（HTTP {resp.status_code}）：{resp.text[:200]}",
+                    "latency_ms": latency_ms,
+                }
         except Exception as e:
             latency_ms = round((_time.time() - start) * 1000, 1)
             err_msg = str(e)
