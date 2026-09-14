@@ -357,6 +357,18 @@ pre.code {
 .matrix-control-row { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; padding-top: 4px; border-top: 1px solid var(--border-light, #f0f0f0); }
 .matrix-control-row .field { flex: 0 0 auto; }
 .matrix-start-wrap { margin-left: auto; }
+.mx-history-bar {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 12px; padding: 10px 14px;
+  background: var(--bg-tertiary, #f8f8f8); border-radius: 8px;
+  border: 1px solid var(--border-light, #eee);
+}
+.mx-history-bar .muted { font-size: 12px; color: var(--text-muted); }
+.mx-hist-select {
+  flex: 1; max-width: 500px; padding: 6px 10px;
+  border: 1px solid var(--border); border-radius: 6px;
+  font-size: 12px; background: var(--bg); cursor: pointer;
+}
 .agent-pick { 
   display: grid; 
   grid-template-columns: repeat(5, 1fr); 

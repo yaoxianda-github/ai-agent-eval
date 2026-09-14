@@ -56,7 +56,7 @@
   var histLimit = 20;    // 每页条数
   var backendsCache = null;
   var pollTimer = null;
-  var mxState = { license: null, current: null, matrix: null, sel: null, timer: null };
+  var mxState = { license: null, current: null, matrix: null, sel: null, timer: null, batches: [] };
 
   function loadMeta() {
     return api("/api/meta").then(function (m) {
@@ -1801,6 +1801,7 @@
     ]).then(function (rs) {
       mxState.license = rs[0];
       var batches = rs[2].batches || [];
+      mxState.batches = batches;
       renderCompareShell(batches);
       if (batches.length) loadBatch(batches[0].batch_id);
     }).catch(function (e) { renderErr(e.message); });
@@ -1856,10 +1857,6 @@
             '<div class="field matrix-start-wrap"><button class="btn btn-primary" id="mx-start">开始对比</button></div>' +
           '</div>' +
         '</div>' +
-        (batches.length ?
-          '<div style="margin-top:12px;"><label class="muted">历史批次：</label> ' +
-          '<select id="mx-hist" style="max-width:420px;padding:6px 10px;border:1px solid #D8D6CF;border-radius:8px;">' +
-          histOpts + '</select></div>' : "") +
       '</div>' +
       '<div id="mx-result"></div>'
     );
@@ -1916,6 +1913,18 @@
       .map(function (c) { return c.value; });
   }
 
+  // 生成历史批次选择器 HTML（放在结果区域顶部）
+  function buildHistorySelector(currentBid) {
+    var batches = mxState.batches || [];
+    if (!batches.length) return "";
+    var opts = batches.map(function (b) {
+      return '<option value="' + esc(b.batch_id) + '"' + (b.batch_id === currentBid ? " selected" : "") + ">" +
+        esc(b.label) + "（" + esc(b.status) + " · " + fmtTime(b.created_at) + "）</option>";
+    }).join("");
+    return '<div class="mx-history-bar"><label class="muted">历史批次：</label> ' +
+      '<select id="mx-hist" class="mx-hist-select">' + opts + "</select></div>";
+  }
+
   function startBatch() {
     var agents = pickedAgents();
     if (!agents.length) { alert("请至少选择一个 Agent"); return; }
@@ -1958,6 +1967,7 @@
           mxState.matrix = b.summary || null;
           // 刷新历史下拉
           api("/api/batches").then(function (d) {
+            mxState.batches = d.batches || [];
             var cur = el("mx-hist");
             if (cur) {
               var opts = d.batches.map(function (x) {
@@ -1981,10 +1991,12 @@
     var total = b.total_runs || 0, done = b.done_runs || 0;
     var pct = total ? Math.round(done / total * 100) : 0;
     el("mx-result").innerHTML =
+      buildHistorySelector(b.batch_id) +
       '<div class="card"><h3>对比进行中 <span class="muted">' + esc(b.label) + '</span></h3>' +
       '<div class="batch-progress"><i style="width:' + pct + '%"></i></div>' +
       '<div class="muted">已完成 ' + done + " / " + total + " 次运行（" + pct + '%）· Agent：' +
         (b.agents || []).map(esc).join("、") + '</div></div>';
+    bindHistorySelector();
   }
 
   function pctClass(rate) { return rate >= 0.999 ? "ok" : (rate >= 0.5 ? "half" : "bad"); }
@@ -2125,6 +2137,7 @@
       : '<button class="btn small secondary" disabled title="Pro 功能">导出 CSV 🔒</button> <span class="lock-tag">Pro 功能</span>';
 
     el("mx-result").innerHTML =
+      buildHistorySelector(b.batch_id) +
       '<div class="card"><h3>对比结论 <span class="muted">' + esc(b.label) + " · runs=" + (b.runs || 1) +
         " · " + fmtTime(b.finished_at || b.created_at) + '</span></h3><div class="mx-concl">' + concl + "</div>" + confHtml + gateHtml + tierDistHtml + "</div>" +
       '<div class="card"><h3>得分矩阵 <span class="muted">格内=最好成绩，颜色=通过率；点击单元格下钻每次运行</span></h3>' +
@@ -2145,6 +2158,15 @@
     if (el("mx-export")) el("mx-export").onclick = function () {
       window.open("/api/matrix/export?batch_id=" + encodeURIComponent(b.batch_id), "_blank");
     };
+    bindHistorySelector();
+  }
+
+  // 绑定历史批次选择器事件
+  function bindHistorySelector() {
+    var sel = el("mx-hist");
+    if (sel) {
+      sel.onchange = function () { loadBatch(this.value); };
+    }
   }
 
   function renderDrill(agent, task) {
