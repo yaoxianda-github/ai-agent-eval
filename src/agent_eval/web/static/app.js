@@ -1837,25 +1837,26 @@
     renderHTML(
       '<h2 class="page-title">多 Agent 对比矩阵' + planBadge + '</h2>' +
       planNote +
-      '<div class="card"><h3>发起对比</h3>' +
-        '<div class="matrix-setup">' +
-          '<div class="matrix-agent-section">' +
-            '<label>选择 Agent（同任务集横向对比）' +
-              '<span class="mx-batch-actions">' +
-                '<button type="button" class="mx-batch-btn" id="mx-select-all">全选</button>' +
-                '<button type="button" class="mx-batch-btn" id="mx-select-none">清空</button>' +
-              '</span>' +
-            '</label>' +
-            '<div class="agent-pick" id="mx-agents">' + agentChips + '</div>' +
-          '</div>' +
-          '<div class="matrix-control-section">' +
-            '<div class="field"><label>任务集</label>' +
+      '<div class="card">' +
+        '<div class="matrix-header">' +
+          '<h3>发起对比</h3>' +
+          '<div class="matrix-header-controls">' +
+            '<div class="field inline-field"><label>任务集</label>' +
               '<select id="mx-scope"><option value="core">core 核心卡口包</option>' +
               '<option value="full">full 全量任务</option></select></div>' +
-            '<div class="field"><label>每格 runs</label>' +
+            '<div class="field inline-field"><label>每格 runs</label>' +
               '<input id="mx-runs" type="number" value="1" min="1" max="10"></div>' +
-            '<button class="btn btn-primary mx-start-btn" id="mx-start">开始对比</button>' +
+            '<button class="btn btn-primary" id="mx-start">开始对比</button>' +
           '</div>' +
+        '</div>' +
+        '<div class="matrix-agent-section">' +
+          '<label>选择 Agent（同任务集横向对比）' +
+            '<span class="mx-batch-actions">' +
+              '<button type="button" class="mx-batch-btn" id="mx-select-all">全选</button>' +
+              '<button type="button" class="mx-batch-btn" id="mx-select-none">清空</button>' +
+            '</span>' +
+          '</label>' +
+          '<div class="agent-pick" id="mx-agents">' + agentChips + '</div>' +
         '</div>' +
       '</div>' +
       '<div id="mx-result"></div>'
