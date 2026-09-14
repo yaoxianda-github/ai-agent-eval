@@ -28,6 +28,8 @@ CheckpointType = Literal[
     "ui_element_exists",   # path=URL, pattern=CSS selector
     "browser_url_contains", # path=起始URL, pattern=期望URL包含的字符串
     "http_status",         # path=URL, pattern=状态码（如 "200"、"2"、"200-299"）
+    # V3.8 P1：参数级 checkpoint——断言工具调用的参数值
+    "tool_call_assert",    # tool=工具名, param=参数名, pattern=参数值正则（值域判断）
 ]
 
 LEVELS = {"L1", "L2", "L3", "L4", "L5"}
@@ -60,6 +62,8 @@ class Checkpoint:
     pattern: str = ""
     cmd: str = ""
     stage: str = "final_answer"  # V3.7：校验点所属评测阶段，默认最终输出
+    tool: str = ""   # V3.8 P1：tool_call_assert 类型的工具名
+    param: str = ""  # V3.8 P1：tool_call_assert 类型的参数名
 
 
 @dataclass
@@ -95,6 +99,8 @@ class TaskSpec:
                 pattern=cp.get("pattern", ""),
                 cmd=cp.get("cmd", ""),
                 stage=cp.get("stage", "final_answer"),
+                tool=cp.get("tool", ""),
+                param=cp.get("param", ""),
             )
             for cp in data.get("ground_truth", {}).get("checkpoints", [])
         ]

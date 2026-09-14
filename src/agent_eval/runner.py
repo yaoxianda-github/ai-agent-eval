@@ -272,10 +272,32 @@ def run_one(
 
         # Day 3：执行判定与评分（仅当后端未发生 error 时）
         # V2.2：verifier=llm_judge 的任务在确定性校验点之外，追加一次 LLM 语义判分
+        # V2.4：全链路回放轨迹（输入意图 → 检索/工具 → 模型生成）
+        # 后端自报 traces（如 minimal-react 的 llm/tool 节点）优先；否则由 steps 兜底合成
+        traces: list[dict] = []
+        if result.traces:
+            traces = list(result.traces)
+        else:
+            for s in result.steps:
+                traces.append(
+                    {
+                        "kind": "tool",
+                        "category": tool_category(s.get("action")),
+                        "ts": s.get("ts", 0.0),
+                        "tool": s.get("action"),
+                        "args": s.get("args"),
+                        "observation": s.get("observation"),
+                    }
+                )
+        traces.insert(
+            0, {"kind": "intent", "ts": 0.0, "content": task.description, "task_id": task.id}
+        )
+        traces.sort(key=lambda t: t.get("ts", 0.0))
+
         verdicts: list[dict] = []
         metrics: dict = {}
         if result.status != "error":
-            verdicts = run_checkpoints(task, workspace)
+            verdicts = run_checkpoints(task, workspace, traces)
             passed = sum(1 for v in verdicts if v.get("passed"))
             logger.info("确定性校验点完成: %d/%d 通过", passed, len(verdicts))
             if task.verifier == "llm_judge":
@@ -313,28 +335,6 @@ def run_one(
             metrics["step_count"] = len(result.steps)
         if sampled_for_audit:
             metrics["sampled_for_audit"] = True
-
-        # V2.4：全链路回放轨迹（输入意图 → 检索/工具 → 模型生成）
-        # 后端自报 traces（如 minimal-react 的 llm/tool 节点）优先；否则由 steps 兜底合成
-        traces: list[dict] = []
-        if result.traces:
-            traces = list(result.traces)
-        else:
-            for s in result.steps:
-                traces.append(
-                    {
-                        "kind": "tool",
-                        "category": tool_category(s.get("action")),
-                        "ts": s.get("ts", 0.0),
-                        "tool": s.get("action"),
-                        "args": s.get("args"),
-                        "observation": s.get("observation"),
-                    }
-                )
-        traces.insert(
-            0, {"kind": "intent", "ts": 0.0, "content": task.description, "task_id": task.id}
-        )
-        traces.sort(key=lambda t: t.get("ts", 0.0))
 
         # V3.8 P1：危险工具调用统计（forbidden_tools）
         forbidden_tool_calls: list[dict] = []

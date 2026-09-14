@@ -34,6 +34,13 @@ ground_truth:
       pattern: "2026-"
       desc: 报告中包含转换记录
       stage: final_answer
+    - id: c5
+      type: tool_call_assert
+      tool: write_file
+      param: path
+      pattern: "input/"
+      desc: Agent 调用 write_file 修改了 input/ 下的文件（参数级校验）
+      stage: tool_use
 
 verifier: deterministic
 weight: 1.0
