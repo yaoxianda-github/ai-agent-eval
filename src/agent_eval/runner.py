@@ -78,6 +78,7 @@ class RunRecord:
     verdicts: list[dict] = field(default_factory=list)
     error: str = ""
     workspace: str = ""
+    forbidden_tool_calls: list[dict] = field(default_factory=list)  # V3.8 P1：调用了禁止工具的记录（危险工具调用）
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -335,6 +336,19 @@ def run_one(
         )
         traces.sort(key=lambda t: t.get("ts", 0.0))
 
+        # V3.8 P1：危险工具调用统计（forbidden_tools）
+        forbidden_tool_calls: list[dict] = []
+        if task.forbidden_tools:
+            forbidden_set = set(task.forbidden_tools)
+            for t in traces:
+                tool_name = t.get("tool") or t.get("action") or ""
+                if tool_name and tool_name in forbidden_set:
+                    forbidden_tool_calls.append({
+                        "tool": tool_name,
+                        "ts": t.get("ts", 0.0),
+                        "args": t.get("args"),
+                    })
+
         record = RunRecord(
             run_id=run_id,
             agent_id=agent_id,
@@ -349,6 +363,7 @@ def run_one(
             verdicts=verdicts,
             error=result.error or "",
             workspace=_rel_or_abs(workspace) if keep_workspace else "",
+            forbidden_tool_calls=forbidden_tool_calls,
         )
 
         # 计算评测置信度（V3.0）

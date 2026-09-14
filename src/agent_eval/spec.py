@@ -80,6 +80,7 @@ class TaskSpec:
     capabilities: list[str] = field(default_factory=list)  # V2.5：任务考察的 Harness 能力（六类）
     mcp_servers: list[dict] = field(default_factory=list)  # M2：任务声明的 MCP server 列表（stdio 模式）
     tier: str = ""  # V3.1：数据集分层（golden/boundary/regression/random）
+    forbidden_tools: list[str] = field(default_factory=list)  # V3.8 P1：禁止调用的危险工具列表（调用即触发红线）
     spec_path: Optional[Path] = None
 
     @classmethod
@@ -114,6 +115,7 @@ class TaskSpec:
             capabilities=list(data.get("capabilities", [])),
             mcp_servers=list(data.get("mcp_servers", [])),
             tier=str(data.get("tier", "")),
+            forbidden_tools=list(data.get("forbidden_tools", [])),
             spec_path=path,
         )
         errors = spec.validate()
