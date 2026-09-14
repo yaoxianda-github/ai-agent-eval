@@ -528,6 +528,16 @@ table.matrix th { position: sticky; top: 0; z-index: 1; }
 .ea-q-val { width: 40px; text-align: right; font-size: 12px; font-weight: 600; color: var(--text-primary); font-family: var(--font-mono); }
 .ea-q-detail { margin-top: 8px; font-size: 11px; color: var(--text-muted); }
 
+/* ---------- 工具调用五维度评分卡（V3.8） ---------- */
+.five-dim-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 8px; }
+.five-dim-cell { background: var(--bg-secondary); border-radius: 8px; padding: 10px; border: 1px solid var(--border-light); }
+.five-dim-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.five-dim-label { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.five-dim-score { font-size: 16px; font-family: var(--font-mono); }
+.five-dim-bar { height: 4px; background: var(--border-light); border-radius: 2px; overflow: hidden; margin-bottom: 6px; }
+.five-dim-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
+.five-dim-note { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+
 /* ---------- 8 维度能力雷达图 ---------- */
 .radar-wrap { text-align: center; }
 .radar-detail {

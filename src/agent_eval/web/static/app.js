@@ -1392,6 +1392,57 @@
     var toolRetryRate = toolCalls > 0 ? Math.round(toolRetries / toolCalls * 100) : 0;
     var paramErrorRate = toolCalls > 0 ? Math.round(paramErrors / toolCalls * 100) : 0;
 
+    // V3.8：工具调用五维度评分（基于 AI评测方法论⑤）
+    // 1.工具选择正确率：100 - 重试率（重试通常意味着选错工具/参数后重来）
+    // 2.参数填写正确率：100 - 参数错误率
+    // 3.调用格式/协议正确性：调用成功率（格式错误导致调用失败）
+    // 4.结果使用正确性：工具成功且任务高分→高；成功但任务低分→中；无工具→—
+    // 5.工具边界识别：无过度调用(同一工具>3次且占比>50%) + 无欠调用(L3+任务但工具<2)
+    var toolSelectScore = toolCalls > 0 ? Math.max(0, 100 - toolRetryRate) : (run.task_level && run.task_level >= "L3" ? 60 : 100);
+    var paramFillScore = toolCalls > 0 ? Math.max(0, 100 - paramErrorRate) : 100;
+    var formatScore = toolCalls > 0 ? toolSuccessRate : 100;
+    var resultUseScore = null;
+    if (toolCalls > 0) {
+      var runScore = typeof run.score === "number" ? run.score : 1;
+      if (toolFailures === 0 && runScore >= 0.8) resultUseScore = 90;
+      else if (toolFailures === 0 && runScore >= 0.5) resultUseScore = 70;
+      else if (runScore >= 0.5) resultUseScore = 50;
+      else resultUseScore = 30;
+    }
+    // 工具边界：过度调用检测
+    var overCallTool = null;
+    var overCallCount = 0;
+    for (var tk in toolDist) {
+      if (toolDist[tk] > 3 && toolDist[tk] / toolCalls > 0.5) {
+        overCallTool = tk; overCallCount = toolDist[tk]; break;
+      }
+    }
+    var underCall = run.task_level && run.task_level >= "L3" && toolCalls < 2;
+    var boundaryScore = 100;
+    var boundaryNote = "";
+    if (overCallTool) { boundaryScore = 50; boundaryNote = "过度调用：" + overCallTool + " 调用" + overCallCount + "次"; }
+    else if (underCall) { boundaryScore = 60; boundaryNote = "疑似欠调用：L3+任务仅" + toolCalls + "次工具调用"; }
+    var fiveDimRows = [
+      { label: "工具选择", score: toolSelectScore, note: toolRetries > 0 ? "重试" + toolRetries + "次" : "无重试" },
+      { label: "参数填写", score: paramFillScore, note: paramErrors > 0 ? "参数错误" + paramErrors + "次" : "参数正确" },
+      { label: "调用格式", score: formatScore, note: toolFailures > 0 ? "失败" + toolFailures + "次" : "全部成功" },
+      { label: "结果使用", score: resultUseScore, note: resultUseScore === null ? "无工具调用" : (resultUseScore >= 80 ? "结果有效利用" : resultUseScore >= 60 ? "部分有效" : "利用不足") },
+      { label: "工具边界", score: boundaryScore, note: boundaryNote || "调用合理" }
+    ];
+    var fiveDimHtml = '<div class="ea-subtitle" style="margin-top:14px;">工具调用五维度评分 <span class="cap-hint" title="基于 AI评测方法论⑤：工具调用准确率拆为工具选择/参数填写/调用格式/结果使用/工具边界五个子维度，从运行轨迹中自动推断。">ⓘ 判定逻辑</span></div>' +
+      '<div class="five-dim-grid">' +
+      fiveDimRows.map(function(d) {
+        var sc = d.score === null ? "—" : d.score;
+        var color = d.score === null ? "#94a3b8" : d.score >= 80 ? "#16a34a" : d.score >= 60 ? "#f59e0b" : "#dc2626";
+        var barW = d.score === null ? 0 : d.score;
+        return '<div class="five-dim-cell">' +
+          '<div class="five-dim-head"><span class="five-dim-label">' + d.label + '</span><b class="five-dim-score" style="color:' + color + ';">' + sc + '</b></div>' +
+          '<div class="five-dim-bar"><div class="five-dim-fill" style="width:' + barW + '%;background:' + color + ';"></div></div>' +
+          '<div class="five-dim-note">' + esc(d.note) + '</div>' +
+        '</div>';
+      }).join("") +
+      '</div>';
+
     // 工具分布条形图
     var toolRows = [];
     var toolKeys = Object.keys(toolDist).sort(function(a, b) { return toolDist[b] - toolDist[a]; });
@@ -1437,6 +1488,7 @@
               '<div class="ea-q-row"><span class="ea-q-label">参数错误率</span><div class="ea-q-bar"><div class="ea-q-fill ea-q-err" style="width:' + paramErrorRate + '%;"></div></div><span class="ea-q-val">' + paramErrorRate + '%</span></div>' +
               '<div class="ea-q-detail">总调用 ' + toolCalls + ' 次 · 失败 ' + toolFailures + ' 次 · 重试 ' + toolRetries + ' 次 · 参数错误 ' + paramErrors + ' 次</div>' +
             '</div>' +
+            fiveDimHtml +
           '</div>' +
         '</div>' +
       '</div>'
