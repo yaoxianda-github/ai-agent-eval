@@ -1837,20 +1837,24 @@
       '<h2 class="page-title">多 Agent 对比矩阵' + planBadge + '</h2>' +
       planNote +
       '<div class="card"><h3>发起对比</h3>' +
-        '<div class="matrix-toolbar">' +
-          '<div class="field" style="flex:2 1 320px;"><label>选择 Agent（同任务集横向对比）' +
-            '<span class="mx-batch-actions">' +
-              '<button type="button" class="mx-batch-btn" id="mx-select-all">全选</button>' +
-              '<button type="button" class="mx-batch-btn" id="mx-select-none">清空</button>' +
-            '</span>' +
-          '</label>' +
-            '<div class="agent-pick" id="mx-agents">' + agentChips + '</div></div>' +
-          '<div class="field" style="flex:0 0 150px;"><label>任务集</label>' +
-            '<select id="mx-scope"><option value="core">core 核心卡口包</option>' +
-            '<option value="full">full 全量任务</option></select></div>' +
-          '<div class="field" style="flex:0 0 110px;"><label>每格 runs</label>' +
-            '<input id="mx-runs" type="number" value="1" min="1" max="10"></div>' +
-          '<div class="field" style="flex:0 0 auto;"><button class="btn" id="mx-start">开始对比</button></div>' +
+        '<div class="matrix-setup">' +
+          '<div class="matrix-agent-row">' +
+            '<label>选择 Agent（同任务集横向对比）' +
+              '<span class="mx-batch-actions">' +
+                '<button type="button" class="mx-batch-btn" id="mx-select-all">全选</button>' +
+                '<button type="button" class="mx-batch-btn" id="mx-select-none">清空</button>' +
+              '</span>' +
+            '</label>' +
+            '<div class="agent-pick" id="mx-agents">' + agentChips + '</div>' +
+          '</div>' +
+          '<div class="matrix-control-row">' +
+            '<div class="field"><label>任务集</label>' +
+              '<select id="mx-scope"><option value="core">core 核心卡口包</option>' +
+              '<option value="full">full 全量任务</option></select></div>' +
+            '<div class="field"><label>每格 runs</label>' +
+              '<input id="mx-runs" type="number" value="1" min="1" max="10"></div>' +
+            '<div class="field matrix-start-wrap"><button class="btn btn-primary" id="mx-start">开始对比</button></div>' +
+          '</div>' +
         '</div>' +
         (batches.length ?
           '<div style="margin-top:12px;"><label class="muted">历史批次：</label> ' +
