@@ -29,7 +29,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from agent_eval import license as license_mod
-from agent_eval.backends import _BACKENDS, list_backends
+from agent_eval.backends import _BACKENDS, get_backend, list_backends
 from agent_eval.log import get_logger, setup_logging
 from agent_eval.reporter import load_runs, render_html, summarize
 from agent_eval.runner import default_results_dir, run_one
@@ -780,6 +780,51 @@ def create_app(
                 for n, cls in sorted(_BACKENDS.items())
             ]
         }
+
+    @app.get("/api/backends/{agent_id}/check-api-key")
+    def check_backend_api_key(agent_id: str) -> dict:
+        """检查指定后端的 API Key 连通性。"""
+        if agent_id not in list_backends():
+            raise HTTPException(status_code=400, detail=f"未知后端: {agent_id}")
+        try:
+            backend = get_backend(agent_id)
+            result = backend.check_api_key()
+            return {"agent_id": agent_id, **result}
+        except Exception as e:
+            return {
+                "agent_id": agent_id,
+                "ok": False,
+                "status": "error",
+                "message": f"检查失败：{str(e)[:200]}",
+                "latency_ms": None,
+            }
+
+    @app.post("/api/backends/check-api-keys")
+    def check_backend_api_keys(payload: dict = Body(...)) -> dict:
+        """批量检查多个后端的 API Key 连通性。"""
+        agent_ids = payload.get("agent_ids", [])
+        results = {}
+        for agent_id in agent_ids:
+            if agent_id not in list_backends():
+                results[agent_id] = {
+                    "ok": False,
+                    "status": "error",
+                    "message": f"未知后端: {agent_id}",
+                    "latency_ms": None,
+                }
+                continue
+            try:
+                backend = get_backend(agent_id)
+                result = backend.check_api_key()
+                results[agent_id] = result
+            except Exception as e:
+                results[agent_id] = {
+                    "ok": False,
+                    "status": "error",
+                    "message": f"检查失败：{str(e)[:200]}",
+                    "latency_ms": None,
+                }
+        return {"results": results}
 
     # ---------- 运行 ----------
     @app.post("/api/runs")

@@ -483,3 +483,60 @@ class DeepseekHarnessBackend(Backend):
             stdout=(out or "").strip(),
             error="" if ok else f"dsh 退出码 {rc}：{(err or out or '')[-300:]}",
         )
+
+    def check_api_key(self) -> dict:
+        """检查 DeepSeek API Key 连通性：直接调用 DeepSeek OpenAI 兼容接口。"""
+        import time as _time
+
+        if not self.api_key:
+            return {
+                "ok": False,
+                "status": "missing",
+                "message": "未配置 DEEPSEEK_API_KEY / LLM_API_KEY 环境变量",
+                "latency_ms": None,
+            }
+        if not self.cmd:
+            return {
+                "ok": False,
+                "status": "error",
+                "message": "未找到 dsh 命令，请先安装：npm install -g @deepseek-ai/dsh",
+                "latency_ms": None,
+            }
+        start = _time.time()
+        try:
+            import openai
+            client = openai.OpenAI(
+                api_key=self.api_key,
+                base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
+            )
+            resp = client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": "hi"}],
+                temperature=0,
+                max_tokens=1,
+            )
+            latency_ms = round((_time.time() - start) * 1000, 1)
+            return {
+                "ok": True,
+                "status": "ok",
+                "message": f"API Key 有效，模型 {self.model} 响应正常（{latency_ms}ms）",
+                "latency_ms": latency_ms,
+            }
+        except Exception as e:
+            latency_ms = round((_time.time() - start) * 1000, 1)
+            err_msg = str(e)
+            if "401" in err_msg or "Authentication" in err_msg:
+                status = "invalid"
+                message = f"API Key 无效（401 Authentication Error）：{err_msg[:200]}"
+            elif "429" in err_msg or "rate" in err_msg.lower():
+                status = "rate_limited"
+                message = f"API 限流（429）：{err_msg[:200]}"
+            else:
+                status = "error"
+                message = f"API 调用失败：{err_msg[:200]}"
+            return {
+                "ok": False,
+                "status": status,
+                "message": message,
+                "latency_ms": latency_ms,
+            }

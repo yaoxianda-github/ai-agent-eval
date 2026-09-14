@@ -38,3 +38,19 @@ class Backend(ABC):
     @abstractmethod
     def run(self, task, workspace: Path) -> BackendResult:
         """在 workspace 内执行任务，返回结果与轨迹。"""
+
+    def check_api_key(self) -> dict:
+        """检查 API Key 连通性。
+
+        返回 dict:
+        - ok: bool，是否通过
+        - status: str，状态描述（ok / missing / invalid / error / unsupported）
+        - message: str，详细信息
+        - latency_ms: float | None，测试耗时（毫秒）
+        """
+        return {
+            "ok": False,
+            "status": "unsupported",
+            "message": f"{self.name} 后端暂不支持 API Key 连通性检查",
+            "latency_ms": None,
+        }

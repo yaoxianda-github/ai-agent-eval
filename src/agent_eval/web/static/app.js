@@ -1934,6 +1934,64 @@
     var scope = el("mx-scope").value;
     var runs = Math.max(1, Math.min(10, parseInt(el("mx-runs").value || "1", 10)));
     var btn = el("mx-start");
+
+    // 清除之前的错误提示
+    var warnEl = document.getElementById("mx-api-warn");
+    if (warnEl) warnEl.remove();
+
+    // 先检查所有选中 Agent 的 API Key 连通性
+    btn.disabled = true; btn.textContent = "检查 API Key…";
+    api("/api/backends/check-api-keys", { method: "POST", body: { agent_ids: agents } })
+      .then(function (resp) {
+        var results = resp.results || {};
+        var failed = [];
+        var warnings = [];
+        agents.forEach(function (aid) {
+          var r = results[aid];
+          if (!r || !r.ok) {
+            failed.push({ agent: aid, result: r || { status: "error", message: "检查失败" } });
+          } else if (r.status === "rate_limited") {
+            warnings.push({ agent: aid, result: r });
+          }
+        });
+
+        if (failed.length > 0) {
+          btn.disabled = false; btn.textContent = "开始对比";
+          // 在页面上显示错误提示，而不是用 confirm 弹窗
+          var warnHtml = '<div class="mx-api-warn" id="mx-api-warn">' +
+            '<div class="mx-api-warn-title">⚠️ 以下 Agent 的 API Key 检查未通过，继续执行将全部失败：</div>' +
+            '<ul class="mx-api-warn-list">';
+          failed.forEach(function (f) {
+            warnHtml += '<li><strong>' + esc(f.agent) + '</strong>：' +
+              esc((f.result.message || f.result.status || '').substring(0, 150)) + '</li>';
+          });
+          warnHtml += '</ul>' +
+            '<div class="mx-api-warn-actions">' +
+            '<button class="btn btn-primary" id="mx-force-start">仍要继续（不推荐）</button>' +
+            '<button class="btn" id="mx-cancel-start">取消</button>' +
+            '</div></div>';
+          btn.insertAdjacentHTML("afterend", warnHtml);
+
+          document.getElementById("mx-force-start").onclick = function () {
+            document.getElementById("mx-api-warn").remove();
+            doStartBatch(agents, scope, runs, btn);
+          };
+          document.getElementById("mx-cancel-start").onclick = function () {
+            document.getElementById("mx-api-warn").remove();
+          };
+          return;
+        }
+
+        // API Key 检查通过，发起对比
+        doStartBatch(agents, scope, runs, btn);
+      })
+      .catch(function (e) {
+        btn.disabled = false; btn.textContent = "开始对比";
+        alert("API Key 检查失败：" + e.message);
+      });
+  }
+
+  function doStartBatch(agents, scope, runs, btn) {
     btn.disabled = true; btn.textContent = "已提交…";
     api("/api/batches", { method: "POST", body: { agents: agents, scope: scope, runs: runs } })
       .then(function (r) {

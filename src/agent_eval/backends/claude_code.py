@@ -572,3 +572,56 @@ class ClaudeCodeBackend(Backend):
             )
         finally:
             shutil.rmtree(tmp_home, ignore_errors=True)
+
+    def check_api_key(self) -> dict:
+        """检查 Anthropic API Key 连通性：直接调用 Anthropic Messages API。"""
+        import time as _time
+
+        if not self.api_key:
+            return {
+                "ok": False,
+                "status": "missing",
+                "message": "未配置 ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN 环境变量",
+                "latency_ms": None,
+            }
+        if not self.cmd:
+            return {
+                "ok": False,
+                "status": "error",
+                "message": "未找到 claude 命令，请先安装：npm install -g @anthropic-ai/claude-code",
+                "latency_ms": None,
+            }
+        start = _time.time()
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=self.api_key)
+            resp = client.messages.create(
+                model=self.model,
+                max_tokens=1,
+                messages=[{"role": "user", "content": "hi"}],
+            )
+            latency_ms = round((_time.time() - start) * 1000, 1)
+            return {
+                "ok": True,
+                "status": "ok",
+                "message": f"API Key 有效，模型 {self.model} 响应正常（{latency_ms}ms）",
+                "latency_ms": latency_ms,
+            }
+        except Exception as e:
+            latency_ms = round((_time.time() - start) * 1000, 1)
+            err_msg = str(e)
+            if "401" in err_msg or "Authentication" in err_msg or "invalid_api_key" in err_msg:
+                status = "invalid"
+                message = f"API Key 无效（401 Authentication Error）：{err_msg[:200]}"
+            elif "429" in err_msg or "rate" in err_msg.lower():
+                status = "rate_limited"
+                message = f"API 限流（429）：{err_msg[:200]}"
+            else:
+                status = "error"
+                message = f"API 调用失败：{err_msg[:200]}"
+            return {
+                "ok": False,
+                "status": status,
+                "message": message,
+                "latency_ms": latency_ms,
+            }
