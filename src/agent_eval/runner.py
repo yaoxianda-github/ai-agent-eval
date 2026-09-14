@@ -79,6 +79,7 @@ class RunRecord:
     error: str = ""
     workspace: str = ""
     forbidden_tool_calls: list[dict] = field(default_factory=list)  # V3.8 P1：调用了禁止工具的记录（危险工具调用）
+    skill_results: list[dict] = field(default_factory=list)  # V3.8 P2：Skill 触发统计结果（Tool vs Skill 分层评估）
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -349,6 +350,51 @@ def run_one(
                         "args": t.get("args"),
                     })
 
+        # V3.8 P2：Skill 触发统计（Tool vs Skill 分层评估）
+        # 从 traces 提取工具调用序列，匹配 spec 中定义的 skills
+        skill_results: list[dict] = []
+        if task.skills:
+            # 提取运行中的工具调用序列（按时间排序，排除 intent/llm/finish）
+            run_tool_seq = []
+            for t in traces:
+                tool_name = t.get("tool") or t.get("action") or ""
+                if tool_name and tool_name != "finish" and t.get("kind") != "intent" and t.get("kind") != "llm":
+                    run_tool_seq.append(tool_name)
+            run_tool_set = set(run_tool_seq)
+
+            for skill in task.skills:
+                expected_tools = skill.tools or []
+                if not expected_tools:
+                    continue
+                # 子工具完整率：调用了多少个预期子工具
+                called_subtools = [t for t in expected_tools if t in run_tool_set]
+                completeness = len(called_subtools) / len(expected_tools) if expected_tools else 0.0
+                # 是否被触发（所有子工具都被调用）
+                triggered = completeness >= 1.0
+                # 顺序是否正确（按预期顺序出现）
+                order_correct = True
+                if skill.expected_order and triggered:
+                    # 检查预期工具序列是否按顺序出现在运行序列中
+                    idx = 0
+                    for rt in run_tool_seq:
+                        if idx < len(expected_tools) and rt == expected_tools[idx]:
+                            idx += 1
+                    order_correct = idx == len(expected_tools)
+                elif not triggered:
+                    order_correct = False
+
+                skill_results.append({
+                    "id": skill.id,
+                    "name": skill.name,
+                    "desc": skill.desc,
+                    "expected_tools": expected_tools,
+                    "called_subtools": called_subtools,
+                    "completeness": round(completeness, 2),
+                    "triggered": triggered,
+                    "order_correct": order_correct,
+                    "expected_order": skill.expected_order,
+                })
+
         record = RunRecord(
             run_id=run_id,
             agent_id=agent_id,
@@ -364,6 +410,7 @@ def run_one(
             error=result.error or "",
             workspace=_rel_or_abs(workspace) if keep_workspace else "",
             forbidden_tool_calls=forbidden_tool_calls,
+            skill_results=skill_results,
         )
 
         # 计算评测置信度（V3.0）

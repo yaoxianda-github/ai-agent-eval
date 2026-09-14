@@ -47,3 +47,11 @@ weight: 1.0
 cost_budget_usd: 0.1
 timeout_s: 300
 forbidden_tools: [list_dir]  # V3.8 P1：禁止调用 list_dir（测试危险工具调用红线）
+
+# V3.8 P2：Skill 定义（多个 Tool 编排封装的能力包）
+skills:
+  - id: s1
+    name: 批量文件修改
+    desc: 查看目录→读取文件→写入修改的典型文件处理技能
+    tools: [list_dir, read_file, write_file]
+    expected_order: true

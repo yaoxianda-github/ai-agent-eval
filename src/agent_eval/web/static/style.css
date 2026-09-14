@@ -538,6 +538,22 @@ table.matrix th { position: sticky; top: 0; z-index: 1; }
 .five-dim-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
 .five-dim-note { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
 
+/* ---------- Skill 层评估（V3.8 P2 Tool vs Skill 分层） ---------- */
+.skill-summary { display: flex; gap: 12px; margin: 8px 0; }
+.skill-stat { flex: 1; background: var(--bg-secondary); border-radius: 8px; padding: 10px; text-align: center; border: 1px solid var(--border-light); }
+.skill-stat b { display: block; font-size: 18px; font-family: var(--font-mono); color: var(--text-primary); }
+.skill-stat span { font-size: 11px; color: var(--text-muted); }
+.skill-list { margin-top: 8px; }
+.skill-row { background: var(--bg-secondary); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; border: 1px solid var(--border-light); }
+.skill-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.skill-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.skill-status { font-size: 12px; font-weight: 600; }
+.skill-tools { font-size: 11px; color: var(--text-muted); margin: 3px 0; line-height: 1.6; }
+.skill-label { color: var(--text-secondary); font-weight: 500; }
+.skill-tool { display: inline-block; background: var(--bg-tertiary); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-family: var(--font-mono); color: var(--text-secondary); margin: 0 2px; }
+.skill-tool-called { background: rgba(22,163,74,0.1); color: #16a34a; }
+.skill-meta { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+
 /* ---------- 8 维度能力雷达图 ---------- */
 .radar-wrap { text-align: center; }
 .radar-detail {

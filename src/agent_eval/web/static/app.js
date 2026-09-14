@@ -1449,6 +1449,43 @@
       }).join("") +
       '</div>';
 
+    // V3.8 P2：Tool vs Skill 分层评估——Skill 层（组合编排准确率）
+    var skillResults = run.skill_results || [];
+    var skillHtml = "";
+    if (skillResults.length > 0) {
+      var triggeredCount = skillResults.filter(function(s){return s.triggered;}).length;
+      var orderCorrectCount = skillResults.filter(function(s){return s.order_correct;}).length;
+      var avgCompleteness = skillResults.length ? Math.round(skillResults.reduce(function(sum,s){return sum + (s.completeness||0);},0) / skillResults.length * 100) : 0;
+      var skillRows = skillResults.map(function(s) {
+        var statusColor = s.triggered ? (s.order_correct ? "#16a34a" : "#f59e0b") : "#dc2626";
+        var statusText = s.triggered ? (s.order_correct ? "✓ 触发且顺序正确" : "⚠ 触发但顺序错误") : "✗ 未触发";
+        var completenessPct = Math.round((s.completeness||0) * 100);
+        return '<div class="skill-row">' +
+          '<div class="skill-head">' +
+            '<span class="skill-name">' + esc(s.name) + '</span>' +
+            '<span class="skill-status" style="color:' + statusColor + ';">' + statusText + '</span>' +
+          '</div>' +
+          '<div class="skill-tools">' +
+            '<span class="skill-label">预期工具:</span> ' +
+            s.expected_tools.map(function(t){return '<code class="skill-tool">' + esc(t) + '</code>';}).join(" → ") +
+          '</div>' +
+          '<div class="skill-tools">' +
+            '<span class="skill-label">实际调用:</span> ' +
+            (s.called_subtools.length ? s.called_subtools.map(function(t){return '<code class="skill-tool skill-tool-called">' + esc(t) + '</code>';}).join(" → ") : '<span class="muted">无</span>') +
+          '</div>' +
+          '<div class="skill-meta">子工具完整率 ' + completenessPct + '% · 预期顺序 ' + (s.expected_order ? "严格" : "宽松") + '</div>' +
+        '</div>';
+      }).join("");
+      skillHtml =
+        '<div class="ea-subtitle" style="margin-top:14px;">Skill 层评估（组合编排） <span class="cap-hint" title="基于 AI评测方法论⑤：Skill 是多个 Tool 编排封装的能力包，测的是组合对不对（触发率/顺序正确率/子工具完整率），与 Tool 层单步准确率区分。">ⓘ 判定逻辑</span></div>' +
+        '<div class="skill-summary">' +
+          '<div class="skill-stat"><b>' + triggeredCount + '/' + skillResults.length + '</b><span>技能触发</span></div>' +
+          '<div class="skill-stat"><b>' + orderCorrectCount + '/' + skillResults.length + '</b><span>顺序正确</span></div>' +
+          '<div class="skill-stat"><b>' + avgCompleteness + '%</b><span>平均完整率</span></div>' +
+        '</div>' +
+        '<div class="skill-list">' + skillRows + '</div>';
+    }
+
     // 工具分布条形图
     var toolRows = [];
     var toolKeys = Object.keys(toolDist).sort(function(a, b) { return toolDist[b] - toolDist[a]; });
@@ -1495,6 +1532,7 @@
               '<div class="ea-q-detail">总调用 ' + toolCalls + ' 次 · 失败 ' + toolFailures + ' 次 · 重试 ' + toolRetries + ' 次 · 参数错误 ' + paramErrors + ' 次</div>' +
             '</div>' +
             fiveDimHtml +
+            skillHtml +
           '</div>' +
         '</div>' +
       '</div>'

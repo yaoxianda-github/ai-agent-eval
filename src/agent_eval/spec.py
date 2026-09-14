@@ -67,6 +67,20 @@ class Checkpoint:
 
 
 @dataclass
+class SkillSpec:
+    """V3.8 P2：Skill 定义——多个 Tool 编排封装的能力包。
+
+    与 Tool（最小原子能力）区分：Skill 测的是组合对不对（编排顺序、子工具完整性），
+    Tool 测的是单步准不准（选择/参数/格式/结果使用/边界）。
+    """
+    id: str
+    name: str
+    desc: str = ""
+    tools: list[str] = field(default_factory=list)  # 该技能包含的工具调用序列（有序）
+    expected_order: bool = True  # 是否要求严格按顺序调用
+
+
+@dataclass
 class TaskSpec:
     id: str
     title: str
@@ -85,6 +99,7 @@ class TaskSpec:
     mcp_servers: list[dict] = field(default_factory=list)  # M2：任务声明的 MCP server 列表（stdio 模式）
     tier: str = ""  # V3.1：数据集分层（golden/boundary/regression/random）
     forbidden_tools: list[str] = field(default_factory=list)  # V3.8 P1：禁止调用的危险工具列表（调用即触发红线）
+    skills: list[SkillSpec] = field(default_factory=list)  # V3.8 P2：Skill 定义（多个 Tool 编排封装的能力包）
     spec_path: Optional[Path] = None
 
     @classmethod
@@ -122,6 +137,16 @@ class TaskSpec:
             mcp_servers=list(data.get("mcp_servers", [])),
             tier=str(data.get("tier", "")),
             forbidden_tools=list(data.get("forbidden_tools", [])),
+            skills=[
+                SkillSpec(
+                    id=s.get("id", ""),
+                    name=s.get("name", ""),
+                    desc=s.get("desc", ""),
+                    tools=list(s.get("tools", [])),
+                    expected_order=s.get("expected_order", True),
+                )
+                for s in data.get("skills", [])
+            ],
             spec_path=path,
         )
         errors = spec.validate()
