@@ -1067,18 +1067,65 @@
             '<span style="font-size:12px;color:#6b7280;">' + passCount + '/' + items.length + ' 通过</span>' +
           "</div>";
         items.forEach(function (vd) {
+          var dimHtml = "";
+          // V3.7：llm_judge 多维度评分展示
+          if (vd.type === "llm_judge" && vd.dimensions) {
+            var DIM_LABELS = {
+              correctness: "正确性", usefulness: "有用性", completeness: "完整性",
+              efficiency: "效率", safety: "安全性"
+            };
+            dimHtml = '<div style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;">';
+            Object.keys(DIM_LABELS).forEach(function (dk) {
+              var dv = vd.dimensions[dk] || 0;
+              var pct = Math.round(dv * 100);
+              var barColor = pct >= 70 ? "#16a34a" : (pct >= 40 ? "#f59e0b" : "#dc2626");
+              dimHtml += '<div style="font-size:11px;">' +
+                '<div style="display:flex;justify-content:space-between;margin-bottom:2px;">' +
+                  '<span style="color:#4b5563;">' + DIM_LABELS[dk] + '</span>' +
+                  '<span style="color:' + barColor + ';font-weight:600;">' + pct + '</span>' +
+                "</div>" +
+                '<div style="height:4px;background:#e5e7eb;border-radius:2px;overflow:hidden;">' +
+                  '<div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:2px;"></div>' +
+                "</div>" +
+              "</div>";
+            });
+            dimHtml += "</div>";
+          }
           vRows += '<div class="verdict-item"><span class="badge ' + (vd.passed ? "pass" : "fail") + '">' +
             (vd.passed ? "PASS" : "FAIL") + "</span> <b>" + esc(vd.id) + "</b> · " + esc(vd.type) +
-            " · " + esc(vd.detail) + "</div>";
+            " · " + esc(vd.detail) + dimHtml + "</div>";
         });
         vRows += "</div>";
       });
       // 如果没有任何阶段分组（旧数据），回退到平铺展示
       if (!vRows) {
         vRows = v.map(function (vd) {
+          var dimHtml = "";
+          if (vd.type === "llm_judge" && vd.dimensions) {
+            var DIM_LABELS2 = {
+              correctness: "正确性", usefulness: "有用性", completeness: "完整性",
+              efficiency: "效率", safety: "安全性"
+            };
+            dimHtml = '<div style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;">';
+            Object.keys(DIM_LABELS2).forEach(function (dk) {
+              var dv = vd.dimensions[dk] || 0;
+              var pct = Math.round(dv * 100);
+              var barColor = pct >= 70 ? "#16a34a" : (pct >= 40 ? "#f59e0b" : "#dc2626");
+              dimHtml += '<div style="font-size:11px;">' +
+                '<div style="display:flex;justify-content:space-between;margin-bottom:2px;">' +
+                  '<span style="color:#4b5563;">' + DIM_LABELS2[dk] + '</span>' +
+                  '<span style="color:' + barColor + ';font-weight:600;">' + pct + '</span>' +
+                "</div>" +
+                '<div style="height:4px;background:#e5e7eb;border-radius:2px;overflow:hidden;">' +
+                  '<div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:2px;"></div>' +
+                "</div>" +
+              "</div>";
+            });
+            dimHtml += "</div>";
+          }
           return '<div class="verdict-item"><span class="badge ' + (vd.passed ? "pass" : "fail") + '">' +
             (vd.passed ? "PASS" : "FAIL") + "</span> <b>" + esc(vd.id) + "</b> · " + esc(vd.type) +
-            " · " + esc(vd.detail) + "</div>";
+            " · " + esc(vd.detail) + dimHtml + "</div>";
         }).join("");
       }
       var steps = (r.steps || []).map(function (s, i) {

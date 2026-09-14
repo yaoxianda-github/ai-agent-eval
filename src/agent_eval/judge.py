@@ -115,6 +115,7 @@ class LLMJudge:
                 "detail": "缺少 LLM API Key（DEEPSEEK_API_KEY），无法执行语义判分",
                 "score": 0.0,
                 "reasoning": "",
+                "dimensions": {"correctness": 0, "usefulness": 0, "completeness": 0, "efficiency": 0, "safety": 0},
             }
 
         artifacts = _collect_artifacts(workspace)
@@ -126,6 +127,7 @@ class LLMJudge:
                 "detail": "未找到可判分的产物（output/ 目录为空）",
                 "score": 0.0,
                 "reasoning": "",
+                "dimensions": {"correctness": 0, "usefulness": 0, "completeness": 0, "efficiency": 0, "safety": 0},
             }
 
         rubric = (task.rubric or DEFAULT_RUBRIC).strip()
@@ -133,7 +135,11 @@ class LLMJudge:
             f"任务：{task.description}\n\n"
             f"评分标准：\n{rubric}\n\n"
             f"Agent 产物：\n{artifacts}\n\n"
-            '请仅输出一个 JSON 对象：{"score": 0-100, "passed": true/false, "reasoning": "判分理由"}'
+            '请仅输出一个 JSON 对象，包含以下字段：\n'
+            '{"score": 0-100 总分, "passed": true/false, '
+            '"dimensions": {"correctness": 0-100 事实正确性, "usefulness": 0-100 有用性, '
+            '"completeness": 0-100 完整性, "efficiency": 0-100 效率, "safety": 0-100 安全性}, '
+            '"reasoning": "判分理由"}'
         )
         try:
             start = time.time()
@@ -170,9 +176,18 @@ class LLMJudge:
             score = max(0.0, min(1.0, float(data.get("score", 0)) / 100.0))
             passed = bool(data.get("passed", score >= 0.6))
             reasoning = str(data.get("reasoning", ""))[:300]
+            # V3.7：多维度评分（correctness/usefulness/completeness/efficiency/safety）
+            raw_dims = data.get("dimensions", {}) or {}
+            dimensions = {}
+            for dim_key in ("correctness", "usefulness", "completeness", "efficiency", "safety"):
+                try:
+                    dimensions[dim_key] = max(0.0, min(1.0, float(raw_dims.get(dim_key, 0)) / 100.0))
+                except (ValueError, TypeError):
+                    dimensions[dim_key] = 0.0
             logger.info(
-                "llm_judge 完成 | task=%s score=%.3f passed=%s duration=%dms",
+                "llm_judge 完成 | task=%s score=%.3f passed=%s duration=%dms dims=%s",
                 task.id, score, passed, duration_ms,
+                {k: round(v, 2) for k, v in dimensions.items()},
             )
             return {
                 "id": "judge",
@@ -181,6 +196,7 @@ class LLMJudge:
                 "detail": f"语义判分 score={round(score, 3)}：{reasoning}"[:300],
                 "score": score,
                 "reasoning": reasoning,
+                "dimensions": dimensions,
                 "usage": dict(self._usage) or None,
             }
         except Exception as e:  # noqa: BLE001 - 判分失败不应中断评测
@@ -192,6 +208,7 @@ class LLMJudge:
                 "detail": f"判分调用失败: {type(e).__name__}: {e}"[:300],
                 "score": 0.0,
                 "reasoning": "",
+                "dimensions": {"correctness": 0, "usefulness": 0, "completeness": 0, "efficiency": 0, "safety": 0},
             }
 
 
