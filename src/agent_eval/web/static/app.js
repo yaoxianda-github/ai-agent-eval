@@ -2538,6 +2538,9 @@
   // ---------- 视图：设置 ----------
   function viewSettings() {
     loadMeta().then(function () {
+      var projectRoot = (meta.tasks_dir || "").replace(/\/tasks$/, "");
+      var envPath = projectRoot ? projectRoot + "/.env" : ".env";
+      var envTooltip = "配置写入项目根目录 .env 文件（完整路径：" + envPath + "），已在 .gitignore 中排除。保存后需重启服务生效。";
       renderHTML(
         '<h2 class="page-title">设置</h2>' +
         '<div class="card"><h3>目录与版本</h3>' +
@@ -2545,7 +2548,7 @@
           "<tr><td>任务目录 tasks_dir</td><td>" + esc(meta.tasks_dir) + "</td></tr>" +
           "<tr><td>结果目录 results_dir</td><td>" + esc(meta.results_dir) + "</td></tr>" +
           "<tr><td>报告目录 report_dir</td><td>" + esc(meta.report_dir) + "</td></tr></table></div>" +
-        '<div class="card"><h3>API Key 快速配置 <span class="info-icon" title="配置写入项目根目录 .env 文件（已在 .gitignore 中排除）。保存后需重启服务生效。">ⓘ</span></h3>' +
+        '<div class="card"><h3>API Key 快速配置 <span class="info-icon" title="' + esc(envTooltip) + '">ⓘ</span></h3>' +
           '<div id="env-config-list"><div class="empty">加载中...</div></div>' +
           '<div style="margin-top:16px;display:flex;gap:8px;align-items:center;">' +
             '<button class="btn" id="btn-save-env">保存配置</button>' +
