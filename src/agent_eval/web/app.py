@@ -810,6 +810,32 @@ def create_app(
         rec = _load_run(run_id)
         return {**rec, "running": False}
 
+    # V3.7 P2：人工抽检——保存人工复核结果到 run.json
+    @app.post("/api/runs/{run_id}/human-review")
+    def save_human_review(run_id: str, payload: dict) -> dict:
+        """保存人工复核结果。
+
+        请求体: {"score": 0-1, "passed": true/false, "notes": "备注", "reviewer": "复核人"}
+        保存到 run.json 的 human_review 字段。
+        """
+        p = results_dir / run_id / "run.json"
+        if not p.exists():
+            raise HTTPException(status_code=404, detail=f"run {run_id} not found")
+        try:
+            rec = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            raise HTTPException(status_code=500, detail=f"读取 run.json 失败: {e}")
+        review = {
+            "score": float(payload.get("score", 0.0)),
+            "passed": bool(payload.get("passed", False)),
+            "notes": str(payload.get("notes", ""))[:500],
+            "reviewer": str(payload.get("reviewer", ""))[:50],
+            "reviewed_at": datetime.now().isoformat(),
+        }
+        rec["human_review"] = review
+        p.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"ok": True, "human_review": review}
+
     @app.get("/api/runs")
     def list_run_history(
         limit: int = Query(20, ge=1, le=500),
@@ -830,6 +856,8 @@ def create_app(
             r["tokens"] = None
             r["confidence_score"] = None
             r["confidence_level"] = None
+            r["human_reviewed"] = False
+            r["human_review_passed"] = None
             p = results_dir / r["run_id"] / "run.json"
             if p.exists():
                 try:
@@ -849,6 +877,11 @@ def create_app(
                     if conf:
                         r["confidence_score"] = conf.get("score")
                         r["confidence_level"] = conf.get("level")
+                    # 人工复核状态（V3.7 P2）
+                    hr = d.get("human_review")
+                    if hr:
+                        r["human_reviewed"] = True
+                        r["human_review_passed"] = hr.get("passed")
                 except Exception:  # noqa: BLE001
                     pass
         return {"runs": runs, "total": total, "limit": limit, "offset": offset}

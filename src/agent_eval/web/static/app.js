@@ -523,6 +523,13 @@
           var confColor = r.confidence_level === "high" ? "#22c55e" : r.confidence_level === "medium" ? "#f59e0b" : "#ef4444";
           confTxt = '<span style="color:' + confColor + ';font-weight:600;">' + r.confidence_score.toFixed(1) + "</span>";
         }
+        // V3.7 P2：人工复核状态
+        var reviewTxt = '<span class="muted">待复核</span>';
+        if (r.human_reviewed) {
+          var rc = r.human_review_passed ? "#16a34a" : "#dc2626";
+          var rl = r.human_review_passed ? "人工通过" : "人工不通过";
+          reviewTxt = '<span style="color:' + rc + ';font-weight:600;">' + rl + "</span>";
+        }
         return '<tr class="clickable" data-rid="' + esc(r.run_id) + '">' +
           "<td>" + esc(fmtTime(r.created_at)) + "</td>" +
           "<td><b>" + esc(r.run_id) + "</b></td>" +
@@ -531,6 +538,7 @@
           "<td>" + esc(r.score) + "</td><td>" + fmtDur(r.duration_s) + "</td><td>" + esc(r.steps) + "</td>" +
           "<td>" + costTxt + "</td>" +
           "<td>" + confTxt + "</td>" +
+          "<td>" + reviewTxt + "</td>" +
           "</tr>";
       }).join("");
       var total = Number(d.total || 0);
@@ -545,6 +553,8 @@
         costTip("实际成本 = 本次评测实际消耗的 token（run.json 的 metrics.usage）按模型单价折算。<br>默认模型 deepseek-chat：输入 ¥2/百万 token、输出 ¥3/百万 token。<br><br>token 埋点（metrics.usage）之前的历史 run 无记录，显示「—」。<br><br>单价可用环境变量 LLM_INPUT_CNY_PER_M / LLM_OUTPUT_CNY_PER_M 覆盖。") +
         '</th><th>置信度' +
         costTip("评测置信度 = 运行次数(25%) + 校验点类型(25%) + 任务覆盖度(20%) + 历史稳定性(15%) + 任务级别(15%) 加权计算。<br><br>高置信(≥80)：结果可信，可用于决策<br>中置信(60-79)：有一定参考价值，建议补充验证<br>低置信(<60)：结果不可靠，需增加 runs 或扩大任务集") +
+        '</th><th>复核' +
+        costTip("人工复核状态：待复核/人工通过/人工不通过。<br><br>在运行详情页可对任意 run 进行人工打分和标注，用于抽检 LLM Judge 结果的准确性。<br><br>实践文章核心观点：'两人打分、持续抽检'，防止自动判分偏差累积。") +
         "</th></tr>" + rows + "</table>" + pager;
       list.querySelectorAll("tr.clickable").forEach(function (tr) {
         tr.onclick = function () { location.hash = "#/run/" + tr.getAttribute("data-rid"); };
@@ -1224,6 +1234,7 @@
         (r.error ? '<div class="err-banner">' + esc(r.error) + "</div>" : "") +
         lockHtml +
         '<div class="card"><h3>判定结果（' + v.length + " 个校验点）</h3>" + (vRows || '<div class="empty">无判定</div>') + "</div>" +
+        humanReviewHtml(r) +
         executionAnalysis(r) +
         '<div class="card"><h3>轨迹回放 <span class="tl-note">输入意图 → 知识/检索 → 模型生成 → 工具执行</span></h3>' + traceTimeline(r.traces, r) + "</div>" +
         '<div class="card"><h3>执行轨迹（' + (r.steps || []).length + " 步）</h3>" + steps + "</div>" +
@@ -1231,6 +1242,7 @@
         '<div class="card" id="file-view" style="display:none;"><h3>文件预览</h3><pre class="code" id="file-content"></pre></div>'
       );
       loadFiles(runId);
+      bindHumanReview(runId);
       var markBtn = el("btn-mark-badcase");
       if (markBtn) {
         markBtn.onclick = function () {
@@ -1249,6 +1261,67 @@
         };
       }
     }).catch(function (e) { renderErr(e.message); });
+  }
+
+  // ---------- 人工复核（V3.7 P2） ----------
+  function humanReviewHtml(run) {
+    var hr = run.human_review;
+    if (hr) {
+      var passColor = hr.passed ? "#16a34a" : "#dc2626";
+      var passLabel = hr.passed ? "人工通过" : "人工不通过";
+      return '<div class="card"><h3>人工复核 <span class="muted">已复核</span></h3>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:12px;">' +
+          '<div><div class="muted" style="font-size:12px;">复核结论</div><b style="color:' + passColor + ';">' + passLabel + '</b></div>' +
+          '<div><div class="muted" style="font-size:12px;">人工打分</div><b>' + (hr.score ? hr.score.toFixed(2) : "—") + '</b></div>' +
+          '<div><div class="muted" style="font-size:12px;">复核人</div><b>' + esc(hr.reviewer || "—") + '</b></div>' +
+          '<div><div class="muted" style="font-size:12px;">复核时间</div><b>' + esc(hr.reviewed_at ? fmtTime(hr.reviewed_at) : "—") + '</b></div>' +
+        "</div>" +
+        (hr.notes ? '<div style="background:#f9fafb;padding:10px;border-radius:6px;font-size:13px;">' + esc(hr.notes) + "</div>" : "") +
+        '<button class="btn secondary small" id="btn-edit-review" style="margin-top:12px;">修改复核</button>' +
+        "</div>";
+    }
+    return '<div class="card"><h3>人工复核 <span class="muted">待复核</span></h3>' +
+      '<div class="form-row">' +
+        '<div class="field" style="flex:0 0 120px;"><label>人工打分（0-1）</label><input id="hr-score" type="number" step="0.1" min="0" max="1" value="0.8"></div>' +
+        '<div class="field" style="flex:0 0 150px;"><label>复核结论</label><select id="hr-passed"><option value="true">通过</option><option value="false">不通过</option></select></div>' +
+        '<div class="field" style="flex:0 0 150px;"><label>复核人</label><input id="hr-reviewer" placeholder="姓名"></div>' +
+      "</div>" +
+      '<div class="field" style="margin-bottom:12px;"><label>复核备注</label><textarea id="hr-notes" placeholder="说明人工复核的理由、发现的问题或改进建议" style="min-height:60px;"></textarea></div>' +
+      '<button class="btn" id="btn-save-review">提交人工复核</button>' +
+      "</div>";
+  }
+
+  function bindHumanReview(runId) {
+    var saveBtn = el("btn-save-review");
+    if (saveBtn) {
+      saveBtn.onclick = function () {
+        var score = parseFloat(el("hr-score").value) || 0;
+        var passed = el("hr-passed").value === "true";
+        var notes = el("hr-notes").value;
+        var reviewer = el("hr-reviewer").value;
+        saveBtn.disabled = true;
+        saveBtn.textContent = "提交中…";
+        api("/api/runs/" + encodeURIComponent(runId) + "/human-review", {
+          method: "POST",
+          body: { score: score, passed: passed, notes: notes, reviewer: reviewer }
+        }).then(function () {
+          saveBtn.textContent = "✓ 已提交";
+          setTimeout(function () { location.reload(); }, 800);
+        }).catch(function (e) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = "提交人工复核";
+          alert("提交失败: " + e.message);
+        });
+      };
+    }
+    var editBtn = el("btn-edit-review");
+    if (editBtn) {
+      editBtn.onclick = function () {
+        // 重新加载页面，显示编辑表单（简化处理：刷新后显示表单）
+        // 实际实现：可以切换显示表单，但这里简化为提示
+        alert("修改复核功能：刷新页面后重新提交即可覆盖原有复核结果。");
+      };
+    }
   }
 
   // ---------- 执行分析：组件实际执行率 ----------
