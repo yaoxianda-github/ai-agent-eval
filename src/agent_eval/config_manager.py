@@ -185,12 +185,43 @@ def apply_env_to_process() -> int:
     .env 文件优先级高于系统环境变量（会覆盖），方便用户通过 Web 设置页面修改配置，
     不用去改 ~/.zshrc 等系统级配置文件。
     只覆盖白名单内的变量，非空值才覆盖。
+    被覆盖的系统环境变量原始值会保存到 _system_env_backup，供 fallback 使用。
     返回加载/覆盖的变量数量。
     """
     env_file = read_env_file()
     count = 0
     for key, value in env_file.items():
         if key in ENV_WHITELIST and value:
+            # 保存被覆盖的系统环境变量原始值（只保存一次，避免重复覆盖）
+            if key not in _system_env_backup and key in os.environ:
+                _system_env_backup[key] = os.environ[key]
             os.environ[key] = value
             count += 1
     return count
+
+
+# 被 .env 覆盖的系统环境变量原始值，供 fallback 使用
+_system_env_backup: dict[str, str] = {}
+
+
+def get_fallback_env(key: str) -> str | None:
+    """获取被 .env 覆盖的系统环境变量原始值。
+
+    如果 .env 中的配置无效，可以用这个函数获取系统环境变量中的原始值作为 fallback。
+    """
+    return _system_env_backup.get(key)
+
+
+def resolve_env_with_fallback(key: str) -> tuple[str | None, str]:
+    """获取环境变量值，并返回来源。
+
+    优先级：当前进程环境（.env 覆盖后）> 系统环境变量备份（被覆盖前的原始值）
+    返回 (value, source)，source 为 "current" 或 "fallback" 或 "none"。
+    """
+    current = os.environ.get(key)
+    if current:
+        return current, "current"
+    fallback = _system_env_backup.get(key)
+    if fallback:
+        return fallback, "fallback"
+    return None, "none"

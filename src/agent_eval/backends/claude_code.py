@@ -417,9 +417,10 @@ class ClaudeCodeBackend(Backend):
         if fast_mode and self.model == self.FAST_MODEL:
             logger.info("claude-code 快速模式已启用：使用 %s（低成本高吞吐）", self.FAST_MODEL)
         # --bare 模式严格只认 ANTHROPIC_API_KEY；兼容 ANTHROPIC_AUTH_TOKEN 兜底
-        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get(
-            "ANTHROPIC_AUTH_TOKEN"
-        )
+        # API Key 解析：.env 配置优先，系统配置兜底（fallback）
+        resolved_key, key_source = self.resolve_api_key(["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"])
+        self.api_key = api_key or resolved_key
+        self._api_key_source = key_source if not api_key else "explicit"
         self.timeout_s = timeout_s
         self.cmd = cmd or _find_claude_cmd()
         self.allowed_tools = allowed_tools or _DEFAULT_ALLOWED_TOOLS
@@ -574,7 +575,11 @@ class ClaudeCodeBackend(Backend):
             shutil.rmtree(tmp_home, ignore_errors=True)
 
     def check_api_key(self) -> dict:
-        """检查 Anthropic API Key 连通性：直接调用 Anthropic Messages API。"""
+        """检查 Anthropic API Key 连通性：直接调用 Anthropic Messages API。
+
+        如果当前使用的 .env 配置 key 无效（401），自动尝试系统环境变量中的 fallback key，
+        如果 fallback key 有效，则自动切换到 fallback key。
+        """
         import time as _time
 
         if not self.api_key:
@@ -591,71 +596,77 @@ class ClaudeCodeBackend(Backend):
                 "message": "未找到 claude 命令，请先安装：npm install -g @anthropic-ai/claude-code",
                 "latency_ms": None,
             }
-        start = _time.time()
-        try:
+
+        def _test_key(key: str) -> tuple[bool, str, str, float]:
+            """测试单个 key，返回 (ok, status, message, latency_ms)。"""
             try:
-                import httpx as _httpx
-            except ImportError:
-                import httpx2 as _httpx
-            resp = _httpx.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": self.api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "max_tokens": 1,
-                    "messages": [{"role": "user", "content": "hi"}],
-                },
-                timeout=15,
-                verify=False,
-            )
-            latency_ms = round((_time.time() - start) * 1000, 1)
-            if resp.status_code == 200:
-                return {
-                    "ok": True,
-                    "status": "ok",
-                    "message": f"API Key 有效，模型 {self.model} 响应正常（{latency_ms}ms）",
-                    "latency_ms": latency_ms,
-                }
-            elif resp.status_code == 401:
-                return {
-                    "ok": False,
-                    "status": "invalid",
-                    "message": f"API Key 无效（401 Authentication Error）：{resp.text[:200]}",
-                    "latency_ms": latency_ms,
-                }
-            elif resp.status_code == 429:
-                return {
-                    "ok": False,
-                    "status": "rate_limited",
-                    "message": f"API 限流（429）：{resp.text[:200]}",
-                    "latency_ms": latency_ms,
-                }
-            else:
-                return {
-                    "ok": False,
-                    "status": "error",
-                    "message": f"API 调用失败（HTTP {resp.status_code}）：{resp.text[:200]}",
-                    "latency_ms": latency_ms,
-                }
-        except Exception as e:
-            latency_ms = round((_time.time() - start) * 1000, 1)
-            err_msg = str(e)
-            if "401" in err_msg or "Authentication" in err_msg or "invalid_api_key" in err_msg:
-                status = "invalid"
-                message = f"API Key 无效（401 Authentication Error）：{err_msg[:200]}"
-            elif "429" in err_msg or "rate" in err_msg.lower():
-                status = "rate_limited"
-                message = f"API 限流（429）：{err_msg[:200]}"
-            else:
-                status = "error"
-                message = f"API 调用失败：{err_msg[:200]}"
-            return {
-                "ok": False,
-                "status": status,
-                "message": message,
-                "latency_ms": latency_ms,
-            }
+                try:
+                    import httpx as _httpx
+                except ImportError:
+                    import httpx2 as _httpx
+                start = _time.time()
+                resp = _httpx.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "max_tokens": 1,
+                        "messages": [{"role": "user", "content": "hi"}],
+                    },
+                    timeout=15,
+                    verify=False,
+                )
+                latency_ms = round((_time.time() - start) * 1000, 1)
+                if resp.status_code == 200:
+                    return True, "ok", f"API Key 有效，模型 {self.model} 响应正常（{latency_ms}ms）", latency_ms
+                elif resp.status_code == 401:
+                    return False, "invalid", f"API Key 无效（401 Authentication Error）：{resp.text[:200]}", latency_ms
+                elif resp.status_code == 429:
+                    return False, "rate_limited", f"API 限流（429）：{resp.text[:200]}", latency_ms
+                else:
+                    return False, "error", f"API 调用失败（HTTP {resp.status_code}）：{resp.text[:200]}", latency_ms
+            except Exception as e:
+                latency_ms = round((_time.time() - start) * 1000, 1)
+                err_msg = str(e)
+                if "401" in err_msg or "Authentication" in err_msg or "invalid_api_key" in err_msg:
+                    return False, "invalid", f"API Key 无效（401 Authentication Error）：{err_msg[:200]}", latency_ms
+                elif "429" in err_msg or "rate" in err_msg.lower():
+                    return False, "rate_limited", f"API 限流（429）：{err_msg[:200]}", latency_ms
+                else:
+                    return False, "error", f"API 调用失败：{err_msg[:200]}", latency_ms
+
+        # 先测试当前 key
+        ok, status, message, latency_ms = _test_key(self.api_key)
+        if ok:
+            return {"ok": True, "status": status, "message": message, "latency_ms": latency_ms}
+
+        # 当前 key 失败且是 401 无效时，尝试 fallback
+        if status == "invalid":
+            from agent_eval.config_manager import get_fallback_env
+            fallback_key = get_fallback_env("ANTHROPIC_API_KEY") or get_fallback_env("ANTHROPIC_AUTH_TOKEN")
+            if fallback_key and fallback_key != self.api_key:
+                ok2, status2, message2, latency2 = _test_key(fallback_key)
+                if ok2:
+                    # fallback key 有效，自动切换
+                    self.api_key = fallback_key
+                    self._api_key_source = "fallback:ANTHROPIC_API_KEY"
+                    return {
+                        "ok": True,
+                        "status": "ok",
+                        "message": f".env 配置的 Key 无效，已自动切换到系统环境变量 Key（{latency2}ms）",
+                        "latency_ms": latency2,
+                        "switched_to_fallback": True,
+                    }
+                else:
+                    return {
+                        "ok": False,
+                        "status": "invalid",
+                        "message": f".env Key 无效，系统环境变量 Key 也无效：{message2}",
+                        "latency_ms": latency_ms,
+                    }
+
+        return {"ok": False, "status": status, "message": message, "latency_ms": latency_ms}
