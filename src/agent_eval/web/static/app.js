@@ -2140,9 +2140,9 @@
       buildHistorySelector(b.batch_id) +
       '<div class="card"><h3>对比结论 <span class="muted">' + esc(b.label) + " · runs=" + (b.runs || 1) +
         " · " + fmtTime(b.finished_at || b.created_at) + '</span></h3><div class="mx-concl">' + concl + "</div>" + confHtml + gateHtml + tierDistHtml + "</div>" +
-      '<div class="card"><h3>得分矩阵 <span class="muted">格内=最好成绩，颜色=通过率；点击单元格下钻每次运行</span></h3>' +
-        '<div class="matrix-scroll"><table class="matrix">' + head + rows + "</table></div>" +
-        '<div style="margin-top:12px;">' + exportBtn + "</div></div>" +
+      '<div class="card"><h3 class="card-title-with-action">得分矩阵 <span class="muted">格内=最好成绩，颜色=通过率；点击单元格下钻每次运行</span>' +
+        '<span class="card-action">' + exportBtn + '</span></h3>' +
+        '<div class="matrix-scroll"><table class="matrix">' + head + rows + "</table></div></div>" +
       '<div class="card totals-card"><h3>Agent 汇总</h3>' +
         '<table class="totals-table">' + totHead + totRows + "</table></div>" +
       '<div class="card mx-drill" id="mx-drill"><h3>单元格下钻</h3>' +

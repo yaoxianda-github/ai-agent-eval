@@ -369,6 +369,12 @@ pre.code {
   border: 1px solid var(--border); border-radius: 6px;
   font-size: 12px; background: var(--bg); cursor: pointer;
 }
+.card-title-with-action {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 10px;
+}
+.card-title-with-action .muted { flex: 1; }
+.card-action { flex-shrink: 0; }
 .agent-pick { 
   display: grid; 
   grid-template-columns: repeat(5, 1fr); 
