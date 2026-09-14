@@ -2136,8 +2136,8 @@
     }).join("");
 
     var exportBtn = canExport
-      ? '<button class="btn small" id="mx-export">导出 CSV</button>'
-      : '<button class="btn small secondary" disabled title="Pro 功能">导出 CSV 🔒</button> <span class="lock-tag">Pro 功能</span>';
+      ? '<button class="btn small" id="mx-export">导出</button>'
+      : '<button class="btn small secondary" disabled title="Pro 功能">导出 🔒</button> <span class="lock-tag">Pro 功能</span>';
 
     el("mx-result").innerHTML =
       buildHistorySelector(b.batch_id) +
@@ -2146,10 +2146,10 @@
       '<div class="card"><h3 class="card-title-with-action">得分矩阵 <span class="muted">格内=最好成绩，颜色=通过率；点击单元格下钻每次运行</span>' +
         '<span class="card-action">' + exportBtn + '</span></h3>' +
         '<div class="matrix-scroll"><table class="matrix">' + head + rows + "</table></div></div>" +
-      '<div class="card totals-card"><h3>Agent 汇总</h3>' +
-        '<table class="totals-table">' + totHead + totRows + "</table></div>" +
       '<div class="card mx-drill" id="mx-drill"><h3>单元格下钻</h3>' +
-        '<div class="muted">点击上方矩阵中的单元格，查看该 Agent 在该任务上的每次运行。</div></div>';
+        '<div class="muted">点击上方矩阵中的单元格，查看该 Agent 在该任务上的每次运行。</div></div>' +
+      '<div class="card totals-card"><h3>Agent 汇总</h3>' +
+        '<table class="totals-table">' + totHead + totRows + "</table></div>";
 
     document.querySelectorAll(".mx-cell[data-agent]").forEach(function (td) {
       td.onclick = function () {
