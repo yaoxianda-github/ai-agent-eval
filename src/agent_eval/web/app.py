@@ -488,6 +488,36 @@ def create_app(
             gate_evals.append({"agent": a, **ge.to_dict()})
         gate_all_passed = all(ge["passed"] for ge in gate_evals)
 
+        # V3.7 P1：按任务层级（tier）分布聚合——"不看平均分，先看哪类样本退步"
+        tier_order = ["golden", "boundary", "regression", "random"]
+        tier_labels = {"golden": "核心", "boundary": "边界", "regression": "回归", "random": "随机"}
+        tier_distribution: dict[str, dict] = {}
+        for a in agents:
+            tier_stats: dict[str, dict] = {}
+            for tier in tier_order:
+                tier_tasks = [t for t in task_ids if getattr(tasks.get(t), "tier", "") == tier]
+                if not tier_tasks:
+                    continue
+                tier_passed = 0
+                tier_total = len(tier_tasks)
+                tier_scores: list[float] = []
+                for t in tier_tasks:
+                    c = cells[f"{a}|{t}"]
+                    if c["n"] == 0:
+                        continue
+                    tier_scores.append(c["best"])
+                    if c["pass_rate"] >= 0.999:
+                        tier_passed += 1
+                if tier_scores:
+                    tier_stats[tier] = {
+                        "label": tier_labels.get(tier, tier),
+                        "tasks_total": tier_total,
+                        "tasks_passed": tier_passed,
+                        "pass_rate": round(tier_passed / tier_total, 3) if tier_total else 0.0,
+                        "avg_score": round(sum(tier_scores) / len(tier_scores), 3),
+                    }
+            tier_distribution[a] = tier_stats
+
         return {
             "agents": agents,
             "tasks": task_ids,
@@ -495,6 +525,7 @@ def create_app(
             "totals": totals,
             "conclusion": _matrix_conclusion(totals),
             "confidence": batch_confidence,
+            "tier_distribution": tier_distribution,  # V3.7：按层级分布
             "gate_evaluation": {  # V3.2：6个blocking指标门禁
                 "passed": gate_all_passed,
                 "per_agent": gate_evals,

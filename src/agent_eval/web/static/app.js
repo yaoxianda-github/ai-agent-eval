@@ -1830,6 +1830,37 @@
         gateMetricsHtml + '</div>';
     }
 
+    // V3.7 P1：按任务层级分布——"不看平均分，先看哪类样本退步"
+    var tierDistHtml = "";
+    if (m.tier_distribution) {
+      var tierOrder = ["golden", "boundary", "regression", "random"];
+      var tierRows = "";
+      tierOrder.forEach(function (tier) {
+        var hasData = agents.some(function (a) {
+          return m.tier_distribution[a] && m.tier_distribution[a][tier];
+        });
+        if (!hasData) return;
+        var cellsHtml = agents.map(function (a) {
+          var td = m.tier_distribution[a] && m.tier_distribution[a][tier];
+          if (!td) return '<td class="num">—</td>';
+          var pct = Math.round(td.pass_rate * 100);
+          var color = pct >= 80 ? "#16a34a" : (pct >= 50 ? "#f59e0b" : "#dc2626");
+          return '<td class="num"><b style="color:' + color + ';">' + pct + '%</b>' +
+            '<div style="font-size:11px;color:#6b7280;">' + td.tasks_passed + '/' + td.tasks_total +
+            ' · 均分 ' + td.avg_score + '</div></td>';
+        }).join("");
+        tierRows += "<tr><td><b>" + ({"golden":"核心","boundary":"边界","regression":"回归","random":"随机"}[tier] || tier) +
+          "</b><div style='font-size:11px;color:#6b7280;'>" + tier + "</div></td>" + cellsHtml + "</tr>";
+      });
+      if (tierRows) {
+        var tierHead = "<tr><th>任务层级</th>" + agents.map(function (a) {
+          return '<th class="num">' + esc(a) + "</th>";
+        }).join("") + "</tr>";
+        tierDistHtml = '<div class="card" style="margin-top:12px;"><h3>按任务层级分布 <span class="muted">核心=必过 · 边界=易错 · 回归=防退化 · 随机=泛化</span></h3>' +
+          '<table class="totals-table">' + tierHead + tierRows + "</table></div>";
+      }
+    }
+
     var totHead = showCost
       ? "<tr><th>Agent</th><th class='num'>加权总分</th><th class='num'>任务通过</th><th class='num'>总成本</th><th class='num'>总耗时</th><th class='num'>平均波动σ</th></tr>"
       : "<tr><th>Agent</th><th class='num'>加权总分</th><th class='num'>任务通过</th><th class='num'>总耗时</th></tr>";
@@ -1855,7 +1886,7 @@
 
     el("mx-result").innerHTML =
       '<div class="card"><h3>对比结论 <span class="muted">' + esc(b.label) + " · runs=" + (b.runs || 1) +
-        " · " + fmtTime(b.finished_at || b.created_at) + '</span></h3><div class="mx-concl">' + concl + "</div>" + confHtml + gateHtml + "</div>" +
+        " · " + fmtTime(b.finished_at || b.created_at) + '</span></h3><div class="mx-concl">' + concl + "</div>" + confHtml + gateHtml + tierDistHtml + "</div>" +
       '<div class="card"><h3>得分矩阵 <span class="muted">格内=最好成绩，颜色=通过率；点击单元格下钻每次运行</span></h3>' +
         '<div class="matrix-scroll"><table class="matrix">' + head + rows + "</table></div>" +
         '<div style="margin-top:12px;">' + exportBtn + "</div></div>" +
