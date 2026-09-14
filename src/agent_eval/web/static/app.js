@@ -1838,7 +1838,12 @@
       planNote +
       '<div class="card"><h3>发起对比</h3>' +
         '<div class="matrix-toolbar">' +
-          '<div class="field" style="flex:2 1 320px;"><label>选择 Agent（同任务集横向对比）</label>' +
+          '<div class="field" style="flex:2 1 320px;"><label>选择 Agent（同任务集横向对比）' +
+            '<span class="mx-batch-actions">' +
+              '<button type="button" class="mx-batch-btn" id="mx-select-all">全选</button>' +
+              '<button type="button" class="mx-batch-btn" id="mx-select-none">清空</button>' +
+            '</span>' +
+          '</label>' +
             '<div class="agent-pick" id="mx-agents">' + agentChips + '</div></div>' +
           '<div class="field" style="flex:0 0 150px;"><label>任务集</label>' +
             '<select id="mx-scope"><option value="core">core 核心卡口包</option>' +
@@ -1868,6 +1873,36 @@
         lab.classList.toggle("on", cb.checked);
       };
     });
+    // 全选 / 清空
+    var selectAllBtn = document.getElementById("mx-select-all");
+    var selectNoneBtn = document.getElementById("mx-select-none");
+    if (selectAllBtn) {
+      selectAllBtn.onclick = function (e) {
+        e.preventDefault();
+        var allCbs = document.querySelectorAll("#mx-agents .mx-agent");
+        if (!isPro && allCbs.length > cap) {
+          // 社区版有数量限制，只选前 cap 个
+          allCbs.forEach(function (cb, i) {
+            cb.checked = (i < cap);
+            cb.closest("label").classList.toggle("on", i < cap);
+          });
+        } else {
+          allCbs.forEach(function (cb) {
+            cb.checked = true;
+            cb.closest("label").classList.add("on");
+          });
+        }
+      };
+    }
+    if (selectNoneBtn) {
+      selectNoneBtn.onclick = function (e) {
+        e.preventDefault();
+        document.querySelectorAll("#mx-agents .mx-agent").forEach(function (cb) {
+          cb.checked = false;
+          cb.closest("label").classList.remove("on");
+        });
+      };
+    }
     el("mx-start").onclick = startBatch;
     if (el("mx-hist")) el("mx-hist").onchange = function () { loadBatch(this.value); };
   }
