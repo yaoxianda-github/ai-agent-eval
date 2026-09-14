@@ -141,6 +141,7 @@ h2.page-title {
 }
 .btn:hover { opacity: 0.85; }
 a.btn { text-decoration: none; display: inline-block; }
+.drill-action-col { text-align: right; white-space: nowrap; }
 .btn.secondary {
   background: var(--bg); color: var(--text-primary);
   border-color: var(--border);

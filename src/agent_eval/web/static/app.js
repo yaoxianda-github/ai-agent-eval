@@ -2136,8 +2136,8 @@
     }).join("");
 
     var exportBtn = canExport
-      ? '<button class="btn small" id="mx-export">导出</button>'
-      : '<button class="btn small secondary" disabled title="Pro 功能">导出 🔒</button> <span class="lock-tag">Pro 功能</span>';
+      ? '<button class="btn btn-primary" id="mx-export">导出</button>'
+      : '<button class="btn btn-primary secondary" disabled title="Pro 功能">导出 🔒</button> <span class="lock-tag">Pro 功能</span>';
 
     el("mx-result").innerHTML =
       buildHistorySelector(b.batch_id) +
@@ -2180,13 +2180,13 @@
     if (!c || !c.n) { box.innerHTML = "<h3>单元格下钻</h3><div class='empty'>无运行记录</div>"; return; }
     var st = { best: c.best, mean: c.mean, std: c.std, pass_rate: c.pass_rate };
     var head = showCost
-      ? "<tr><th>run</th><th>状态</th><th>得分</th><th>通过率</th><th>耗时</th><th>成本</th><th></th></tr>"
-      : "<tr><th>run</th><th>状态</th><th>得分</th><th>通过率</th><th>耗时</th><th></th></tr>";
+      ? "<tr><th>run</th><th>状态</th><th>得分</th><th>通过率</th><th>耗时</th><th>成本</th><th class='drill-action-col'></th></tr>"
+      : "<tr><th>run</th><th>状态</th><th>得分</th><th>通过率</th><th>耗时</th><th class='drill-action-col'></th></tr>";
     var rows = c.runs.map(function (r) {
       var line = "<tr><td>" + esc(r.run_id) + "</td><td>" + esc(r.status) + "</td><td>" + r.score +
         "</td><td>" + pctText(r.pass_rate) + "</td><td>" + fmtDur(r.duration_s) + "</td>";
       if (showCost) line += "<td>¥" + r.cost_cny + "</td>";
-      line += '<td><a class="btn btn-primary" href="#/run/' + esc(r.run_id) + '">轨迹详情</a></td></tr>';
+      line += '<td class="drill-action-col"><a class="btn btn-primary" href="#/run/' + esc(r.run_id) + '">轨迹详情</a></td></tr>';
       return line;
     }).join("");
     box.innerHTML =
