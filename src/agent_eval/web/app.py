@@ -685,20 +685,25 @@ def create_app(
             d["cost_estimate"] = est
             out.append(d)
         # V3.1：返回 tier 配置和 core 包定义
+        # V3.7：增加 dev_pack/eval_pack 分离（防评测集泄漏）
         manifest = load_manifest(tasks_dir)
         return {
             "tasks": out,
             "tiers": manifest.get("tiers", {}),
             "core_pack": manifest.get("core_pack", ["golden", "regression"]),
+            "dev_pack": manifest.get("dev_pack", ["boundary", "random"]),
+            "eval_pack": manifest.get("eval_pack", ["golden", "regression"]),
         }
 
     @app.get("/api/tiers")
     def api_tiers() -> dict:
-        """V3.1：返回数据集4层分层配置。"""
+        """V3.1：返回数据集4层分层配置。V3.7：增加 dev_pack/eval_pack 分离。"""
         manifest = load_manifest(tasks_dir)
         return {
             "tiers": manifest.get("tiers", {}),
             "core_pack": manifest.get("core_pack", ["golden", "regression"]),
+            "dev_pack": manifest.get("dev_pack", ["boundary", "random"]),
+            "eval_pack": manifest.get("eval_pack", ["golden", "regression"]),
         }
 
     @app.get("/api/circuit-status")

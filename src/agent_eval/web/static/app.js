@@ -50,6 +50,8 @@
   var costsCache = null;
   var tiersCache = null;       // V3.1：数据集4层分层配置
   var corePackCache = null;    // V3.1：core包定义（tier列表）
+  var devPackCache = null;     // V3.7：开发集（tier列表）
+  var evalPackCache = null;    // V3.7：评测集（tier列表）
   var histPage = 0;      // 运行历史当前页（从 0 起）
   var histLimit = 20;    // 每页条数
   var backendsCache = null;
@@ -74,6 +76,8 @@
       tasksCache = d.tasks;
       tiersCache = d.tiers || {};
       corePackCache = d.core_pack || ["golden", "regression"];
+      devPackCache = d.dev_pack || ["boundary", "random"];
+      evalPackCache = d.eval_pack || ["golden", "regression"];
       return d.tasks;
     });
   }
@@ -306,13 +310,34 @@
         return '<span class="tier-stat"><b style="color:' + t.color + ';">' + tierStats[k] + '</b> ' + esc(t.label) + '</span>';
       }).join("");
 
-      function renderRows(filterTier) {
-        var filtered = filterTier ? tasksCache.filter(function (t) { return t.tier === filterTier; }) : tasksCache;
+      // V3.7：用途标签渲染函数（开发集/评测集）
+      function usageBadge(tier) {
+        if (!tier) return '<span class="muted">—</span>';
+        var isDev = devPackCache && devPackCache.indexOf(tier) >= 0;
+        var isEval = evalPackCache && evalPackCache.indexOf(tier) >= 0;
+        if (isDev && isEval) {
+          return '<span class="tier-badge" style="background:#3b82f620;color:#3b82f6;">开发+评测</span>';
+        } else if (isEval) {
+          return '<span class="tier-badge" style="background:#dc262620;color:#dc2626;">评测集</span>';
+        } else if (isDev) {
+          return '<span class="tier-badge" style="background:#6b728020;color:#6b7280;">开发集</span>';
+        }
+        return '<span class="muted">—</span>';
+      }
+
+      function renderRows(filterTier, filterUsage) {
+        var filtered = tasksCache;
+        if (filterTier) filtered = filtered.filter(function (t) { return t.tier === filterTier; });
+        if (filterUsage === "dev") {
+          filtered = filtered.filter(function (t) { return devPackCache && devPackCache.indexOf(t.tier) >= 0; });
+        } else if (filterUsage === "eval") {
+          filtered = filtered.filter(function (t) { return evalPackCache && evalPackCache.indexOf(t.tier) >= 0; });
+        }
         return filtered.map(function (t) {
           var ce = t.cost_estimate;
           var costTxt = ce ? (ce.source === "measured" ? "" : "~") + "¥" + ce.cost_cny.toFixed(4) : "—";
           return "<tr><td>" + esc(t.id) + "</td><td>" + esc(t.title) + "</td><td>" + tierBadge(t.tier) +
-            "</td><td>" + esc(t.level) +
+            "</td><td>" + usageBadge(t.tier) + "</td><td>" + esc(t.level) +
             "</td><td>" + esc(t.verifier) + "</td><td>" + esc(t.weight) + "</td><td>" +
             (t.checkpoints ? t.checkpoints.length : 0) + " 个</td><td>" + esc(t.timeout_s) + "s</td><td>" +
             costTxt + "</td></tr>";
@@ -325,12 +350,15 @@
           '<span class="tier-stats">' + statsHtml + '</span></h3>' +
           '<div class="form-row" style="margin-bottom:12px;">' +
             '<div class="field" style="flex:0 0 200px;"><label>按分层筛选</label><select id="tier-filter">' + tierOpts + "</select></div>" +
+            '<div class="field" style="flex:0 0 200px;"><label>按用途筛选' +
+              costTip("开发集=日常调试用，允许反复跑；评测集=最终回归/上线门禁用，平时不跑，防止过拟合。<br><br>当前配置：开发集=" + (devPackCache ? devPackCache.join("+") : "boundary+random") + "，评测集=" + (evalPackCache ? evalPackCache.join("+") : "golden+regression")) +
+              '</label><select id="usage-filter"><option value="">全部用途</option><option value="dev">开发集</option><option value="eval">评测集</option></select></div>' +
           "</div>" +
           '<div id="task-table">' +
-          '<table><tr><th>ID</th><th>标题</th><th>分层</th><th>级别</th><th>判定</th><th>权重</th><th>校验点</th><th>超时</th><th>预计成本/run' +
+          '<table><tr><th>ID</th><th>标题</th><th>分层</th><th>用途</th><th>级别</th><th>判定</th><th>权重</th><th>校验点</th><th>超时</th><th>预计成本/run' +
           costTip("预计成本 = 单次 run 的 token 消耗 × 模型单价。<br>默认模型 deepseek-chat：输入 ¥2/百万 token、输出 ¥3/百万 token（缓存未命中口径）。<br><br>有实测：取该后端（minimal-react）在此任务的历史 run 的 metrics.usage 均值；<br>无实测：按任务级别 L1-L5 估算，数值前标「~」。<br><br>单价可用环境变量 LLM_INPUT_CNY_PER_M / LLM_OUTPUT_CNY_PER_M 覆盖。") +
           "</th></tr>" +
-          renderRows("") + "</table></div></div>" +
+          renderRows("", "") + "</table></div></div>" +
         '<div class="card"><h3>新建任务</h3>' + taskFormHTML() + "</div>" +
         '<div id="task-result"></div>'
       );
@@ -339,10 +367,13 @@
       addCheckpointRow();
       bindCostTips();
       // tier 筛选
-      el("tier-filter").onchange = function () {
-        var v = this.value;
-        el("task-table").innerHTML = '<table><tr><th>ID</th><th>标题</th><th>分层</th><th>级别</th><th>判定</th><th>权重</th><th>校验点</th><th>超时</th><th>预计成本/run</th></tr>' + renderRows(v) + "</table>";
-      };
+      function applyFilters() {
+        var tier = el("tier-filter").value;
+        var usage = el("usage-filter").value;
+        el("task-table").innerHTML = '<table><tr><th>ID</th><th>标题</th><th>分层</th><th>用途</th><th>级别</th><th>判定</th><th>权重</th><th>校验点</th><th>超时</th><th>预计成本/run</th></tr>' + renderRows(tier, usage) + "</table>";
+      }
+      el("tier-filter").onchange = applyFilters;
+      el("usage-filter").onchange = applyFilters;
     }).catch(function (e) { renderErr(e.message); });
   }
 

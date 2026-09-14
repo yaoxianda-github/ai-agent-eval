@@ -34,6 +34,17 @@ core_pack:
   - golden
   - regression
 
+# V3.7 P2：开发集 vs 评测集分离（防评测集泄漏到训练/调参）
+# 参考：Agent评测怎么做——"评测集要保密，只有最终回归时才跑；平时调试用另一套开发集"
+# - dev_pack（开发集）：日常调试用，允许反复跑、允许分数不完美
+# - eval_pack（评测集）：最终回归/上线门禁用，平时不跑，防止过拟合
+dev_pack:
+  - boundary
+  - random
+eval_pack:
+  - golden
+  - regression
+
 tasks:
   # ===== 黄金集（核心场景，必须100%通过）=====
   - id: T001
