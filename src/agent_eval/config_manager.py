@@ -182,13 +182,15 @@ def get_env_status() -> list[dict]:
 def apply_env_to_process() -> int:
     """将 .env 文件中的变量加载到当前进程环境。
 
-    已存在的系统环境变量优先级更高（不覆盖）。
-    返回加载的变量数量。
+    .env 文件优先级高于系统环境变量（会覆盖），方便用户通过 Web 设置页面修改配置，
+    不用去改 ~/.zshrc 等系统级配置文件。
+    只覆盖白名单内的变量，非空值才覆盖。
+    返回加载/覆盖的变量数量。
     """
     env_file = read_env_file()
     count = 0
     for key, value in env_file.items():
-        if value and not os.environ.get(key):
+        if key in ENV_WHITELIST and value:
             os.environ[key] = value
             count += 1
     return count

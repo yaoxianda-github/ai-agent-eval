@@ -2540,7 +2540,7 @@
     loadMeta().then(function () {
       var projectRoot = (meta.tasks_dir || "").replace(/\/tasks$/, "");
       var envPath = projectRoot ? projectRoot + "/.env" : ".env";
-      var envTooltip = "配置写入项目根目录 .env 文件（完整路径：" + envPath + "），已在 .gitignore 中排除。保存后需重启服务生效。";
+      var envTooltip = "配置写入项目根目录 .env 文件（完整路径：" + envPath + "），已在 .gitignore 中排除。保存后即时生效，无需重启服务。";
       renderHTML(
         '<h2 class="page-title">设置</h2>' +
         '<div class="card"><h3>目录与版本</h3>' +
@@ -2554,7 +2554,7 @@
             '<button class="btn" id="btn-save-env">保存配置</button>' +
             '<span id="env-save-msg" style="font-size:13px;"></span>' +
           "</div>" +
-          '<div class="warn-banner" style="margin-top:12px;">保存后需重启服务才能生效（环境变量在进程启动时读取）。</div>' +
+          '<div class="warn-banner" style="margin-top:12px;">保存后即时生效（.env 文件优先级高于系统环境变量，正在执行中的任务不受影响）。</div>' +
         "</div>" +
         '<div class="card"><h3>启动方式</h3><pre class="code">pip install -e ".[web]"&#10;python -m agent_eval.web --port 8000&#10;# 浏览器打开 http://127.0.0.1:8000</pre></div>'
       );

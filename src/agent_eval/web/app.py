@@ -208,6 +208,15 @@ def create_app(
     app = FastAPI(title="AI Agent 评测工作台", version=_app_version())
     logger.info("工作台启动 | tasks_dir=%s results_dir=%s version=%s", tasks_dir, results_dir, _app_version())
 
+    # 启动时加载 .env 文件到进程环境（优先级高于系统环境变量，方便通过 Web 设置页面修改配置）
+    try:
+        from agent_eval.config_manager import apply_env_to_process
+        env_count = apply_env_to_process()
+        if env_count:
+            logger.info("已从 .env 文件加载 %d 个环境变量（覆盖系统环境变量）", env_count)
+    except Exception as e:  # noqa: BLE001 - .env 加载失败不影响启动
+        logger.warning(".env 文件加载跳过: %s", e)
+
     db_path = db_path if db_path is not None else results_dir.parent / "run_history.db"
     store = RunStore(db_path)
     store.rebuild(results_dir)
@@ -660,15 +669,18 @@ def create_app(
 
         请求体: {"values": {"DEEPSEEK_API_KEY": "sk-xxx", ...}}
         空字符串表示清除该变量。
+        保存后自动更新当前进程环境（无需重启服务）。
         """
-        from agent_eval.config_manager import ENV_WHITELIST, write_env_file
+        from agent_eval.config_manager import ENV_WHITELIST, write_env_file, apply_env_to_process
         values = payload.get("values", {})
         # 过滤白名单
         filtered = {k: v for k, v in values.items() if k in ENV_WHITELIST}
         if not filtered:
             raise HTTPException(status_code=400, detail="没有有效的环境变量（必须在白名单内）")
         write_env_file(filtered)
-        return {"saved": list(filtered.keys()), "message": "已保存到 .env 文件，重启服务后生效"}
+        # 保存后立即更新当前进程环境，无需重启
+        applied = apply_env_to_process()
+        return {"saved": list(filtered.keys()), "applied_to_process": applied, "message": f"已保存到 .env 文件并即时生效（{applied} 个变量已更新）"}
 
     @app.get("/api/tasks")
     def api_tasks() -> dict:
