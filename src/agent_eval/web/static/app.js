@@ -29,7 +29,28 @@
     }
     return String(v);
   }
-  function fmtTime(s) { return s ? String(s).slice(0, 19) : "-"; }
+  function fmtTime(s) {
+    if (!s) return "-";
+    // 2026-09-15T07:45:53 → 2026-09-15 07:45
+    var t = String(s).slice(0, 16).replace("T", " ");
+    return t;
+  }
+  // 相对时间：如"5分钟前"、"2小时前"、"3天前"
+  function fmtRelative(s) {
+    if (!s) return "-";
+    var then = new Date(s).getTime();
+    if (isNaN(then)) return fmtTime(s);
+    var diff = Date.now() - then;
+    var sec = Math.floor(diff / 1000);
+    if (sec < 60) return "刚刚";
+    var min = Math.floor(sec / 60);
+    if (min < 60) return min + "分钟前";
+    var hr = Math.floor(min / 60);
+    if (hr < 24) return hr + "小时前";
+    var day = Math.floor(hr / 24);
+    if (day < 30) return day + "天前";
+    return fmtTime(s);
+  }
   function fmtDur(s) { var d = Number(s); return isFinite(d) ? d.toFixed(1) + "s" : "-"; }
 
   function api(path, opts) {
@@ -150,6 +171,90 @@
       " <span class='muted'>（" + src + " · " + runs + " run）</span>";
   }
 
+  // ---------- 视图：概览 Dashboard（独立统计看板） ----------
+  function viewOverview() {
+    Promise.all([
+      api("/api/tasks").catch(function () { return { tasks: [] }; }),
+      api("/api/runs?limit=50").catch(function () { return { runs: [] }; }),
+      api("/api/badcases?limit=100").catch(function () { return { items: [] }; })
+    ]).then(function (rs) {
+      var tasks = rs[0].tasks || rs[0].items || [];
+      var runs = rs[1].runs || rs[1].items || [];
+      var badcases = rs[2].items || rs[2].badcases || [];
+
+      // 统计计算
+      var completed = runs.filter(function (r) { return r.status === "completed"; });
+      var failed = runs.filter(function (r) { return r.status === "error" || r.status === "fail"; });
+      var running = runs.filter(function (r) { return r.status === "running"; });
+      var passRate = completed.length ? (completed.filter(function (r) { return (r.score || 0) >= 0.8; }).length / completed.length * 100).toFixed(1) : "—";
+      var avgDuration = completed.length ? (completed.reduce(function (s, r) { return s + (r.duration_s || 0); }, 0) / completed.length).toFixed(1) : "—";
+      var totalCost = runs.reduce(function (s, r) { return s + (r.cost_cny || 0); }, 0);
+
+      // Agent 统计
+      var agentStats = {};
+      runs.forEach(function (r) {
+        if (!agentStats[r.agent_id]) agentStats[r.agent_id] = { total: 0, pass: 0, cost: 0 };
+        agentStats[r.agent_id].total++;
+        if ((r.score || 0) >= 0.8) agentStats[r.agent_id].pass++;
+        agentStats[r.agent_id].cost += r.cost_cny || 0;
+      });
+      var agentRows = Object.keys(agentStats).map(function (a) {
+        var s = agentStats[a];
+        var rate = s.total ? (s.pass / s.total * 100).toFixed(0) : "—";
+        return "<tr><td><b>" + esc(a) + "</b></td><td>" + s.total + "</td><td>" + s.pass + "</td><td>" + rate + "%</td><td>¥" + s.cost.toFixed(4) + "</td></tr>";
+      }).join("") || '<tr><td colspan="5" class="muted">暂无数据</td></tr>';
+
+      // 最近运行
+      var recentRows = runs.slice(0, 8).map(function (r) {
+        var statusColor = r.status === "completed" ? "#16a34a" : (r.status === "running" ? "#d97706" : "#dc2626");
+        return '<tr class="clickable" data-rid="' + esc(r.run_id) + '">' +
+          '<td class="col-time" title="' + esc(fmtTime(r.created_at)) + '">' + esc(fmtRelative(r.created_at)) + "</td>" +
+          '<td class="col-runid"><b>' + esc(r.run_id) + "</b></td>" +
+          '<td class="col-task">' + esc(r.task_id) + '</td>' +
+          '<td class="col-agent">' + esc(r.agent_id) + "</td>" +
+          '<td><span style="color:' + statusColor + ';font-weight:600;">' + esc(r.status) + "</span></td>" +
+          '<td class="col-score">' + esc(r.score != null ? r.score : "—") + "</td></tr>";
+      }).join("") || '<tr><td colspan="6" class="muted">暂无运行记录</td></tr>';
+
+      renderHTML(
+        '<h2 class="page-title">概览 · 数据看板</h2>' +
+        // KPI 卡片
+        '<div class="kpi-row">' +
+          '<div class="kpi"><b>' + tasks.length + '</b><span>任务总数</span></div>' +
+          '<div class="kpi"><b>' + runs.length + '</b><span>运行总数（近50）</span></div>' +
+          '<div class="kpi"><b style="color:#16a34a;">' + passRate + '%</b><span>通过率（score≥0.8）</span></div>' +
+          '<div class="kpi"><b>' + avgDuration + 's</b><span>平均耗时</span></div>' +
+          '<div class="kpi"><b>¥' + totalCost.toFixed(4) + '</b><span>累计成本</span></div>' +
+          '<div class="kpi"><b style="color:#dc2626;">' + badcases.length + '</b><span>Badcase 总数</span></div>' +
+        "</div>" +
+        // 状态分布
+        '<div class="card"><h3>运行状态分布</h3>' +
+          '<div style="display:flex;gap:24px;flex-wrap:wrap;">' +
+            '<div><span style="color:#16a34a;font-weight:700;font-size:24px;">' + completed.length + '</span> <span class="muted">已完成</span></div>' +
+            '<div><span style="color:#d97706;font-weight:700;font-size:24px;">' + running.length + '</span> <span class="muted">运行中</span></div>' +
+            '<div><span style="color:#dc2626;font-weight:700;font-size:24px;">' + failed.length + '</span> <span class="muted">失败</span></div>' +
+          '</div></div>' +
+        // Agent 对比
+        '<div class="card"><h3 class="card-title-with-action">Agent 能力对比 <span class="muted">基于最近 50 次运行</span>' +
+          '<span class="card-action"><a class="btn secondary small" href="#/compare">进入对比矩阵 →</a></span></h3>' +
+          '<table><tr><th>Agent</th><th>运行次数</th><th>通过次数</th><th>通过率</th><th>累计成本</th></tr>' + agentRows + '</table></div>' +
+        // 最近运行
+        '<div class="card"><h3 class="card-title-with-action">最近运行 <span class="muted">最新 8 条</span>' +
+          '<span class="card-action"><a class="btn secondary small" href="#/history">查看全部 →</a></span></h3>' +
+          '<table><tr><th>时间</th><th>run_id</th><th>任务</th><th>后端</th><th>状态</th><th>score</th></tr>' + recentRows + '</table></div>' +
+        // Badcase 概览
+        '<div class="card"><h3 class="card-title-with-action">Badcase 概览 <span class="muted">共 ' + badcases.length + ' 条</span>' +
+          '<span class="card-action"><a class="btn secondary small" href="#/badcases">进入 Badcase 管理 →</a></span></h3>' +
+          (badcases.length ? '<div class="muted">待分析 ' + badcases.filter(function(b){return b.status==='pending';}).length + ' 条 · 已修复 ' + badcases.filter(function(b){return b.status==='fixed';}).length + ' 条</div>' : '<div class="empty">暂无 Badcase 记录</div>') +
+        '</div>'
+      );
+      // 绑定点击事件
+      document.querySelectorAll("#app tr.clickable").forEach(function (tr) {
+        tr.onclick = function () { location.hash = "#/run/" + tr.getAttribute("data-rid"); };
+      });
+    }).catch(function (e) { renderErr(e.message); });
+  }
+
   function viewDashboard() {
     Promise.all([loadTasks(), loadBackends(), loadCosts()]).then(function () {
       var taskOpts = tasksCache.map(function (t) {
@@ -174,14 +279,49 @@
           '<div class="form-row"><div class="field"><label>预计 LLM 成本</label><span id="f-cost" class="muted">—</span></div></div>' +
           '<button class="btn" id="btn-run">开始运行</button> <span class="muted">多 run 采样用于对抗 LLM 非确定性</span>' +
         "</div>" +
-        '<div id="run-result"></div>'
+        '<div id="run-result"></div>' +
+        '<div class="card" style="margin-top:20px;">' +
+          '<h3 class="card-title-with-action">最近运行记录 <span class="muted">最新 10 条</span>' +
+            '<span class="card-action"><a class="btn secondary small" href="#/history">查看全部 →</a></span></h3>' +
+          '<div id="home-recent-runs"><div class="empty">加载中...</div></div>' +
+        "</div>"
       );
       el("f-task").onchange = updateCost;
       el("f-agent").onchange = onAgentChange;
       el("f-runs").oninput = updateCost;
       onAgentChange();  // 初始化模型默认值
       el("btn-run").onclick = startRun;
+      loadRecentRuns();
     }).catch(function (e) { renderErr(e.message); });
+  }
+
+  // 首页加载最近运行记录
+  function loadRecentRuns() {
+    api("/api/runs?limit=10").then(function (d) {
+      var runs = d.runs || d.items || [];
+      var box = document.getElementById("home-recent-runs");
+      if (!box) return;
+      if (!runs.length) { box.innerHTML = '<div class="empty">暂无运行记录，点击上方"开始运行"创建第一条评测。</div>'; return; }
+      var rows = runs.map(function (r) {
+        var statusColor = r.status === "completed" ? "#16a34a" : (r.status === "running" ? "#d97706" : "#dc2626");
+        return '<tr class="clickable" data-rid="' + esc(r.run_id) + '">' +
+          '<td class="col-time" title="' + esc(fmtTime(r.created_at)) + '">' + esc(fmtRelative(r.created_at)) + "</td>" +
+          '<td class="col-runid"><b>' + esc(r.run_id) + "</b></td>" +
+          '<td class="col-task">' + esc(r.task_id) + '</td>' +
+          '<td class="col-agent">' + esc(r.agent_id) + "</td>" +
+          '<td><span style="color:' + statusColor + ';font-weight:600;">' + esc(r.status) + "</span></td>" +
+          '<td class="col-score">' + esc(r.score != null ? r.score : "—") + "</td>" +
+          '<td class="col-duration">' + fmtDur(r.duration_s) + "</td>" +
+          "</tr>";
+      }).join("");
+      box.innerHTML = '<table><tr><th>时间</th><th>run_id</th><th>任务</th><th>后端</th><th>状态</th><th>score</th><th>时长</th></tr>' + rows + "</table>";
+      box.querySelectorAll("tr.clickable").forEach(function (tr) {
+        tr.onclick = function () { location.hash = "#/run/" + tr.getAttribute("data-rid"); };
+      });
+    }).catch(function () {
+      var box = document.getElementById("home-recent-runs");
+      if (box) box.innerHTML = '<div class="empty">加载运行记录失败</div>';
+    });
   }
 
   function onAgentChange() {
@@ -337,11 +477,11 @@
           var ce = t.cost_estimate;
           var costTxt = ce ? (ce.source === "measured" ? "" : "~") + "¥" + ce.cost_cny.toFixed(4) : "—";
           var modTxt = t.last_modified ? fmtTime(t.last_modified) : "—";
-          return "<tr><td>" + esc(t.id) + "</td><td>" + esc(t.title) + "</td><td>" + tierBadge(t.tier) +
-            "</td><td>" + usageBadge(t.tier) + "</td><td>" + esc(t.level) +
-            "</td><td>" + esc(t.verifier) + "</td><td>" + esc(t.weight) + "</td><td>" +
-            (t.checkpoints ? t.checkpoints.length : 0) + " 个</td><td>" + esc(t.timeout_s) + "s</td><td>" +
-            modTxt + "</td><td>" + costTxt + "</td></tr>";
+          return "<tr><td class='tcol-id'>" + esc(t.id) + "</td><td class='tcol-title'>" + esc(t.title) + "</td><td class='tcol-tier'>" + tierBadge(t.tier) +
+            "</td><td class='tcol-usage'>" + usageBadge(t.tier) + "</td><td class='tcol-level'>" + esc(t.level) +
+            "</td><td class='tcol-verifier'>" + esc(t.verifier) + "</td><td class='tcol-weight'>" + esc(t.weight) + "</td><td class='tcol-cp'>" +
+            (t.checkpoints ? t.checkpoints.length : 0) + " 个</td><td class='tcol-timeout'>" + esc(t.timeout_s) + "s</td><td class='tcol-mod'>" +
+            modTxt + "</td><td class='tcol-cost'>" + costTxt + "</td></tr>";
         }).join("");
       }
 
@@ -355,8 +495,8 @@
               costTip("开发集=日常调试用，允许反复跑；评测集=最终回归/上线门禁用，平时不跑，防止过拟合。<br><br>当前配置：开发集=" + (devPackCache ? devPackCache.join("+") : "boundary+random") + "，评测集=" + (evalPackCache ? evalPackCache.join("+") : "golden+regression")) +
               '</label><select id="usage-filter"><option value="">全部用途</option><option value="dev">开发集</option><option value="eval">评测集</option></select></div>' +
           "</div>" +
-          '<div id="task-table">' +
-          '<table><tr><th>ID</th><th>标题</th><th>分层</th><th>用途</th><th>级别</th><th>判定</th><th>权重</th><th>校验点</th><th>超时</th><th>最后修改</th><th>预计成本/run' +
+          '<div id="task-table" class="table-scroll">' +
+          '<table><tr><th class="tcol-id">ID</th><th class="tcol-title">标题</th><th class="tcol-tier">分层</th><th class="tcol-usage">用途</th><th class="tcol-level">级别</th><th class="tcol-verifier">判定</th><th class="tcol-weight">权重</th><th class="tcol-cp">校验点</th><th class="tcol-timeout">超时</th><th class="tcol-mod">最后修改</th><th class="tcol-cost">预计成本/run' +
           costTip("预计成本 = 单次 run 的 token 消耗 × 模型单价。<br>默认模型 deepseek-chat：输入 ¥2/百万 token、输出 ¥3/百万 token（缓存未命中口径）。<br><br>有实测：取该后端（minimal-react）在此任务的历史 run 的 metrics.usage 均值；<br>无实测：按任务级别 L1-L5 估算，数值前标「~」。<br><br>单价可用环境变量 LLM_INPUT_CNY_PER_M / LLM_OUTPUT_CNY_PER_M 覆盖。") +
           "</th></tr>" +
           renderRows("", "") + "</table></div></div>" +
@@ -371,7 +511,7 @@
       function applyFilters() {
         var tier = el("tier-filter").value;
         var usage = el("usage-filter").value;
-        el("task-table").innerHTML = '<table><tr><th>ID</th><th>标题</th><th>分层</th><th>用途</th><th>级别</th><th>判定</th><th>权重</th><th>校验点</th><th>超时</th><th>最后修改</th><th>预计成本/run</th></tr>' + renderRows(tier, usage) + "</table>";
+        el("task-table").innerHTML = '<table><tr><th class="tcol-id">ID</th><th class="tcol-title">标题</th><th class="tcol-tier">分层</th><th class="tcol-usage">用途</th><th class="tcol-level">级别</th><th class="tcol-verifier">判定</th><th class="tcol-weight">权重</th><th class="tcol-cp">校验点</th><th class="tcol-timeout">超时</th><th class="tcol-mod">最后修改</th><th class="tcol-cost">预计成本/run</th></tr>' + renderRows(tier, usage) + "</table>";
       }
       el("tier-filter").onchange = applyFilters;
       el("usage-filter").onchange = applyFilters;
@@ -531,13 +671,13 @@
           reviewTxt = '<span style="color:' + rc + ';font-weight:600;">' + rl + "</span>";
         }
         return '<tr class="clickable" data-rid="' + esc(r.run_id) + '">' +
-          "<td>" + esc(fmtTime(r.created_at)) + "</td>" +
-          "<td><b>" + esc(r.run_id) + "</b></td>" +
-          "<td>" + esc(r.task_id) + "</td><td>" + esc(r.agent_id) + "</td>" +
+          '<td class="col-time" title="' + esc(fmtTime(r.created_at)) + '">' + esc(fmtRelative(r.created_at)) + "</td>" +
+          '<td class="col-runid"><b>' + esc(r.run_id) + "</b></td>" +
+          '<td class="col-task">' + esc(r.task_id) + '</td><td class="col-agent">' + esc(r.agent_id) + "</td>" +
           "<td>" + statusBadge(r.status) + "</td>" +
-          "<td>" + esc(r.score) + "</td><td>" + fmtDur(r.duration_s) + "</td><td>" + esc(r.steps) + "</td>" +
-          "<td>" + costTxt + "</td>" +
-          "<td>" + confTxt + "</td>" +
+          '<td class="col-score">' + esc(r.score) + '</td><td class="col-duration">' + fmtDur(r.duration_s) + "</td><td>" + esc(r.steps) + "</td>" +
+          '<td class="col-cost">' + costTxt + "</td>" +
+          '<td class="col-conf">' + confTxt + "</td>" +
           "<td>" + reviewTxt + "</td>" +
           "</tr>";
       }).join("");
@@ -1224,6 +1364,14 @@
           '<a class="btn secondary" style="float:right;margin-left:8px;" href="#/history">← 返回历史</a>' +
           '<button class="btn secondary" id="btn-mark-badcase" style="float:right;">标记为 badcase</button>' +
         '</h2>' +
+        '<div class="anchor-nav" id="run-anchor-nav">' +
+          '<a href="#run-verdict" class="anchor-link">判定结果</a>' +
+          '<a href="#run-review" class="anchor-link">人工复核</a>' +
+          '<a href="#run-analysis" class="anchor-link">执行分析</a>' +
+          '<a href="#run-trace" class="anchor-link">轨迹回放</a>' +
+          '<a href="#run-steps" class="anchor-link">执行轨迹</a>' +
+          '<a href="#run-files" class="anchor-link">产物文件</a>' +
+        "</div>" +
         '<div class="kpi-row">' +
           '<div class="kpi"><b>' + esc(r.run_id) + "</b><span>run_id</span></div>" +
           '<div class="kpi"><b>' + esc(r.task_id) + " / " + esc(r.agent_id) + "</b><span>任务 / 后端</span></div>" +
@@ -1233,12 +1381,12 @@
         "</div>" +
         (r.error ? '<div class="err-banner">' + esc(r.error) + "</div>" : "") +
         lockHtml +
-        '<div class="card"><h3>判定结果（' + v.length + " 个校验点）</h3>" + (vRows || '<div class="empty">无判定</div>') + "</div>" +
-        humanReviewHtml(r) +
-        executionAnalysis(r) +
-        '<div class="card"><h3>轨迹回放 <span class="tl-note">输入意图 → 知识/检索 → 模型生成 → 工具执行</span></h3>' + traceTimeline(r.traces, r) + "</div>" +
-        '<div class="card"><h3>执行轨迹（' + (r.steps || []).length + " 步）</h3>" + steps + "</div>" +
-        '<div class="card"><h3>产物文件</h3><div id="file-list"><div class="empty">加载中…</div></div></div>' +
+        '<div class="card" id="run-verdict"><h3>判定结果（' + v.length + " 个校验点）</h3>" + (vRows || '<div class="empty">无判定</div>') + "</div>" +
+        '<div id="run-review">' + humanReviewHtml(r) + '</div>' +
+        '<div id="run-analysis">' + executionAnalysis(r) + '</div>' +
+        '<div class="card" id="run-trace"><h3>轨迹回放 <span class="tl-note">输入意图 → 知识/检索 → 模型生成 → 工具执行</span></h3>' + traceTimeline(r.traces, r) + "</div>" +
+        '<div class="card" id="run-steps"><h3>执行轨迹（' + (r.steps || []).length + " 步）</h3>" + steps + "</div>" +
+        '<div class="card" id="run-files"><h3>产物文件</h3><div id="file-list"><div class="empty">加载中…</div></div></div>' +
         '<div class="card" id="file-view" style="display:none;"><h3>文件预览</h3><pre class="code" id="file-content"></pre></div>'
       );
       loadFiles(runId);
@@ -1924,8 +2072,9 @@
       return '<option value="' + esc(b.batch_id) + '"' + (b.batch_id === currentBid ? " selected" : "") + ">" +
         esc(b.label) + "（" + esc(b.status) + " · " + fmtTime(b.created_at) + "）</option>";
     }).join("");
-    return '<div class="mx-history-bar"><label class="muted">历史批次：</label> ' +
-      '<select id="mx-hist" class="mx-hist-select">' + opts + "</select></div>";
+    return '<div class="mx-result-header"><h3 class="mx-result-title">对比结果</h3>' +
+      '<div class="mx-history-bar"><label class="muted">历史批次：</label> ' +
+      '<select id="mx-hist" class="mx-hist-select">' + opts + "</select></div></div>";
   }
 
   function startBatch() {
@@ -2710,7 +2859,7 @@
         var statusColor = item.configured ? "#16a34a" : "#9ca3af";
         var statusText = item.configured ? "已配置 (" + item.source + ")" : "未配置";
         var inputType = item.category === "api_key" ? "password" : "text";
-        var placeholder = item.configured ? "已配置，留空保持不变" : "请输入 " + item.label;
+        var placeholder = item.configured ? "输入新 Key 覆盖当前配置，留空则保持不变" : "请输入 " + item.label;
         html += '<div class="env-config-item" style="padding:12px 0;border-bottom:1px solid var(--border-light);">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
             '<label style="font-weight:600;font-size:14px;">' + esc(item.label) +
@@ -2877,7 +3026,8 @@
     if (name === "run") { viewRunDetail(parts[1]); return; }
     if (name === "badcase") { viewBadcaseDetail(parts[1]); return; }
     if (name === "memory") { viewMemoryDetail(parts[1]); return; }
-    if (name === "dashboard") viewDashboard();
+    if (name === "overview") viewOverview();
+    else if (name === "dashboard") viewDashboard();
     else if (name === "tasks") viewTasks();
     else if (name === "packages") viewPackages();
     else if (name === "history") viewHistory();

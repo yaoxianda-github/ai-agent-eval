@@ -95,7 +95,7 @@ body {
 /* ---------- 内容区 ---------- */
 .content {
   flex: 1 1 auto; padding: 88px 32px 60px;
-  width: 100%; max-width: 1200px; margin: 0 auto;
+  width: 100%; max-width: 1400px; margin: 0 auto;
 }
 
 /* ---------- 标题 ---------- */
@@ -108,6 +108,7 @@ h2.page-title {
 .card {
   background: var(--bg); border: 1px solid var(--border);
   border-radius: 10px; padding: 20px 22px; margin-bottom: 16px;
+  overflow-x: auto;
 }
 .card h3 {
   font-size: 15px; font-weight: 700; margin-bottom: 14px;
@@ -153,7 +154,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ---------- 表格 ---------- */
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+table { width: 100%; min-width: 600px; border-collapse: collapse; font-size: 13px; }
 th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border-light); }
 th {
   color: var(--text-muted); font-weight: 600; font-size: 11px;
@@ -161,6 +162,50 @@ th {
 }
 tr.clickable { cursor: pointer; }
 tr.clickable:hover { background: var(--bg-secondary); }
+
+/* 表格列宽优化 */
+.col-time { min-width: 80px; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); }
+.col-runid { min-width: 110px; font-family: var(--font-mono); font-size: 12px; }
+.col-task { min-width: 70px; font-weight: 600; }
+.col-agent { min-width: 110px; }
+.col-score { min-width: 60px; text-align: right; font-family: var(--font-mono); }
+.col-duration { min-width: 60px; text-align: right; font-family: var(--font-mono); }
+.col-cost { min-width: 80px; text-align: right; font-family: var(--font-mono); }
+.col-conf { min-width: 60px; text-align: right; font-family: var(--font-mono); }
+
+/* 表格横向滚动容器 */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll table { min-width: 900px; }
+
+/* 运行详情锚点导航 */
+.anchor-nav {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  margin-bottom: 16px; padding: 8px 12px;
+  background: var(--bg-secondary); border-radius: 8px;
+  border: 1px solid var(--border-light);
+  position: sticky; top: 70px; z-index: 50;
+}
+.anchor-link {
+  padding: 5px 12px; border-radius: 5px;
+  font-size: 12px; font-weight: 500; color: var(--text-secondary);
+  text-decoration: none; transition: all 0.15s;
+  white-space: nowrap;
+}
+.anchor-link:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+.anchor-link.active { background: var(--text-primary); color: var(--bg); }
+
+/* 任务管理表格列宽 */
+.tcol-id { min-width: 70px; font-family: var(--font-mono); font-weight: 600; }
+.tcol-title { min-width: 200px; max-width: 300px; }
+.tcol-tier { min-width: 80px; text-align: center; }
+.tcol-usage { min-width: 80px; text-align: center; }
+.tcol-level { min-width: 60px; text-align: center; }
+.tcol-verifier { min-width: 100px; }
+.tcol-weight { min-width: 60px; text-align: right; font-family: var(--font-mono); }
+.tcol-cp { min-width: 70px; text-align: center; }
+.tcol-timeout { min-width: 60px; text-align: right; font-family: var(--font-mono); }
+.tcol-mod { min-width: 120px; font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); }
+.tcol-cost { min-width: 100px; text-align: right; font-family: var(--font-mono); white-space: nowrap; }
 
 /* ---------- 徽章 ---------- */
 .badge {
@@ -366,6 +411,19 @@ pre.code {
 .matrix-header-controls .inline-field label { font-size: 12px; color: var(--text-secondary); margin: 0; white-space: nowrap; }
 .matrix-agent-section { display: flex; flex-direction: column; gap: 10px; }
 .matrix-agent-section > label { font-weight: 600; font-size: 13px; color: var(--text-primary); display: flex; align-items: center; }
+/* 对比结果区域标题 */
+.mx-result-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 24px 0 12px; padding-bottom: 8px;
+  border-bottom: 2px solid var(--text-primary);
+}
+.mx-result-title {
+  font-size: 18px; font-weight: 700; color: var(--text-primary);
+  margin: 0; letter-spacing: -0.3px;
+}
+.mx-result-header .mx-history-bar {
+  margin-bottom: 0; padding: 6px 10px; background: transparent; border: none;
+}
 .mx-history-bar {
   display: flex; align-items: center; gap: 10px;
   margin-bottom: 12px; padding: 10px 14px;
