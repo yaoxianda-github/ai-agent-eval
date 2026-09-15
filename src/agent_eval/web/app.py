@@ -864,6 +864,201 @@ def create_app(
         t.start()
         return {"run_ids": run_ids, "last_run_id": run_ids[-1]}
 
+    # ---------- 失败 Case 自动分桶归因（必须在 /api/runs/{run_id} 之前定义） ----------
+    @app.get("/api/runs/failure-buckets")
+    def failure_buckets(
+        limit: int = Query(200, ge=1, le=1000),
+        agent_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+    ) -> dict:
+        """失败 Case 自动分桶统计：将失败的 run 按失败原因分类到桶中。
+
+        分桶类型：
+        - timeout: 超时未完成
+        - crash: 异常崩溃
+        - max_steps: 步数超限
+        - file_missing: 文件生成失败（file_exists checkpoint 失败）
+        - content_mismatch: 内容不匹配（content_* checkpoint 失败）
+        - cmd_failed: 命令执行失败（cmd_exit_zero checkpoint 失败）
+        - judge_failed: LLM Judge 判定未通过（score < 0.8）
+        - other: 其他未分类失败
+        """
+        runs, _ = store.list_runs(limit=limit, offset=0, agent_id=agent_id, task_id=task_id)
+
+        buckets = {
+            "timeout": {"label": "超时未完成", "count": 0, "run_ids": [], "color": "#f59e0b"},
+            "crash": {"label": "异常崩溃", "count": 0, "run_ids": [], "color": "#ef4444"},
+            "max_steps": {"label": "步数超限", "count": 0, "run_ids": [], "color": "#f97316"},
+            "file_missing": {"label": "文件生成失败", "count": 0, "run_ids": [], "color": "#8b5cf6"},
+            "content_mismatch": {"label": "内容不匹配", "count": 0, "run_ids": [], "color": "#3b82f6"},
+            "cmd_failed": {"label": "命令执行失败", "count": 0, "run_ids": [], "color": "#ec4899"},
+            "judge_failed": {"label": "Judge判定未通过", "count": 0, "run_ids": [], "color": "#6366f1"},
+            "other": {"label": "其他未分类", "count": 0, "run_ids": [], "color": "#6b7280"},
+        }
+
+        total_failed = 0
+        total_runs = len(runs)
+
+        for r in runs:
+            rid = r.get("run_id", "")
+            status = r.get("status", "")
+            score = r.get("score")
+
+            # 只统计失败的 run
+            is_failed = status in ("error", "timeout", "max_steps") or (
+                status == "completed" and score is not None and score < 0.8
+            )
+            if not is_failed:
+                continue
+
+            total_failed += 1
+            bucket = "other"
+
+            # 1. 状态级分桶
+            if status == "timeout":
+                bucket = "timeout"
+            elif status == "error":
+                bucket = "crash"
+            elif status == "max_steps":
+                bucket = "max_steps"
+            else:
+                # 2. completed 但 score < 0.8，需要看 checkpoint 失败类型
+                p = results_dir / rid / "run.json"
+                if p.exists():
+                    try:
+                        d = json.loads(p.read_text(encoding="utf-8"))
+                        verdicts = (d.get("metrics") or {}).get("verdicts") or []
+                        failed_cps = [v for v in verdicts if not v.get("passed", False)]
+
+                        if failed_cps:
+                            cp_types = [v.get("checkpoint_type", "") for v in failed_cps]
+                            if any(t == "file_exists" for t in cp_types):
+                                bucket = "file_missing"
+                            elif any(t.startswith("content_") for t in cp_types):
+                                bucket = "content_mismatch"
+                            elif any(t == "cmd_exit_zero" for t in cp_types):
+                                bucket = "cmd_failed"
+                            else:
+                                bucket = "judge_failed"
+                        else:
+                            bucket = "judge_failed"
+                    except Exception:  # noqa: BLE001
+                        bucket = "judge_failed"
+                else:
+                    bucket = "judge_failed"
+
+            buckets[bucket]["count"] += 1
+            if len(buckets[bucket]["run_ids"]) < 20:  # 最多保留20个run_id
+                buckets[bucket]["run_ids"].append(rid)
+
+        # 计算占比
+        for b in buckets.values():
+            b["percentage"] = round(b["count"] / total_failed * 100, 1) if total_failed > 0 else 0
+
+        return {
+            "total_runs": total_runs,
+            "total_failed": total_failed,
+            "failure_rate": round(total_failed / total_runs * 100, 1) if total_runs > 0 else 0,
+            "buckets": buckets,
+            "analyzed": min(limit, total_runs),
+        }
+
+    # ---------- Judge 一致率统计 ----------
+    @app.get("/api/runs/judge-agreement")
+    def judge_agreement(
+        limit: int = Query(500, ge=1, le=2000),
+        agent_id: Optional[str] = None,
+    ) -> dict:
+        """LLM Judge vs 人工复核一致率统计。
+
+        统计有人工复核标记的 run，对比 LLM Judge 结果（score >= 0.8 视为通过）
+        和人工复核结果（human_review.passed），计算一致率和误判类型。
+
+        误判类型：
+        - false_positive: LLM通过但人工不通过（假阳性，Judge过松）
+        - false_negative: LLM不通过但人工通过（假阴性，Judge过严）
+        - agreed_pass: 双方都通过
+        - agreed_fail: 双方都不通过
+        """
+        runs, _ = store.list_runs(limit=limit, offset=0, agent_id=agent_id)
+
+        reviewed = []
+        for r in runs:
+            rid = r.get("run_id", "")
+            p = results_dir / rid / "run.json"
+            if not p.exists():
+                continue
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))
+                hr = d.get("human_review")
+                if not hr:
+                    continue
+                llm_score = (d.get("metrics") or {}).get("score") or 0
+                llm_passed = llm_score >= 0.8
+                human_passed = hr.get("passed", False)
+                task_id = d.get("task_id", r.get("task_id", "unknown"))
+
+                # 判断一致/误判类型
+                if llm_passed and human_passed:
+                    agreement_type = "agreed_pass"
+                elif not llm_passed and not human_passed:
+                    agreement_type = "agreed_fail"
+                elif llm_passed and not human_passed:
+                    agreement_type = "false_positive"
+                else:
+                    agreement_type = "false_negative"
+
+                reviewed.append({
+                    "run_id": rid,
+                    "task_id": task_id,
+                    "agent_id": d.get("agent_id", r.get("agent_id", "unknown")),
+                    "llm_score": llm_score,
+                    "llm_passed": llm_passed,
+                    "human_passed": human_passed,
+                    "human_score": hr.get("score"),
+                    "agreement_type": agreement_type,
+                    "reviewed_at": hr.get("reviewed_at", ""),
+                })
+            except Exception:  # noqa: BLE001
+                continue
+
+        total = len(reviewed)
+        agreed = sum(1 for r in reviewed if r["agreement_type"] in ("agreed_pass", "agreed_fail"))
+        false_positive = sum(1 for r in reviewed if r["agreement_type"] == "false_positive")
+        false_negative = sum(1 for r in reviewed if r["agreement_type"] == "false_negative")
+        agreed_pass = sum(1 for r in reviewed if r["agreement_type"] == "agreed_pass")
+        agreed_fail = sum(1 for r in reviewed if r["agreement_type"] == "agreed_fail")
+
+        # 按任务分桶
+        by_task = {}
+        for r in reviewed:
+            tid = r["task_id"]
+            if tid not in by_task:
+                by_task[tid] = {"total": 0, "agreed": 0, "false_positive": 0, "false_negative": 0}
+            by_task[tid]["total"] += 1
+            if r["agreement_type"] in ("agreed_pass", "agreed_fail"):
+                by_task[tid]["agreed"] += 1
+            elif r["agreement_type"] == "false_positive":
+                by_task[tid]["false_positive"] += 1
+            elif r["agreement_type"] == "false_negative":
+                by_task[tid]["false_negative"] += 1
+
+        # 计算每个任务的一致率
+        for tid in by_task:
+            t = by_task[tid]
+            t["agreement_rate"] = round(t["agreed"] / t["total"] * 100, 1) if t["total"] > 0 else 0
+
+        return {
+            "total_reviewed": total,
+            "agreement_rate": round(agreed / total * 100, 1) if total > 0 else None,
+            "agreed_pass": agreed_pass,
+            "agreed_fail": agreed_fail,
+            "false_positive": false_positive,
+            "false_negative": false_negative,
+            "by_task": by_task,
+            "details": reviewed[:50],  # 最多返回50条详情
+        }
+
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: str) -> dict:
         state = running.get(run_id)
@@ -1473,6 +1668,91 @@ def create_app(
         """获取所有已转化为回归评测用例的 badcase 列表。"""
         items = store.list_regression_badcases()
         return {"items": items, "total": len(items)}
+
+    # ---------- 闭环追踪：回归对比报告 ----------
+    @app.get("/api/badcases/{bid}/regression-compare")
+    def api_badcase_regression_compare(bid: str) -> dict:
+        """Badcase 回归对比：对比修复前后同一任务的运行分数。
+
+        根据 badcase 关联的 task_id，查找该任务的所有运行记录，
+        按 badcase 创建时间和修复时间（status 变为 fixed 的时间）分割，
+        对比修复前和修复后的平均分数、通过率、耗时等指标。
+        """
+        b = store.get_badcase(bid)
+        if not b:
+            raise HTTPException(status_code=404, detail=f"badcase 不存在: {bid}")
+
+        task_id = b.get("task_id") or b.get("source_run_task_id")
+        if not task_id:
+            return {"error": "badcase 未关联任务，无法进行回归对比", "badcase_id": bid}
+
+        # 获取该任务的所有运行记录
+        all_runs, _ = store.list_runs(limit=500, offset=0, task_id=task_id)
+
+        # 按时间排序
+        all_runs.sort(key=lambda r: r.get("created_at", ""))
+
+        badcase_created = b.get("created_at", "")
+        badcase_fixed_at = b.get("fixed_at") or b.get("updated_at", "")
+
+        # 分割修复前和修复后的运行
+        before_runs = []
+        after_runs = []
+        for r in all_runs:
+            run_time = r.get("created_at", "")
+            if not run_time:
+                continue
+            if badcase_fixed_at and run_time >= badcase_fixed_at:
+                after_runs.append(r)
+            elif badcase_created and run_time < badcase_created:
+                before_runs.append(r)
+            elif not badcase_created:
+                before_runs.append(r)
+
+        def calc_stats(runs_list):
+            if not runs_list:
+                return {"count": 0, "avg_score": None, "pass_rate": None, "avg_duration": None, "avg_tokens": None}
+            completed = [r for r in runs_list if r.get("status") == "completed"]
+            scores = [r.get("score") or 0 for r in completed]
+            passed = [s for s in scores if s >= 0.8]
+            durations = [r.get("duration_s") or 0 for r in completed]
+            return {
+                "count": len(runs_list),
+                "completed_count": len(completed),
+                "avg_score": round(sum(scores) / len(scores), 4) if scores else None,
+                "pass_rate": round(len(passed) / len(scores) * 100, 1) if scores else None,
+                "avg_duration": round(sum(durations) / len(durations), 1) if durations else None,
+                "run_ids": [r.get("run_id") for r in runs_list[:10]],
+            }
+
+        before_stats = calc_stats(before_runs)
+        after_stats = calc_stats(after_runs)
+
+        # 计算改善幅度
+        improvement = None
+        if before_stats.get("avg_score") is not None and after_stats.get("avg_score") is not None:
+            improvement = round(after_stats["avg_score"] - before_stats["avg_score"], 4)
+
+        pass_rate_improvement = None
+        if before_stats.get("pass_rate") is not None and after_stats.get("pass_rate") is not None:
+            pass_rate_improvement = round(after_stats["pass_rate"] - before_stats["pass_rate"], 1)
+
+        return {
+            "badcase_id": bid,
+            "task_id": task_id,
+            "badcase_status": b.get("status"),
+            "badcase_created_at": badcase_created,
+            "badcase_fixed_at": badcase_fixed_at,
+            "before": before_stats,
+            "after": after_stats,
+            "score_improvement": improvement,
+            "pass_rate_improvement": pass_rate_improvement,
+            "verdict": (
+                "修复有效" if improvement is not None and improvement > 0
+                else "修复无效或需更多数据" if improvement is not None and improvement <= 0
+                else "数据不足，无法判断"
+            ),
+        }
 
     # ---------- 经验记忆（V2.9） ----------
     @app.get("/api/memories")

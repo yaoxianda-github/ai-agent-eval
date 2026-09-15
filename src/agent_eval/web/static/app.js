@@ -228,11 +228,15 @@
     Promise.all([
       api("/api/tasks").catch(function () { return { tasks: [] }; }),
       api("/api/runs?limit=50").catch(function () { return { runs: [] }; }),
-      api("/api/badcases?limit=100").catch(function () { return { items: [] }; })
+      api("/api/badcases?limit=100").catch(function () { return { items: [] }; }),
+      api("/api/runs/failure-buckets?limit=200").catch(function () { return null; }),
+      api("/api/runs/judge-agreement?limit=500").catch(function () { return null; })
     ]).then(function (rs) {
       var tasks = rs[0].tasks || rs[0].items || [];
       var runs = rs[1].runs || rs[1].items || [];
       var badcases = rs[2].items || rs[2].badcases || [];
+      var failureBuckets = rs[3];
+      var judgeAgreement = rs[4];
 
       // 统计计算
       var completed = runs.filter(function (r) { return r.status === "completed"; });
@@ -286,6 +290,56 @@
             '<div><span style="color:#d97706;font-weight:700;font-size:24px;">' + running.length + '</span> <span class="muted">运行中</span></div>' +
             '<div><span style="color:#dc2626;font-weight:700;font-size:24px;">' + failed.length + '</span> <span class="muted">失败</span></div>' +
           '</div></div>' +
+        // 失败分桶归因
+        (failureBuckets && failureBuckets.total_failed > 0 ? (
+          '<div class="card"><h3 class="card-title-with-action">失败 Case 自动分桶归因 <span class="muted">最近 ' + failureBuckets.analyzed + ' 次运行 · 失败率 ' + failureBuckets.failure_rate + '%</span>' +
+            '<span class="card-action"><a class="btn secondary small" href="#/history">查看运行历史 →</a></span></h3>' +
+            '<div class="failure-buckets">' +
+              Object.keys(failureBuckets.buckets).filter(function(k) { return failureBuckets.buckets[k].count > 0; })
+                .sort(function(a, b) { return failureBuckets.buckets[b].count - failureBuckets.buckets[a].count; })
+                .map(function(k) {
+                  var b = failureBuckets.buckets[k];
+                  var barWidth = Math.max(b.percentage, 2);
+                  return '<div class="fb-row" data-bucket="' + k + '">' +
+                    '<div class="fb-label" style="color:' + b.color + ';">' + b.label + '</div>' +
+                    '<div class="fb-bar-wrap"><div class="fb-bar" style="width:' + barWidth + '%;background:' + b.color + ';"></div></div>' +
+                    '<div class="fb-count"><b>' + b.count + '</b> <span class="muted">(' + b.percentage + '%)</span></div>' +
+                  '</div>';
+                }).join("") +
+            '</div>' +
+            '<div class="muted" style="margin-top:10px;font-size:12px;">自动归因基于运行状态和失败的 checkpoint 类型，供人工参考和修正。</div>' +
+          '</div>'
+        ) : "") +
+        // Judge 一致率统计
+        (judgeAgreement && judgeAgreement.total_reviewed > 0 ? (
+          '<div class="card"><h3 class="card-title-with-action">LLM Judge 一致率统计 <span class="muted">已人工复核 ' + judgeAgreement.total_reviewed + ' 条</span>' +
+            '<span class="card-action"><a class="btn secondary small" href="#/history">查看运行历史 →</a></span></h3>' +
+            '<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">' +
+              '<div style="text-align:center;">' +
+                '<div style="font-size:36px;font-weight:800;color:' + (judgeAgreement.agreement_rate >= 90 ? '#16a34a' : judgeAgreement.agreement_rate >= 75 ? '#d97706' : '#dc2626') + ';">' + (judgeAgreement.agreement_rate ? judgeAgreement.agreement_rate + '%' : '—') + '</div>' +
+                '<div class="muted" style="font-size:12px;">总体一致率</div>' +
+              '</div>' +
+              '<div style="flex:1;min-width:200px;">' +
+                '<div class="ja-row"><span class="ja-label" style="color:#16a34a;">双方通过</span><span class="ja-count">' + judgeAgreement.agreed_pass + '</span></div>' +
+                '<div class="ja-row"><span class="ja-label" style="color:#6b7280;">双方不通过</span><span class="ja-count">' + judgeAgreement.agreed_fail + '</span></div>' +
+                '<div class="ja-row"><span class="ja-label" style="color:#f59e0b;">假阳性（LLM过松）</span><span class="ja-count">' + judgeAgreement.false_positive + '</span></div>' +
+                '<div class="ja-row"><span class="ja-label" style="color:#ef4444;">假阴性（LLM过严）</span><span class="ja-count">' + judgeAgreement.false_negative + '</span></div>' +
+              '</div>' +
+            '</div>' +
+            (Object.keys(judgeAgreement.by_task || {}).length > 0 ? (
+              '<div style="border-top:1px solid var(--border-color);padding-top:12px;">' +
+                '<div class="muted" style="font-size:12px;margin-bottom:8px;">按任务分桶一致率</div>' +
+                '<table><tr><th>任务</th><th>复核数</th><th>一致率</th><th>假阳性</th><th>假阴性</th></tr>' +
+                Object.keys(judgeAgreement.by_task).slice(0, 10).map(function(tid) {
+                  var t = judgeAgreement.by_task[tid];
+                  var rateColor = t.agreement_rate >= 90 ? '#16a34a' : t.agreement_rate >= 75 ? '#d97706' : '#dc2626';
+                  return '<tr><td><b>' + esc(tid) + '</b></td><td>' + t.total + '</td><td style="color:' + rateColor + ';font-weight:600;">' + t.agreement_rate + '%</td><td>' + t.false_positive + '</td><td>' + t.false_negative + '</td></tr>';
+                }).join("") +
+                '</table>' +
+              '</div>'
+            ) : "") +
+          '</div>'
+        ) : "") +
         // Agent 对比
         '<div class="card"><h3 class="card-title-with-action">Agent 能力对比 <span class="muted">基于最近 50 次运行</span>' +
           '<span class="card-action"><a class="btn secondary small" href="#/compare">进入对比矩阵 →</a></span></h3>' +
@@ -946,10 +1000,16 @@
     planning: "规划错误", context: "上下文理解错误", other: "其他"
   };
   var BC_STATUS_LABELS = {
-    pending: "待分析", analyzing: "分析中", fixed: "已修复", ignored: "已忽略"
+    pending: "待分析", analyzing: "分析中", fixing: "修复中", fixed: "已修复",
+    regression: "回归验证中", verified: "已验证", ignored: "已忽略"
   };
   var BC_SEVERITY_COLORS = { P0: "#dc2626", P1: "#ea580c", P2: "#ca8a04", P3: "#65a30d" };
-  var BC_STATUS_COLORS = { pending: "#6b7280", analyzing: "#2563eb", fixed: "#16a34a", ignored: "#9ca3af" };
+  var BC_STATUS_COLORS = {
+    pending: "#6b7280", analyzing: "#2563eb", fixing: "#f59e0b", fixed: "#16a34a",
+    regression: "#8b5cf6", verified: "#059669", ignored: "#9ca3af"
+  };
+  // 状态流转顺序
+  var BC_STATUS_FLOW = ["pending", "analyzing", "fixing", "fixed", "regression", "verified"];
 
   function viewBadcases() {
     Promise.all([loadTasks(), loadBackends()]).then(function () {
@@ -1107,8 +1167,28 @@
       }
       var convertBtn = b.regression_task_id ? "" : '<button class="btn secondary" id="bc-convert">转化为评测用例</button>';
       var memoryBtn = '<button class="btn secondary" id="bc-to-memory">转化为经验记忆</button>';
+      // 状态流转快捷按钮
+      var currentIdx = BC_STATUS_FLOW.indexOf(b.status);
+      var nextStatus = currentIdx >= 0 && currentIdx < BC_STATUS_FLOW.length - 1 ? BC_STATUS_FLOW[currentIdx + 1] : null;
+      var flowBtns = "";
+      if (nextStatus) {
+        flowBtns = '<button class="btn secondary small" id="bc-flow-next" data-next="' + nextStatus + '">→ ' + BC_STATUS_LABELS[nextStatus] + '</button>';
+      }
+      if (b.status !== "pending") {
+        flowBtns = '<button class="btn secondary small" id="bc-flow-reset">重置为待分析</button>' + flowBtns;
+      }
       renderHTML(
         '<h2 class="page-title">Badcase 详情 · ' + esc(b.id) + '</h2>' +
+        // 状态流转进度条
+        '<div class="bc-flow-bar">' +
+          BC_STATUS_FLOW.map(function(s, i) {
+            var isActive = s === b.status;
+            var isPast = BC_STATUS_FLOW.indexOf(b.status) > i;
+            var cls = isActive ? "bc-flow-active" : isPast ? "bc-flow-past" : "bc-flow-future";
+            return '<div class="bc-flow-node ' + cls + '"><div class="bc-flow-dot"></div><div class="bc-flow-label">' + BC_STATUS_LABELS[s] + '</div></div>' +
+                   (i < BC_STATUS_FLOW.length - 1 ? '<div class="bc-flow-line ' + (isPast ? "bc-flow-past" : "") + '"></div>' : "");
+          }).join("") +
+        '</div>' +
         '<div class="card">' +
           '<div class="form-row">' +
             '<div class="field" style="flex:2"><label>标题</label><input id="bc-title" value="' + esc(b.title) + '"></div>' +
@@ -1127,12 +1207,18 @@
           regressionInfo +
           '<div class="form-row" style="margin-top:16px">' +
             '<button class="btn" id="bc-save">保存修改</button>' +
+            flowBtns +
             convertBtn +
             memoryBtn +
             runLink +
             '<button class="btn danger" id="bc-delete" style="margin-left:auto">删除</button>' +
           "</div>" +
           '<div id="bc-msg"></div>' +
+          // 回归对比报告区域
+          '<div id="bc-regression-section" style="margin-top:24px;border-top:2px solid var(--border-color);padding-top:20px;">' +
+            '<h3 style="margin-bottom:12px;">闭环追踪 · 回归对比报告</h3>' +
+            '<div id="bc-regression-content" class="muted">加载中...</div>' +
+          "</div>" +
           // 转化对话框
           '<div id="bc-convert-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">' +
             '<div style="background:#fff;padding:24px;border-radius:8px;width:560px;max-width:90vw;">' +
@@ -1150,6 +1236,26 @@
         "</div>"
       );
       el("bc-save").onclick = function () { saveBadcase(bid); };
+      // 状态流转快捷按钮
+      var flowNextBtn = el("bc-flow-next");
+      if (flowNextBtn) {
+        flowNextBtn.onclick = function () {
+          var next = flowNextBtn.getAttribute("data-next");
+          if (confirm("确认将状态更新为「" + BC_STATUS_LABELS[next] + "」？")) {
+            flowBadcaseStatus(bid, next);
+          }
+        };
+      }
+      var flowResetBtn = el("bc-flow-reset");
+      if (flowResetBtn) {
+        flowResetBtn.onclick = function () {
+          if (confirm("确认重置为「待分析」状态？")) {
+            flowBadcaseStatus(bid, "pending");
+          }
+        };
+      }
+      // 加载回归对比报告
+      loadBadcaseRegression(bid);
       el("bc-delete").onclick = function () {
         if (confirm("确定删除这条 badcase？")) {
           api("/api/badcases/" + bid, { method: "DELETE" }).then(function () {
@@ -1248,6 +1354,54 @@
       el("bc-msg").innerHTML = '<div class="success-banner">已保存 ✓</div>';
       setTimeout(function () { el("bc-msg").innerHTML = ""; }, 2000);
     }).catch(function (e) { el("bc-msg").innerHTML = '<div class="err-banner">' + esc(e.message) + "</div>"; });
+  }
+
+  // Badcase 状态流转：快速切换到下一个状态
+  function flowBadcaseStatus(bid, newStatus) {
+    api("/api/badcases/" + bid, { method: "PUT", body: { status: newStatus } }).then(function () {
+      el("bc-msg").innerHTML = '<div class="success-banner">状态已更新为「' + BC_STATUS_LABELS[newStatus] + '」✓</div>';
+      setTimeout(function () { viewBadcaseDetail(bid); }, 1000);
+    }).catch(function (e) { el("bc-msg").innerHTML = '<div class="err-banner">' + esc(e.message) + "</div>"; });
+  }
+
+  // 加载 Badcase 回归对比报告
+  function loadBadcaseRegression(bid) {
+    var container = el("bc-regression-content");
+    if (!container) return;
+    api("/api/badcases/" + bid + "/regression-compare").then(function (d) {
+      if (d.error) {
+        container.innerHTML = '<div class="muted">' + esc(d.error) + '</div>';
+        return;
+      }
+      var before = d.before || {};
+      var after = d.after || {};
+      var verdictColor = d.verdict === "修复有效" ? "#16a34a" : d.verdict === "修复无效或需更多数据" ? "#dc2626" : "#6b7280";
+      container.innerHTML =
+        '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;">' +
+          '<div class="rc-card"><div class="rc-label">修复前</div>' +
+            '<div class="rc-value">' + (before.avg_score != null ? before.avg_score.toFixed(3) : "—") + '</div>' +
+            '<div class="rc-sub">平均分 · ' + before.count + ' 次运行</div>' +
+            '<div class="rc-sub">通过率: ' + (before.pass_rate != null ? before.pass_rate + "%" : "—") + '</div>' +
+          "</div>" +
+          '<div class="rc-arrow">→</div>' +
+          '<div class="rc-card"><div class="rc-label">修复后</div>' +
+            '<div class="rc-value" style="color:' + verdictColor + ';">' + (after.avg_score != null ? after.avg_score.toFixed(3) : "—") + '</div>' +
+            '<div class="rc-sub">平均分 · ' + after.count + ' 次运行</div>' +
+            '<div class="rc-sub">通过率: ' + (after.pass_rate != null ? after.pass_rate + "%" : "—") + '</div>' +
+          "</div>" +
+          '<div class="rc-card" style="background:' + verdictColor + '15;border-color:' + verdictColor + ';">' +
+            '<div class="rc-label">改善幅度</div>' +
+            '<div class="rc-value" style="color:' + verdictColor + ';">' + (d.score_improvement != null ? (d.score_improvement > 0 ? "+" : "") + d.score_improvement.toFixed(3) : "—") + '</div>' +
+            '<div class="rc-sub">分数变化</div>' +
+            '<div class="rc-sub" style="font-weight:700;color:' + verdictColor + ';">' + esc(d.verdict) + '</div>' +
+          "</div>" +
+        "</div>" +
+        (d.pass_rate_improvement != null ?
+          '<div class="muted" style="margin-bottom:8px;">通过率变化: ' + (d.pass_rate_improvement > 0 ? "+" : "") + d.pass_rate_improvement + '%</div>' : "") +
+        '<div class="muted" style="font-size:12px;">对比基于 badcase 创建时间和修复时间分割的运行记录。修复后需重新运行该任务才能看到对比数据。</div>';
+    }).catch(function (e) {
+      container.innerHTML = '<div class="muted">回归对比加载失败: ' + esc(e.message) + '</div>';
+    });
   }
 
   // ---------- 视图：经验记忆（V2.9） ----------
