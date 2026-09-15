@@ -132,10 +132,62 @@
   // ---------- 渲染容器 ----------
   function view() { return el("view"); }
 
-  function renderHTML(html) { view().innerHTML = html; }
+  // 路由名称映射（用于面包屑）
+  var ROUTE_NAMES = {
+    overview: "概览", dashboard: "工作台", tasks: "任务管理",
+    packages: "任务包", history: "运行历史", run: "运行详情",
+    badcases: "Badcase", badcase: "Badcase详情",
+    memories: "经验库", memory: "经验详情",
+    compare: "对比矩阵", monitor: "监控", report: "报告", settings: "设置"
+  };
+  function renderBreadcrumb() {
+    var h = location.hash || "#/dashboard";
+    var parts = h.replace(/^#\//, "").split("/");
+    var name = parts[0] || "dashboard";
+    var label = ROUTE_NAMES[name] || name;
+    var crumbs = '<a href="#/dashboard" class="bc-link">首页</a>';
+    if (name !== "dashboard") {
+      crumbs += '<span class="bc-sep">/</span>';
+      if (name === "run" && parts[1]) {
+        crumbs += '<a href="#/history" class="bc-link">运行历史</a>';
+        crumbs += '<span class="bc-sep">/</span>';
+        crumbs += '<span class="bc-current">' + parts[1].substring(0, 8) + '…</span>';
+      } else if (name === "badcase" && parts[1]) {
+        crumbs += '<a href="#/badcases" class="bc-link">Badcase</a>';
+        crumbs += '<span class="bc-sep">/</span>';
+        crumbs += '<span class="bc-current">详情</span>';
+      } else if (name === "memory" && parts[1]) {
+        crumbs += '<a href="#/memories" class="bc-link">经验库</a>';
+        crumbs += '<span class="bc-sep">/</span>';
+        crumbs += '<span class="bc-current">详情</span>';
+      } else {
+        crumbs += '<span class="bc-current">' + label + '</span>';
+      }
+    } else {
+      crumbs += '<span class="bc-sep">/</span><span class="bc-current">工作台</span>';
+    }
+    return '<div class="breadcrumb">' + crumbs + '</div>';
+  }
+  function renderHTML(html) { view().innerHTML = renderBreadcrumb() + html; }
 
   function renderErr(msg) {
     renderHTML('<div class="err-banner">' + esc(msg) + "</div>");
+  }
+
+  // 数字滚动动画
+  function animateNumber(el, target, duration) {
+    duration = duration || 800;
+    var start = 0;
+    var startTime = null;
+    function step(timestamp) {
+      if (!startTime) startTime = timestamp;
+      var progress = Math.min((timestamp - startTime) / duration, 1);
+      var eased = 1 - Math.pow(1 - progress, 3); // easeOutCubic
+      el.textContent = Math.floor(eased * target).toLocaleString();
+      if (progress < 1) requestAnimationFrame(step);
+      else el.textContent = target.toLocaleString();
+    }
+    requestAnimationFrame(step);
   }
 
   // ---------- 视图：工作台 ----------
@@ -220,12 +272,12 @@
         '<h2 class="page-title">概览 · 数据看板</h2>' +
         // KPI 卡片
         '<div class="kpi-row">' +
-          '<div class="kpi"><b>' + tasks.length + '</b><span>任务总数</span></div>' +
-          '<div class="kpi"><b>' + runs.length + '</b><span>运行总数（近50）</span></div>' +
-          '<div class="kpi"><b style="color:#16a34a;">' + passRate + '%</b><span>通过率（score≥0.8）</span></div>' +
-          '<div class="kpi"><b>' + avgDuration + 's</b><span>平均耗时</span></div>' +
-          '<div class="kpi"><b>¥' + totalCost.toFixed(4) + '</b><span>累计成本</span></div>' +
-          '<div class="kpi"><b style="color:#dc2626;">' + badcases.length + '</b><span>Badcase 总数</span></div>' +
+          '<div class="kpi"><b id="kpi-tasks">' + tasks.length + '</b><span>任务总数</span></div>' +
+          '<div class="kpi"><b id="kpi-runs">' + runs.length + '</b><span>运行总数（近50）</span></div>' +
+          '<div class="kpi"><b style="color:#16a34a;" id="kpi-passrate">' + passRate + '%</b><span>通过率（score≥0.8）</span></div>' +
+          '<div class="kpi"><b id="kpi-duration">' + avgDuration + 's</b><span>平均耗时</span></div>' +
+          '<div class="kpi"><b id="kpi-cost">¥' + totalCost.toFixed(4) + '</b><span>累计成本</span></div>' +
+          '<div class="kpi"><b style="color:#dc2626;" id="kpi-badcases">' + badcases.length + '</b><span>Badcase 总数</span></div>' +
         "</div>" +
         // 状态分布
         '<div class="card"><h3>运行状态分布</h3>' +
@@ -252,6 +304,10 @@
       document.querySelectorAll("#app tr.clickable").forEach(function (tr) {
         tr.onclick = function () { location.hash = "#/run/" + tr.getAttribute("data-rid"); };
       });
+      // KPI 数字滚动动画
+      var kpiTasks = el("kpi-tasks"); if (kpiTasks) animateNumber(kpiTasks, tasks.length);
+      var kpiRuns = el("kpi-runs"); if (kpiRuns) animateNumber(kpiRuns, runs.length);
+      var kpiBad = el("kpi-badcases"); if (kpiBad) animateNumber(kpiBad, badcases.length);
     }).catch(function (e) { renderErr(e.message); });
   }
 
@@ -1342,8 +1398,11 @@
       var steps = (r.steps || []).map(function (s, i) {
         var obsTxt = strOf(s.observation);
         var obsHtml = "";
+        var isLong = obsTxt && obsTxt.length > 160;
         if (obsTxt) {
-          obsHtml = '<div class="muted">→ ' + esc(clip(obsTxt, 160)) + "</div>";
+          var displayTxt = isLong ? clip(obsTxt, 160) : esc(obsTxt);
+          obsHtml = '<div class="step-obs' + (isLong ? ' collapsed' : '') + '" data-full="' + esc(obsTxt).replace(/"/g, '&quot;') + '">→ ' + displayTxt +
+            (isLong ? ' <span class="step-toggle" style="color:var(--accent,#2563eb);cursor:pointer;font-weight:600;">展开全文</span>' : '') + "</div>";
           if (obsTxt.indexOf("\uFFFD") >= 0) {
             obsHtml = '<span class="enc-bad" title="该步骤输出含编码损坏字符（历史数据：旧版本按 UTF-8 硬解 GBK 输出所致）；已修复，重新运行任务即可正常显示">编码损坏 ⚠</span> ' + obsHtml;
           }
@@ -1423,6 +1482,22 @@
       );
       loadFiles(runId);
       bindHumanReview(runId);
+      // 步骤折叠/展开
+      document.querySelectorAll(".step-toggle").forEach(function (toggle) {
+        toggle.onclick = function () {
+          var obs = this.closest(".step-obs");
+          var full = obs.getAttribute("data-full");
+          if (obs.classList.contains("collapsed")) {
+            obs.classList.remove("collapsed");
+            obs.innerHTML = "→ " + full + ' <span class="step-toggle" style="color:var(--accent,#2563eb);cursor:pointer;font-weight:600;">收起</span>';
+          } else {
+            obs.classList.add("collapsed");
+            obs.innerHTML = "→ " + full.substring(0, 160) + '… <span class="step-toggle" style="color:var(--accent,#2563eb);cursor:pointer;font-weight:600;">展开全文</span>';
+          }
+          // 重新绑定新的 toggle
+          obs.querySelector(".step-toggle").onclick = arguments.callee;
+        };
+      });
       var markBtn = el("btn-mark-badcase");
       if (markBtn) {
         markBtn.onclick = function () {
@@ -2911,7 +2986,9 @@
           '</div>' +
           '<div id="theme-msg" style="margin-top:10px;font-size:13px;color:var(--text-muted);"></div>' +
         '</div>' +
-        '<div class="card"><h3>API Key 快速配置 <span class="info-icon" title="' + esc(envTooltip) + '">ⓘ</span></h3>' +
+        '<div class="card"><h3>API Key 快速配置 <span class="info-icon" title="' + esc(envTooltip) + '">ⓘ</span>' +
+          '<input type="text" id="env-search" placeholder="搜索配置项..." style="float:right;font-size:12px;padding:5px 10px;border:1px solid var(--border);border-radius:5px;width:180px;">' +
+          '</h3>' +
           '<div id="env-config-list"><div class="empty">加载中...</div></div>' +
           '<div style="margin-top:16px;display:flex;gap:8px;align-items:center;">' +
             '<button class="btn" id="btn-save-env">保存配置</button>' +
@@ -2969,6 +3046,18 @@
         "</div>";
       });
       document.getElementById("env-config-list").innerHTML = html;
+
+      // 搜索过滤
+      var searchInput = document.getElementById("env-search");
+      if (searchInput) {
+        searchInput.oninput = function () {
+          var q = this.value.toLowerCase().trim();
+          document.querySelectorAll(".env-config-item").forEach(function (item) {
+            var text = item.textContent.toLowerCase();
+            item.style.display = (!q || text.indexOf(q) >= 0) ? "" : "none";
+          });
+        };
+      }
 
       // 绑定保存按钮
       var saveBtn = document.getElementById("btn-save-env");
@@ -3143,6 +3232,66 @@
   }
   // 页面加载时应用保存的主题
   applyTheme(localStorage.getItem("agenteval-theme") || "default");
+
+  // ---------- 键盘快捷键 ----------
+  var keyBuffer = "";
+  var keyTimer = null;
+  document.addEventListener("keydown", function (e) {
+    // 输入框中不触发快捷键
+    if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) {
+      if (e.key === "Escape") e.target.blur();
+      return;
+    }
+    // ? 显示快捷键帮助
+    if (e.key === "?") {
+      e.preventDefault();
+      showShortcutHelp();
+      return;
+    }
+    // g 前缀快捷键（g+t 任务，g+h 历史，g+d 工作台，g+c 对比，g+s 设置）
+    if (e.key === "g") {
+      keyBuffer = "g";
+      clearTimeout(keyTimer);
+      keyTimer = setTimeout(function () { keyBuffer = ""; }, 1000);
+      return;
+    }
+    if (keyBuffer === "g") {
+      keyBuffer = "";
+      clearTimeout(keyTimer);
+      var routes = { t: "#/tasks", h: "#/history", d: "#/dashboard", o: "#/overview", c: "#/compare", s: "#/settings", b: "#/badcases", m: "#/memories", r: "#/report" };
+      if (routes[e.key]) {
+        e.preventDefault();
+        location.hash = routes[e.key];
+      }
+      return;
+    }
+    // / 聚焦搜索（如果当前页有搜索框）
+    if (e.key === "/" ) {
+      e.preventDefault();
+      var search = document.getElementById("env-search") || document.querySelector("input[type='search']");
+      if (search) search.focus();
+    }
+  });
+  function showShortcutHelp() {
+    var help = document.createElement("div");
+    help.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:24px 32px;box-shadow:0 20px 60px rgba(0,0,0,0.2);z-index:9999;min-width:320px;";
+    help.innerHTML = '<h3 style="margin:0 0 16px 0;font-size:16px;">键盘快捷键</h3>' +
+      '<div style="display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13px;">' +
+      '<code style="background:var(--bg-tertiary);padding:2px 8px;border-radius:4px;">g t</code><span>跳转任务管理</span>' +
+      '<code style="background:var(--bg-tertiary);padding:2px 8px;border-radius:4px;">g h</code><span>跳转运行历史</span>' +
+      '<code style="background:var(--bg-tertiary);padding:2px 8px;border-radius:4px;">g d</code><span>跳转工作台</span>' +
+      '<code style="background:var(--bg-tertiary);padding:2px 8px;border-radius:4px;">g c</code><span>跳转对比矩阵</span>' +
+      '<code style="background:var(--bg-tertiary);padding:2px 8px;border-radius:4px;">g s</code><span>跳转设置</span>' +
+      '<code style="background:var(--bg-tertiary);padding:2px 8px;border-radius:4px;">g b</code><span>跳转Badcase</span>' +
+      '<code style="background:var(--bg-tertiary);padding:2px 8px;border-radius:4px;">/</code><span>聚焦搜索框</span>' +
+      '<code style="background:var(--bg-tertiary);padding:2px 8px;border-radius:4px;">?</code><span>显示此帮助</span>' +
+      '<code style="background:var(--bg-tertiary);padding:2px 8px;border-radius:4px;">Esc</code><span>关闭弹窗/取消输入</span>' +
+      '</div>' +
+      '<div style="margin-top:16px;text-align:center;font-size:12px;color:var(--text-muted);">按任意键关闭</div>';
+    document.body.appendChild(help);
+    var close = function () { help.remove(); document.removeEventListener("keydown", close); };
+    setTimeout(function () { document.addEventListener("keydown", close); }, 100);
+  }
 
   // ---------- 启动 ----------
   loadMeta().catch(function () {});
