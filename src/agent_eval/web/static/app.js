@@ -2888,6 +2888,29 @@
           "<tr><td>任务目录 tasks_dir</td><td class='path-cell' title='" + esc(meta.tasks_dir) + "'>" + esc(meta.tasks_dir) + "</td></tr>" +
           "<tr><td>结果目录 results_dir</td><td class='path-cell' title='" + esc(meta.results_dir) + "'>" + esc(meta.results_dir) + "</td></tr>" +
           "<tr><td>报告目录 report_dir</td><td class='path-cell' title='" + esc(meta.report_dir) + "'>" + esc(meta.report_dir) + "</td></tr></table></div>" +
+        '<div class="card"><h3>外观主题 <span class="info-icon" title="选择配色方案，即时生效，保存在浏览器本地">ⓘ</span></h3>' +
+          '<div class="theme-picker" id="theme-picker">' +
+            '<div class="theme-option" data-theme="default" style="--theme-main:#0a0a0a;--theme-bg:#ffffff;--theme-accent:#0a0a0a;">' +
+              '<div class="theme-preview"><div class="tp-nav"></div><div class="tp-body"><div class="tp-card"></div><div class="tp-card"></div></div></div>' +
+              '<div class="theme-name">默认（黑白灰）</div></div>' +
+            '<div class="theme-option" data-theme="warm-brown" style="--theme-main:#3D2914;--theme-bg:#FAF7F2;--theme-accent:#D97706;">' +
+              '<div class="theme-preview"><div class="tp-nav"></div><div class="tp-body"><div class="tp-card"></div><div class="tp-card"></div></div></div>' +
+              '<div class="theme-name">A 暖米棕</div></div>' +
+            '<div class="theme-option" data-theme="forest-green" style="--theme-main:#1A3A2A;--theme-bg:#F7F5F0;--theme-accent:#2D6A4F;">' +
+              '<div class="theme-preview"><div class="tp-nav"></div><div class="tp-body"><div class="tp-card"></div><div class="tp-card"></div></div></div>' +
+              '<div class="theme-name">B 墨绿米白</div></div>' +
+            '<div class="theme-option" data-theme="navy-blue" style="--theme-main:#1E3A5F;--theme-bg:#F5F7FA;--theme-accent:#3B82F6;">' +
+              '<div class="theme-preview"><div class="tp-nav"></div><div class="tp-body"><div class="tp-card"></div><div class="tp-card"></div></div></div>' +
+              '<div class="theme-name">C 藏蓝浅灰</div></div>' +
+            '<div class="theme-option" data-theme="charcoal-warm" style="--theme-main:#1F2937;--theme-bg:#F9FAFB;--theme-accent:#B45309;">' +
+              '<div class="theme-preview"><div class="tp-nav"></div><div class="tp-body"><div class="tp-card"></div><div class="tp-card"></div></div></div>' +
+              '<div class="theme-name">D 炭黑暖灰</div></div>' +
+            '<div class="theme-option" data-theme="teal-fresh" style="--theme-main:#0F3D3E;--theme-bg:#F0F7F7;--theme-accent:#0D9488;">' +
+              '<div class="theme-preview"><div class="tp-nav"></div><div class="tp-body"><div class="tp-card"></div><div class="tp-card"></div></div></div>' +
+              '<div class="theme-name">E 深青浅青</div></div>' +
+          '</div>' +
+          '<div id="theme-msg" style="margin-top:10px;font-size:13px;color:var(--text-muted);"></div>' +
+        '</div>' +
         '<div class="card"><h3>API Key 快速配置 <span class="info-icon" title="' + esc(envTooltip) + '">ⓘ</span></h3>' +
           '<div id="env-config-list"><div class="empty">加载中...</div></div>' +
           '<div style="margin-top:16px;display:flex;gap:8px;align-items:center;">' +
@@ -2899,6 +2922,24 @@
         '<div class="card"><h3>启动方式</h3><pre class="code">pip install -e ".[web]"&#10;python -m agent_eval.web --port 8000&#10;# 浏览器打开 http://127.0.0.1:8000</pre></div>'
       );
       loadEnvConfig();
+      // 绑定主题选择
+      var currentTheme = localStorage.getItem("agenteval-theme") || "default";
+      document.querySelectorAll(".theme-option").forEach(function (opt) {
+        if (opt.dataset.theme === currentTheme) opt.classList.add("active");
+        opt.onclick = function () {
+          var theme = opt.dataset.theme;
+          applyTheme(theme);
+          localStorage.setItem("agenteval-theme", theme);
+          document.querySelectorAll(".theme-option").forEach(function (o) { o.classList.remove("active"); });
+          opt.classList.add("active");
+          var msg = document.getElementById("theme-msg");
+          if (msg) {
+            msg.style.color = "var(--success)";
+            msg.textContent = "✓ 已切换到「" + opt.querySelector(".theme-name").textContent + "」主题";
+            setTimeout(function () { msg.textContent = ""; }, 2500);
+          }
+        };
+      });
     }).catch(function (e) { renderErr(e.message); });
   }
 
@@ -3091,6 +3132,17 @@
     else if (name === "settings") viewSettings();
     else viewDashboard();
   }
+
+  // ---------- 主题切换 ----------
+  function applyTheme(theme) {
+    if (theme === "default" || !theme) {
+      document.documentElement.removeAttribute("data-theme");
+    } else {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+  }
+  // 页面加载时应用保存的主题
+  applyTheme(localStorage.getItem("agenteval-theme") || "default");
 
   // ---------- 启动 ----------
   loadMeta().catch(function () {});

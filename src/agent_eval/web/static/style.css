@@ -13,6 +13,7 @@
   --text-primary: #0a0a0a;
   --text-secondary: #666666;
   --text-muted: #999999;
+  --accent: #0a0a0a;
   --success: #16a34a;
   --success-bg: #f0fdf4;
   --warning: #d97706;
@@ -23,6 +24,116 @@
   --info-bg: #eff6ff;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', Consolas, monospace;
   --font-sans: -apple-system, 'SF Pro Display', 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+/* 方案 A：暖米棕（温暖自然） */
+[data-theme="warm-brown"] {
+  --bg: #FAF7F2;
+  --bg-secondary: #F5F0E8;
+  --bg-tertiary: #EDE6DA;
+  --bg-code: #2D1F14;
+  --border: #D4CFC5;
+  --border-light: #E5E0D8;
+  --text-primary: #3D2914;
+  --text-secondary: #6B5D4F;
+  --text-muted: #9C8E7F;
+  --accent: #D97706;
+  --success: #16a34a;
+  --success-bg: #f0fdf4;
+  --warning: #D97706;
+  --warning-bg: #FFF7ED;
+  --danger: #dc2626;
+  --danger-bg: #fef2f2;
+  --info: #92400E;
+  --info-bg: #FEF3C7;
+}
+
+/* 方案 B：墨绿米白（自然专业） */
+[data-theme="forest-green"] {
+  --bg: #F7F5F0;
+  --bg-secondary: #F0EDE4;
+  --bg-tertiary: #E5E1D5;
+  --bg-code: #0D1F17;
+  --border: #D4D0C5;
+  --border-light: #E5E2D8;
+  --text-primary: #1A3A2A;
+  --text-secondary: #4A5D52;
+  --text-muted: #7A8A80;
+  --accent: #2D6A4F;
+  --success: #16a34a;
+  --success-bg: #f0fdf4;
+  --warning: #B45309;
+  --warning-bg: #FFFBEB;
+  --danger: #dc2626;
+  --danger-bg: #fef2f2;
+  --info: #2D6A4F;
+  --info-bg: #ECFDF5;
+}
+
+/* 方案 C：藏蓝浅灰（商务科技） */
+[data-theme="navy-blue"] {
+  --bg: #F5F7FA;
+  --bg-secondary: #EDF0F5;
+  --bg-tertiary: #E2E8F0;
+  --bg-code: #0F1E33;
+  --border: #CBD5E1;
+  --border-light: #E2E8F0;
+  --text-primary: #1E3A5F;
+  --text-secondary: #475569;
+  --text-muted: #94A3B8;
+  --accent: #3B82F6;
+  --success: #16a34a;
+  --success-bg: #f0fdf4;
+  --warning: #D97706;
+  --warning-bg: #FFFBEB;
+  --danger: #dc2626;
+  --danger-bg: #fef2f2;
+  --info: #3B82F6;
+  --info-bg: #EFF6FF;
+}
+
+/* 方案 D：炭黑暖灰（高级简约） */
+[data-theme="charcoal-warm"] {
+  --bg: #F9FAFB;
+  --bg-secondary: #F3F4F6;
+  --bg-tertiary: #E5E7EB;
+  --bg-code: #111827;
+  --border: #D1D5DB;
+  --border-light: #E5E7EB;
+  --text-primary: #1F2937;
+  --text-secondary: #4B5563;
+  --text-muted: #9CA3AF;
+  --accent: #B45309;
+  --success: #16a34a;
+  --success-bg: #f0fdf4;
+  --warning: #B45309;
+  --warning-bg: #FFFBEB;
+  --danger: #dc2626;
+  --danger-bg: #fef2f2;
+  --info: #6B7280;
+  --info-bg: #F3F4F6;
+}
+
+/* 方案 E：深青浅青（清新科技） */
+[data-theme="teal-fresh"] {
+  --bg: #F0F7F7;
+  --bg-secondary: #E6F0F0;
+  --bg-tertiary: #D4E4E4;
+  --bg-code: #082323;
+  --border: #B8D4D4;
+  --border-light: #D4E4E4;
+  --text-primary: #0F3D3E;
+  --text-secondary: #3D6B6C;
+  --text-muted: #6B9A9B;
+  --accent: #0D9488;
+  --success: #16a34a;
+  --success-bg: #f0fdf4;
+  --warning: #B45309;
+  --warning-bg: #FFFBEB;
+  --danger: #dc2626;
+  --danger-bg: #fef2f2;
+  --info: #0D9488;
+  --info-bg: #F0FDFA;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -171,6 +282,65 @@ a.btn { text-decoration: none; display: inline-flex; }
   max-width: 400px; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; font-family: var(--font-mono); font-size: 12px;
   cursor: help;
+}
+
+/* ---------- 主题选择器 ---------- */
+.theme-picker {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-top: 8px;
+}
+.theme-option {
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--bg);
+}
+.theme-option:hover {
+  border-color: var(--text-secondary);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+.theme-option.active {
+  border-color: var(--accent, var(--text-primary));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, var(--text-primary)) 15%, transparent);
+}
+.theme-preview {
+  height: 60px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(0,0,0,0.1);
+  margin-bottom: 8px;
+  background: var(--theme-bg);
+}
+.tp-nav {
+  height: 14px;
+  background: var(--theme-main);
+}
+.tp-body {
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+}
+.tp-card {
+  flex: 1;
+  height: 28px;
+  background: #fff;
+  border-radius: 3px;
+  border: 1px solid rgba(0,0,0,0.08);
+}
+.tp-card:first-child {
+  background: var(--theme-accent);
+  opacity: 0.8;
+}
+.theme-name {
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text-primary);
 }
 
 /* ---------- 成本预览 ---------- */
