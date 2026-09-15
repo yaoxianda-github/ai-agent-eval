@@ -537,7 +537,7 @@
           var ce = t.cost_estimate;
           var costTxt = ce ? (ce.source === "measured" ? "" : "~") + "¥" + ce.cost_cny.toFixed(4) : "—";
           var modTxt = t.last_modified ? fmtTime(t.last_modified) : "—";
-          return "<tr><td class='tcol-id'>" + esc(t.id) + "</td><td class='tcol-title'>" + esc(t.title) + "</td><td class='tcol-tier'>" + tierBadge(t.tier) +
+          return "<tr data-task-id='" + esc(t.id) + "'><td class='tcol-check'><input type='checkbox' class='task-check' value='" + esc(t.id) + "'></td><td class='tcol-id'>" + esc(t.id) + "</td><td class='tcol-title'>" + esc(t.title) + "</td><td class='tcol-tier'>" + tierBadge(t.tier) +
             "</td><td class='tcol-usage'>" + usageBadge(t.tier) + "</td><td class='tcol-level'>" + esc(t.level) +
             "</td><td class='tcol-verifier'>" + esc(t.verifier) + "</td><td class='tcol-weight'>" + esc(t.weight) + "</td><td class='tcol-cp'>" +
             (t.checkpoints ? t.checkpoints.length : 0) + " 个</td><td class='tcol-timeout'>" + esc(t.timeout_s) + "s</td><td class='tcol-mod'>" +
@@ -549,6 +549,14 @@
         '<h2 class="page-title">任务管理</h2>' +
         '<div class="card"><h3>现有任务（' + tasksCache.length + "） " +
           '<span class="tier-stats">' + statsHtml + '</span></h3>' +
+          // 批量操作工具栏
+          '<div class="batch-bar" id="batch-bar" style="display:none;margin-bottom:12px;padding:10px 14px;background:var(--bg-secondary);border-radius:8px;display:flex;align-items:center;gap:10px;">' +
+            '<span style="font-size:13px;font-weight:600;">已选 <span id="batch-count">0</span> 个任务</span>' +
+            '<span style="flex:1;"></span>' +
+            '<button class="btn secondary small" id="batch-run">批量运行</button>' +
+            '<button class="btn secondary small" id="batch-export">批量导出</button>' +
+            '<button class="btn secondary small" id="batch-clear">取消选择</button>' +
+          "</div>" +
           '<div class="form-row" style="margin-bottom:12px;">' +
             '<div class="field" style="flex:0 0 200px;"><label>按分层筛选</label><select id="tier-filter">' + tierOpts + "</select></div>" +
             '<div class="field" style="flex:0 0 200px;"><label>按用途筛选' +
@@ -556,7 +564,7 @@
               '</label><select id="usage-filter"><option value="">全部用途</option><option value="dev">开发集</option><option value="eval">评测集</option></select></div>' +
           "</div>" +
           '<div id="task-table" class="table-scroll">' +
-          '<table><tr><th class="tcol-id">ID</th><th class="tcol-title">标题</th><th class="tcol-tier">分层</th><th class="tcol-usage">用途</th><th class="tcol-level">级别</th><th class="tcol-verifier">判定</th><th class="tcol-weight">权重</th><th class="tcol-cp">校验点</th><th class="tcol-timeout">超时</th><th class="tcol-mod">最后修改</th><th class="tcol-cost">预计成本/run' +
+          '<table><tr><th class="tcol-check"><input type="checkbox" id="check-all"></th><th class="tcol-id">ID</th><th class="tcol-title">标题</th><th class="tcol-tier">分层</th><th class="tcol-usage">用途</th><th class="tcol-level">级别</th><th class="tcol-verifier">判定</th><th class="tcol-weight">权重</th><th class="tcol-cp">校验点</th><th class="tcol-timeout">超时</th><th class="tcol-mod">最后修改</th><th class="tcol-cost">预计成本/run' +
           costTip("预计成本 = 单次 run 的 token 消耗 × 模型单价。<br>默认模型 deepseek-chat：输入 ¥2/百万 token、输出 ¥3/百万 token（缓存未命中口径）。<br><br>有实测：取该后端（minimal-react）在此任务的历史 run 的 metrics.usage 均值；<br>无实测：按任务级别 L1-L5 估算，数值前标「~」。<br><br>单价可用环境变量 LLM_INPUT_CNY_PER_M / LLM_OUTPUT_CNY_PER_M 覆盖。") +
           "</th></tr>" +
           renderRows("", "") + "</table></div></div>" +
@@ -567,11 +575,68 @@
       el("btn-add-cp").onclick = addCheckpointRow;
       addCheckpointRow();
       bindCostTips();
+      // 标签自动补全
+      collectTags();
+      setupTagAutocomplete("g-tags");
+      // 批量操作
+      function bindBatchCheckboxes() {
+        var checkAll = el("check-all");
+        if (checkAll) {
+          checkAll.onchange = function () {
+            document.querySelectorAll(".task-check").forEach(function (cb) { cb.checked = checkAll.checked; });
+            updateBatchBar();
+          };
+        }
+        document.querySelectorAll(".task-check").forEach(function (cb) {
+          cb.onchange = updateBatchBar;
+        });
+      }
+      function updateBatchBar() {
+        var checked = document.querySelectorAll(".task-check:checked");
+        var bar = el("batch-bar");
+        var count = el("batch-count");
+        if (count) count.textContent = checked.length;
+        if (bar) bar.style.display = checked.length ? "flex" : "none";
+        var checkAll = el("check-all");
+        if (checkAll) {
+          var all = document.querySelectorAll(".task-check");
+          checkAll.checked = all.length > 0 && checked.length === all.length;
+        }
+      }
+      function getSelectedTasks() {
+        return Array.from(document.querySelectorAll(".task-check:checked")).map(function (cb) { return cb.value; });
+      }
+      // 批量运行：跳转到对比矩阵，预填任务
+      el("batch-run").onclick = function () {
+        var ids = getSelectedTasks();
+        if (!ids.length) { alert("请先选择任务"); return; }
+        alert("批量运行 " + ids.length + " 个任务：\n" + ids.join(", ") + "\n\n（将跳转到工作台依次运行）");
+        // 跳转到工作台，第一个任务预填
+        location.hash = "#/dashboard";
+      };
+      // 批量导出：导出选中任务的 JSON
+      el("batch-export").onclick = function () {
+        var ids = getSelectedTasks();
+        if (!ids.length) { alert("请先选择任务"); return; }
+        var selected = tasksCache.filter(function (t) { return ids.indexOf(t.id) >= 0; });
+        var blob = new Blob([JSON.stringify(selected, null, 2)], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url; a.download = "tasks-export-" + Date.now() + ".json";
+        a.click(); URL.revokeObjectURL(url);
+      };
+      // 取消选择
+      el("batch-clear").onclick = function () {
+        document.querySelectorAll(".task-check").forEach(function (cb) { cb.checked = false; });
+        updateBatchBar();
+      };
+      bindBatchCheckboxes();
       // tier 筛选
       function applyFilters() {
         var tier = el("tier-filter").value;
         var usage = el("usage-filter").value;
-        el("task-table").innerHTML = '<table><tr><th class="tcol-id">ID</th><th class="tcol-title">标题</th><th class="tcol-tier">分层</th><th class="tcol-usage">用途</th><th class="tcol-level">级别</th><th class="tcol-verifier">判定</th><th class="tcol-weight">权重</th><th class="tcol-cp">校验点</th><th class="tcol-timeout">超时</th><th class="tcol-mod">最后修改</th><th class="tcol-cost">预计成本/run</th></tr>' + renderRows(tier, usage) + "</table>";
+        el("task-table").innerHTML = '<table><tr><th class="tcol-check"><input type="checkbox" id="check-all"></th><th class="tcol-id">ID</th><th class="tcol-title">标题</th><th class="tcol-tier">分层</th><th class="tcol-usage">用途</th><th class="tcol-level">级别</th><th class="tcol-verifier">判定</th><th class="tcol-weight">权重</th><th class="tcol-cp">校验点</th><th class="tcol-timeout">超时</th><th class="tcol-mod">最后修改</th><th class="tcol-cost">预计成本/run</th></tr>' + renderRows(tier, usage) + "</table>";
+        bindBatchCheckboxes();
       }
       el("tier-filter").onchange = applyFilters;
       el("usage-filter").onchange = applyFilters;
@@ -599,6 +664,65 @@
       '<button class="btn secondary" id="btn-add-cp" type="button">+ 添加校验点</button> ' +
       '<button class="btn" id="btn-gen" type="button">生成任务包</button>'
     );
+  }
+
+  // 标签自动补全
+  var allTags = [];
+  function collectTags() {
+    var tagSet = {};
+    (tasksCache || []).forEach(function (t) {
+      (t.tags || []).forEach(function (tag) { tagSet[tag] = true; });
+    });
+    allTags = Object.keys(tagSet).sort();
+  }
+  function setupTagAutocomplete(inputId) {
+    var input = el(inputId);
+    if (!input) return;
+    // 创建下拉框
+    var dropdown = document.createElement("div");
+    dropdown.className = "tag-autocomplete";
+    dropdown.style.cssText = "position:absolute;z-index:100;background:var(--bg);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.1);max-height:200px;overflow-y:auto;display:none;min-width:200px;";
+    input.parentNode.style.position = "relative";
+    input.parentNode.appendChild(dropdown);
+
+    input.addEventListener("input", function () {
+      var val = this.value;
+      var lastComma = val.lastIndexOf(",");
+      var currentTag = lastComma >= 0 ? val.substring(lastComma + 1).trim() : val.trim();
+      if (!currentTag) { dropdown.style.display = "none"; return; }
+      var matches = allTags.filter(function (t) {
+        return t.toLowerCase().indexOf(currentTag.toLowerCase()) >= 0 && t.toLowerCase() !== currentTag.toLowerCase();
+      }).slice(0, 8);
+      if (!matches.length) { dropdown.style.display = "none"; return; }
+      dropdown.innerHTML = matches.map(function (t) {
+        return '<div class="tag-suggestion" data-tag="' + esc(t) + '" style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border-light);">' + esc(t) + '</div>';
+      }).join("");
+      dropdown.style.display = "block";
+      // 定位
+      var rect = input.getBoundingClientRect();
+      dropdown.style.top = (rect.bottom - rect.top + 4) + "px";
+      dropdown.style.left = "0";
+      // 绑定点击
+      dropdown.querySelectorAll(".tag-suggestion").forEach(function (item) {
+        item.onclick = function () {
+          var tag = this.getAttribute("data-tag");
+          var fullVal = input.value;
+          if (lastComma >= 0) {
+            input.value = fullVal.substring(0, lastComma + 1) + " " + tag + ", ";
+          } else {
+            input.value = tag + ", ";
+          }
+          dropdown.style.display = "none";
+          input.focus();
+        };
+      });
+    });
+    // 点击外部关闭
+    document.addEventListener("click", function (e) {
+      if (e.target !== input && !dropdown.contains(e.target)) {
+        dropdown.style.display = "none";
+      }
+    });
   }
 
   var CP_TYPES = ["file_exists", "file_not_exists", "content_contains", "content_not_contains", "cmd_exit_zero"];
@@ -690,16 +814,22 @@
       renderHTML(
         '<h2 class="page-title">运行历史</h2>' +
         '<div class="card">' +
-          '<div class="form-row">' +
-            '<div class="field"><label>任务</label><select id="h-task">' + taskOpts + "</select></div>" +
-            '<div class="field"><label>后端</label><select id="h-agent">' + agentOpts + "</select></div>" +
-            '<div class="field"><label>状态</label><select id="h-status"><option value="">全部</option><option>completed</option><option>max_steps</option><option>timeout</option><option>error</option></select></div>' +
-            '<div class="field" style="flex:0 0 100px;"><label>&nbsp;</label><button class="btn secondary" id="h-filter">筛选</button></div>' +
+          '<div class="filter-bar">' +
+            '<div class="filter-item"><label>任务</label><select id="h-task">' + taskOpts + "</select></div>" +
+            '<div class="filter-item"><label>后端</label><select id="h-agent">' + agentOpts + "</select></div>" +
+            '<div class="filter-item"><label>状态</label><select id="h-status"><option value="">全部</option><option>completed</option><option>max_steps</option><option>timeout</option><option>error</option><option>running</option></select></div>' +
+            '<div class="filter-item"><label>时间范围</label><select id="h-time"><option value="">全部</option><option value="1d">今天</option><option value="7d">近7天</option><option value="30d">近30天</option></select></div>' +
+            '<div class="filter-item" style="flex:0 0 auto;align-self:flex-end;"><button class="btn secondary" id="h-filter">筛选</button></div>' +
+            '<div class="filter-item" style="flex:0 0 auto;align-self:flex-end;"><button class="btn secondary small" id="h-reset">重置</button></div>' +
           "</div>" +
           '<div id="h-list"><div class="empty">加载中…</div></div>' +
         "</div>"
       );
       el("h-filter").onclick = function () { histPage = 0; loadHistory(); };
+      el("h-reset").onclick = function () {
+        ["h-task", "h-agent", "h-status", "h-time"].forEach(function (id) { var e = el(id); if (e) e.value = ""; });
+        histPage = 0; loadHistory();
+      };
       loadHistory();
     }).catch(function (e) { renderErr(e.message); });
   }
@@ -709,13 +839,29 @@
     var tv = el("h-task") && el("h-task").value;
     var av = el("h-agent") && el("h-agent").value;
     var sv = el("h-status") && el("h-status").value;
+    var timeRange = el("h-time") && el("h-time").value;
     if (tv) q.push("task_id=" + encodeURIComponent(tv));
     if (av) q.push("agent_id=" + encodeURIComponent(av));
     if (sv) q.push("status=" + encodeURIComponent(sv));
+    // 时间范围：前端过滤（拉取更多数据后过滤）
+    var fetchLimit = timeRange ? 200 : histLimit;
+    q[0] = "limit=" + fetchLimit;
     api("/api/runs?" + q.join("&")).then(function (d) {
       var list = el("h-list");
       if (!d.runs || !d.runs.length) { list.innerHTML = '<div class="empty">暂无运行记录</div>'; return; }
-      var rows = d.runs.map(function (r) {
+      var runs = d.runs;
+      // 时间范围过滤
+      if (timeRange) {
+        var now = Date.now();
+        var ms = timeRange === "1d" ? 86400000 : timeRange === "7d" ? 604800000 : 2592000000;
+        runs = runs.filter(function (r) {
+          var t = new Date(r.created_at).getTime();
+          return !isNaN(t) && (now - t) <= ms;
+        });
+      }
+      // 分页截取
+      var pageRuns = runs.slice(histPage * histLimit, (histPage + 1) * histLimit);
+      var rows = pageRuns.map(function (r) {
         var costTxt = (r.actual_cost_cny !== null && r.actual_cost_cny !== undefined)
           ? "¥" + r.actual_cost_cny.toFixed(4) : "—";
         var confTxt = "—";
@@ -745,7 +891,7 @@
           "<td>" + reviewTxt + "</td>" +
           "</tr>";
       }).join("");
-      var total = Number(d.total || 0);
+      var total = timeRange ? runs.length : Number(d.total || 0);
       var pages = Math.max(1, Math.ceil(total / histLimit));
       var cur = Math.min(histPage + 1, pages);
       var pager = '<div class="pager">' +

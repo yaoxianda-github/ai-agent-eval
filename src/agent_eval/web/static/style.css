@@ -286,6 +286,22 @@ a.btn { text-decoration: none; display: inline-flex; }
   box-shadow: 0 4px 16px rgba(0,0,0,0.06);
 }
 
+/* ---------- 筛选栏 ---------- */
+.filter-bar {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  align-items: flex-end; margin-bottom: 16px;
+  padding: 14px 16px; background: var(--bg-secondary);
+  border-radius: 8px;
+}
+.filter-item { display: flex; flex-direction: column; gap: 4px; }
+.filter-item label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+.filter-item select {
+  padding: 6px 10px; border: 1px solid var(--border);
+  border-radius: 6px; font-size: 13px; background: var(--bg);
+  cursor: pointer; min-width: 120px;
+}
+.filter-item select:focus { outline: none; border-color: var(--text-primary); }
+
 /* ---------- 面包屑导航 ---------- */
 .breadcrumb {
   display: flex; align-items: center; gap: 6px;
@@ -436,6 +452,8 @@ tr.clickable:hover { background: var(--bg-secondary); }
 .anchor-link.active { background: var(--text-primary); color: var(--bg); }
 
 /* 任务管理表格列宽 */
+.tcol-check { width: 36px; text-align: center; }
+.tcol-check input[type="checkbox"] { cursor: pointer; accent-color: var(--text-primary); width: 16px; height: 16px; }
 .tcol-id { min-width: 70px; font-family: var(--font-mono); font-weight: 600; }
 .tcol-title { min-width: 200px; max-width: 300px; }
 .tcol-tier { min-width: 80px; text-align: center; }
