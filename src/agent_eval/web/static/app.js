@@ -272,12 +272,16 @@
             '<div class="field"><label>Agent 后端</label><select id="f-agent">' + backendOpts + "</select></div>" +
           "</div>" +
           '<div class="form-row">' +
-            '<div class="field"><label>模型（按后端自动填充）</label><input id="f-model" value=""></div>' +
+            '<div class="field"><label>模型（按后端自动填充）</label><input id="f-model" value="" placeholder="选择后端后自动填充"></div>' +
             '<div class="field"><label>超时（秒，留空用任务默认）</label><input id="f-timeout" type="number" placeholder="300"></div>' +
-            '<div class="field"><label>采样次数 --runs</label><input id="f-runs" type="number" value="1" min="1" max="20"></div>' +
+            '<div class="field"><label>采样次数 --runs <span class="muted" style="font-weight:400;font-size:11px;">对抗 LLM 非确定性</span></label><input id="f-runs" type="number" value="1" min="1" max="20"></div>' +
           "</div>" +
-          '<div class="form-row"><div class="field"><label>预计 LLM 成本</label><span id="f-cost" class="muted">—</span></div></div>' +
-          '<button class="btn" id="btn-run">开始运行</button> <span class="muted">多 run 采样用于对抗 LLM 非确定性</span>' +
+          '<div class="cost-preview" id="cost-preview">' +
+            '<div class="cost-preview-label">预计 LLM 成本</div>' +
+            '<div class="cost-preview-value" id="f-cost">¥0.0000</div>' +
+            '<div class="cost-preview-note">基于任务预估 token × 模型单价，实际成本以运行后为准</div>' +
+          "</div>" +
+          '<button class="btn btn-primary" id="btn-run">开始运行</button>' +
         "</div>" +
         '<div id="run-result"></div>' +
         '<div class="card" style="margin-top:20px;">' +
@@ -670,12 +674,16 @@
           var rl = r.human_review_passed ? "人工通过" : "人工不通过";
           reviewTxt = '<span style="color:' + rc + ';font-weight:600;">' + rl + "</span>";
         }
+        // 耗时颜色编码：<30s 绿，30-120s 橙，>120s 红
+        var dur = r.duration_s || 0;
+        var durColor = dur < 30 ? "#16a34a" : (dur < 120 ? "#d97706" : "#dc2626");
+        var durTxt = '<span style="color:' + durColor + ';font-weight:600;">' + fmtDur(dur) + "</span>";
         return '<tr class="clickable" data-rid="' + esc(r.run_id) + '">' +
           '<td class="col-time" title="' + esc(fmtTime(r.created_at)) + '">' + esc(fmtRelative(r.created_at)) + "</td>" +
-          '<td class="col-runid"><b>' + esc(r.run_id) + "</b></td>" +
+          '<td class="col-runid"><b class="run-id-copy" data-id="' + esc(r.run_id) + '" title="点击复制">' + esc(r.run_id) + "</b></td>" +
           '<td class="col-task">' + esc(r.task_id) + '</td><td class="col-agent">' + esc(r.agent_id) + "</td>" +
           "<td>" + statusBadge(r.status) + "</td>" +
-          '<td class="col-score">' + esc(r.score) + '</td><td class="col-duration">' + fmtDur(r.duration_s) + "</td><td>" + esc(r.steps) + "</td>" +
+          '<td class="col-score">' + esc(r.score) + '</td><td class="col-duration">' + durTxt + "</td><td>" + esc(r.steps) + "</td>" +
           '<td class="col-cost">' + costTxt + "</td>" +
           '<td class="col-conf">' + confTxt + "</td>" +
           "<td>" + reviewTxt + "</td>" +
@@ -702,6 +710,27 @@
       var prevBtn = el("h-prev"), nextBtn = el("h-next");
       if (prevBtn) prevBtn.onclick = function () { if (histPage > 0) { histPage--; loadHistory(); } };
       if (nextBtn) nextBtn.onclick = function () { if (histPage < pages - 1) { histPage++; loadHistory(); } };
+      // RUN_ID 点击复制
+      list.querySelectorAll(".run-id-copy").forEach(function (el) {
+        el.style.cursor = "pointer";
+        el.onclick = function (e) {
+          e.stopPropagation();
+          var id = el.getAttribute("data-id");
+          navigator.clipboard.writeText(id).then(function () {
+            var orig = el.textContent;
+            el.textContent = "已复制 ✓";
+            el.style.color = "#16a34a";
+            setTimeout(function () { el.textContent = orig; el.style.color = ""; }, 1200);
+          }).catch(function () {
+            // fallback
+            var ta = document.createElement("textarea");
+            ta.value = id; document.body.appendChild(ta); ta.select();
+            document.execCommand("copy"); document.body.removeChild(ta);
+            el.textContent = "已复制 ✓"; el.style.color = "#16a34a";
+            setTimeout(function () { el.textContent = id; el.style.color = ""; }, 1200);
+          });
+        };
+      });
       bindCostTips();
     }).catch(function (e) { el("h-list").innerHTML = '<div class="err-banner">' + esc(e.message) + "</div>"; });
   }
@@ -1361,8 +1390,11 @@
       }
       renderHTML(
         '<h2 class="page-title">运行详情 ' +
-          '<a class="btn secondary" style="float:right;margin-left:8px;" href="#/history">← 返回历史</a>' +
-          '<button class="btn secondary" id="btn-mark-badcase" style="float:right;">标记为 badcase</button>' +
+          '<span style="float:right;display:flex;gap:8px;">' +
+          '<a class="btn secondary" href="#/history">← 返回历史</a>' +
+          '<button class="btn secondary" id="btn-rerun">重新运行</button>' +
+          '<button class="btn secondary" id="btn-mark-badcase">标记为 badcase</button>' +
+          '</span>' +
         '</h2>' +
         '<div class="anchor-nav" id="run-anchor-nav">' +
           '<a href="#run-verdict" class="anchor-link">判定结果</a>' +
@@ -1405,6 +1437,26 @@
             markBtn.disabled = false;
             markBtn.textContent = "标记为 badcase";
             alert("标记失败: " + e.message);
+          });
+        };
+      }
+      // 重新运行按钮
+      var rerunBtn = el("btn-rerun");
+      if (rerunBtn) {
+        rerunBtn.onclick = function () {
+          if (!confirm("确认使用相同配置重新运行此任务？")) return;
+          rerunBtn.disabled = true;
+          rerunBtn.textContent = "启动中…";
+          api("/api/runs", {
+            method: "POST",
+            body: { task_id: r.task_id, agent_id: r.agent_id, model: r.model || "", runs: 1 }
+          }).then(function (d) {
+            rerunBtn.textContent = "✓ 已启动";
+            setTimeout(function () { location.hash = "#/run/" + d.run_id; }, 800);
+          }).catch(function (e) {
+            rerunBtn.disabled = false;
+            rerunBtn.textContent = "重新运行";
+            alert("启动失败: " + e.message);
           });
         };
       }
@@ -2832,10 +2884,10 @@
       renderHTML(
         '<h2 class="page-title">设置</h2>' +
         '<div class="card"><h3>目录与版本</h3>' +
-          '<table class="env-table"><tr><td>框架版本</td><td>' + esc(meta.version) + "</td></tr>" +
-          "<tr><td>任务目录 tasks_dir</td><td>" + esc(meta.tasks_dir) + "</td></tr>" +
-          "<tr><td>结果目录 results_dir</td><td>" + esc(meta.results_dir) + "</td></tr>" +
-          "<tr><td>报告目录 report_dir</td><td>" + esc(meta.report_dir) + "</td></tr></table></div>" +
+          '<table class="env-table"><tr><td style="width:160px;">框架版本</td><td>' + esc(meta.version) + "</td></tr>" +
+          "<tr><td>任务目录 tasks_dir</td><td class='path-cell' title='" + esc(meta.tasks_dir) + "'>" + esc(meta.tasks_dir) + "</td></tr>" +
+          "<tr><td>结果目录 results_dir</td><td class='path-cell' title='" + esc(meta.results_dir) + "'>" + esc(meta.results_dir) + "</td></tr>" +
+          "<tr><td>报告目录 report_dir</td><td class='path-cell' title='" + esc(meta.report_dir) + "'>" + esc(meta.report_dir) + "</td></tr></table></div>" +
         '<div class="card"><h3>API Key 快速配置 <span class="info-icon" title="' + esc(envTooltip) + '">ⓘ</span></h3>' +
           '<div id="env-config-list"><div class="empty">加载中...</div></div>' +
           '<div style="margin-top:16px;display:flex;gap:8px;align-items:center;">' +
@@ -2872,7 +2924,7 @@
           "</div>" +
           '<input type="' + inputType + '" id="env-' + item.key + '" placeholder="' + placeholder +
             '" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:var(--font-mono);">' +
-          (item.configured ? '<button class="btn secondary" style="margin-top:6px;padding:4px 10px;font-size:12px;" onclick="clearEnvField(\'' + item.key + '\')">清除此配置</button>' : "") +
+          (item.configured ? '<button class="btn secondary small" style="margin-top:8px;" onclick="clearEnvField(\'' + item.key + '\')">清除此配置</button>' : "") +
         "</div>";
       });
       document.getElementById("env-config-list").innerHTML = html;

@@ -67,7 +67,14 @@ body {
   white-space: nowrap; flex-shrink: 0;
 }
 .nav a:hover { color: var(--text-primary); background: var(--bg-tertiary); }
-.nav a.active { color: var(--text-primary); background: var(--bg-tertiary); font-weight: 600; }
+.nav a.active {
+  color: var(--text-primary); background: var(--bg-tertiary); font-weight: 600;
+  position: relative;
+}
+.nav a.active::after {
+  content: ""; position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%);
+  width: 20px; height: 2px; background: var(--text-primary); border-radius: 1px;
+}
 
 .nav-status {
   display: flex; align-items: center; gap: 6px;
@@ -138,20 +145,61 @@ h2.page-title {
   padding: 8px 16px; border: 1px solid transparent; border-radius: 6px;
   font-size: 13px; cursor: pointer; background: var(--text-primary);
   color: #fff; font-weight: 600; transition: all 0.15s;
-  font-family: inherit;
+  font-family: inherit; display: inline-flex; align-items: center; gap: 6px;
 }
-.btn:hover { opacity: 0.85; }
-a.btn { text-decoration: none; display: inline-block; }
+.btn:hover { opacity: 0.85; transform: translateY(-1px); }
+.btn:active { transform: translateY(0); }
+.btn:focus { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+a.btn { text-decoration: none; display: inline-flex; }
 .drill-action-col { text-align: right; white-space: nowrap; }
+.btn-primary { background: var(--text-primary); color: #fff; border-color: var(--text-primary); }
+.btn-primary:hover { background: #333; }
 .btn.secondary {
   background: var(--bg); color: var(--text-primary);
   border-color: var(--border);
 }
-.btn.secondary:hover { border-color: var(--text-primary); }
+.btn.secondary:hover { border-color: var(--text-primary); background: var(--bg-secondary); }
 .btn.small { padding: 5px 12px; font-size: 12px; border-radius: 5px; }
-.btn.danger { background: var(--danger); color: #fff; }
+.btn.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
 .btn.danger:hover { background: #b91c1c; }
-.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn.success { background: var(--success); color: #fff; border-color: var(--success); }
+.btn.success:hover { background: #15803d; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+/* ---------- 路径截断 ---------- */
+.path-cell {
+  max-width: 400px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-family: var(--font-mono); font-size: 12px;
+  cursor: help;
+}
+
+/* ---------- 成本预览 ---------- */
+.cost-preview {
+  background: var(--bg-secondary); border: 1px solid var(--border-light);
+  border-radius: 8px; padding: 14px 18px; margin: 14px 0;
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.cost-preview-label { font-size: 12px; color: var(--text-secondary); font-weight: 500; }
+.cost-preview-value {
+  font-size: 22px; font-weight: 700; color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+.cost-preview-note { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+
+/* ---------- 运行进度 ---------- */
+.run-progress {
+  background: var(--bg-secondary); border: 1px solid var(--border-light);
+  border-radius: 8px; padding: 16px 20px; margin: 14px 0;
+}
+.run-progress-bar {
+  height: 6px; background: var(--border-light); border-radius: 3px;
+  overflow: hidden; margin: 10px 0;
+}
+.run-progress-fill {
+  height: 100%; background: var(--text-primary); border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.run-progress-text { font-size: 12px; color: var(--text-secondary); display: flex; justify-content: space-between; }
 
 /* ---------- 表格 ---------- */
 table { width: 100%; min-width: 600px; border-collapse: collapse; font-size: 13px; }
@@ -496,18 +544,18 @@ pre.code {
   box-shadow: 0 2px 6px rgba(0,0,0,0.06);
 }
 .agent-pick label.on {
-  border-color: #2563eb; 
-  background: rgba(37, 99, 235, 0.06);
-  color: var(--text-primary); 
+  border-color: var(--text-primary);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
   font-weight: 600;
 }
 .agent-pick label.on::before {
-  background: #2563eb;
+  background: var(--text-primary);
 }
 .agent-pick input[type="checkbox"] {
   width: 14px; height: 14px;
   cursor: pointer;
-  accent-color: #2563eb;
+  accent-color: var(--text-primary);
   flex-shrink: 0;
 }
 .mx-batch-actions { display: inline-flex; gap: 6px; margin-left: 10px; vertical-align: middle; }
