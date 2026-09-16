@@ -9,6 +9,12 @@
 模型接入：OpenAI 兼容接口（默认 DeepSeek API），可用环境变量覆盖：
 - DEEPSEEK_API_KEY / LLM_API_KEY：API Key
 - LLM_BASE_URL：接口地址，默认 https://api.deepseek.com
+
+多模型支持（自动识别 base_url 和 API Key）：
+- deepseek-chat（默认）：DeepSeek 官方 API
+- spark-x2.5 / x2.5：讯飞星火 X2.5（星辰 MaaS 平台，OpenAI 兼容接口）
+  - SPARK_API_KEY / XFYUN_API_KEY：讯飞 API Key
+  - base_url：https://maas-api.cn-huabei-1.xf-yun.com/v2
 """
 
 from __future__ import annotations
@@ -112,13 +118,25 @@ class MinimalReactBackend(Backend):
         self.max_parse_retries = max_parse_retries
         self.temperature = temperature
         self.timeout_s = timeout_s
-        # API Key 解析：.env 配置优先，系统配置兜底（fallback）
-        resolved_key, key_source = self.resolve_api_key(["DEEPSEEK_API_KEY", "LLM_API_KEY"])
+
+        # 多模型自动配置：根据 model 名称识别 base_url 和 API Key 环境变量
+        model_lower = model.lower()
+        if "spark" in model_lower or "x2.5" in model_lower or "x25" in model_lower:
+            # 讯飞星火 X2.5：星辰 MaaS 平台 OpenAI 兼容接口
+            resolved_key, key_source = self.resolve_api_key(["SPARK_API_KEY", "XFYUN_API_KEY", "LLM_API_KEY"])
+            default_base = "https://maas-api.cn-huabei-1.xf-yun.com/v2"
+            self._model_family = "spark"
+        else:
+            # 默认 DeepSeek
+            resolved_key, key_source = self.resolve_api_key(["DEEPSEEK_API_KEY", "LLM_API_KEY"])
+            default_base = "https://api.deepseek.com"
+            self._model_family = "deepseek"
+
         self.api_key = api_key or resolved_key
         self._api_key_source = key_source if not api_key else "explicit"
         self.client = openai.OpenAI(
             api_key=self.api_key,
-            base_url=base_url or os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
+            base_url=base_url or os.environ.get("LLM_BASE_URL", default_base),
         )
         # LLM token 用量累计（CI 成本核算）
         self._usage: dict = {"prompt_tokens": 0, "completion_tokens": 0}
@@ -301,27 +319,37 @@ class MinimalReactBackend(Backend):
         )
 
     def check_api_key(self) -> dict:
-        """检查 DeepSeek API Key 连通性：发送一个极简的 chat completion 请求。
+        """检查 API Key 连通性：发送一个极简的 chat completion 请求。
 
         如果当前使用的 .env 配置 key 无效（401），自动尝试系统环境变量中的 fallback key，
         如果 fallback key 有效，则自动切换到 fallback key。
+        支持多模型：DeepSeek / 星火 X2.5 等。
         """
         import time as _time
 
         if not self.api_key:
+            env_names = "SPARK_API_KEY / XFYUN_API_KEY" if self._model_family == "spark" else "DEEPSEEK_API_KEY / LLM_API_KEY"
             return {
                 "ok": False,
                 "status": "missing",
-                "message": "未配置 DEEPSEEK_API_KEY / LLM_API_KEY 环境变量",
+                "message": f"未配置 {env_names} 环境变量",
                 "latency_ms": None,
             }
+
+        # 根据模型家族确定 base_url 和 fallback 环境变量名
+        if self._model_family == "spark":
+            default_base = "https://maas-api.cn-huabei-1.xf-yun.com/v2"
+            fallback_envs = ["SPARK_API_KEY", "XFYUN_API_KEY", "LLM_API_KEY"]
+        else:
+            default_base = "https://api.deepseek.com"
+            fallback_envs = ["DEEPSEEK_API_KEY", "LLM_API_KEY"]
 
         def _test_key(key: str) -> tuple[bool, str, str, float]:
             """测试单个 key，返回 (ok, status, message, latency_ms)。"""
             import openai as _openai
             client = _openai.OpenAI(
                 api_key=key,
-                base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
+                base_url=os.environ.get("LLM_BASE_URL", default_base),
             )
             start = _time.time()
             try:
@@ -351,7 +379,11 @@ class MinimalReactBackend(Backend):
         # 当前 key 失败且是 401 无效时，尝试 fallback
         if status == "invalid":
             from agent_eval.config_manager import get_fallback_env
-            fallback_key = get_fallback_env("DEEPSEEK_API_KEY") or get_fallback_env("LLM_API_KEY")
+            fallback_key = None
+            for env_name in fallback_envs:
+                fallback_key = get_fallback_env(env_name)
+                if fallback_key:
+                    break
             if fallback_key and fallback_key != self.api_key:
                 ok2, status2, message2, latency2 = _test_key(fallback_key)
                 if ok2:
@@ -360,9 +392,9 @@ class MinimalReactBackend(Backend):
                     import openai as _openai
                     self.client = _openai.OpenAI(
                         api_key=fallback_key,
-                        base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
+                        base_url=os.environ.get("LLM_BASE_URL", default_base),
                     )
-                    self._api_key_source = "fallback:DEEPSEEK_API_KEY"
+                    self._api_key_source = f"fallback:{fallback_envs[0]}"
                     return {
                         "ok": True,
                         "status": "ok",

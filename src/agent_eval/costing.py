@@ -41,6 +41,11 @@ DEFAULT_PRICING = {
         "input_cny_per_m": 108.0,
         "output_cny_per_m": 540.0,
     },
+    "spark-x2.5": {
+        # 讯飞星火 X2.5（限时五折，原价 ¥3.2/¥12 per M），2026-09 定价
+        "input_cny_per_m": 1.6,
+        "output_cny_per_m": 6.0,
+    },
 }
 
 # 无实测数据时的分级估算（prompt, completion），基于 minimal-react 全量实测归纳
