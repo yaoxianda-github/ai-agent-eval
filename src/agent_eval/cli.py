@@ -1,10 +1,15 @@
 """agent-eval 命令行入口。
 
-命令：list-tasks（已实现）/ run（MVP 执行，判定 Day 3 接入）。
+命令：list-tasks / run / ci / report / convert / taskpack / workbench / dreaming / preflight。
+
+V3.9：CLI 能力开放——所有命令支持 --json 结构化输出，新增 preflight 预检命令，
+统一退出码（0通过/1未通过/2参数错误/3API Key问题/4超时/5内部错误），
+方便外部系统、其他 agent、CI 流水线直接调用。
 """
 
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 import typer
@@ -16,9 +21,19 @@ app = typer.Typer(help="通用 AI Agent 评测框架")
 # CLI 入口统一初始化日志（控制台 + results/logs/ 文件）；幂等，重复调用安全
 setup_logging()
 
+# 退出码常量
+EXIT_OK = 0          # 成功 / 评测全部通过
+EXIT_FAIL = 1        # 评测未通过（有失败 checkpoint）
+EXIT_PARAM = 2       # 参数错误 / 任务不存在
+EXIT_API_KEY = 3     # API Key 缺失或无效
+EXIT_TIMEOUT = 4     # 执行超时
+EXIT_INTERNAL = 5    # 内部错误
+
 
 @app.command("list-tasks")
-def list_tasks() -> None:
+def list_tasks(
+    json_output: bool = typer.Option(False, "--json", help="输出结构化 JSON（适合程序调用）"),
+) -> None:
     """列出任务包中的所有任务（读取 manifest + 各 spec.yaml）。"""
     from agent_eval.spec import find_tasks_dir, load_task_pack
     from agent_eval.costing import estimate_cost, load_benchmark
@@ -28,10 +43,37 @@ def list_tasks() -> None:
         tasks = load_task_pack(tasks_dir)
     except FileNotFoundError as exc:
         typer.echo(f"错误：{exc}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=EXIT_PARAM)
 
     bench = load_benchmark()
     default_agent = "minimal-react"
+
+    if json_output:
+        task_list = []
+        for t in sorted(tasks, key=lambda x: x.id):
+            est = estimate_cost(
+                default_agent, t.id, level=t.level, verifier=t.verifier, runs=1, benchmark=bench
+            )
+            task_list.append({
+                "id": t.id,
+                "title": t.title,
+                "level": t.level,
+                "weight": t.weight,
+                "verifier": t.verifier,
+                "risk_level": getattr(t, "risk_level", None),
+                "risk_category": getattr(t, "risk_category", None),
+                "estimated_cost_cny": round(est["cost_cny"], 4),
+                "cost_source": est["source"],
+                "checkpoints_count": len(getattr(t, "checkpoints", [])),
+            })
+        typer.echo(json.dumps({
+            "tasks_dir": str(tasks_dir),
+            "total": len(task_list),
+            "default_agent": default_agent,
+            "tasks": task_list,
+        }, ensure_ascii=False, indent=2))
+        return
+
     typer.echo(f"任务包: {tasks_dir}")
     typer.echo(f"{'ID':<6}{'级别':<5}{'权重':<7}{'判定':<13}{'预计成本':<14}标题")
     typer.echo("-" * 78)
@@ -58,8 +100,13 @@ def run(
     model: str = typer.Option("deepseek-chat", "--model", help="LLM 模型名"),
     timeout: Optional[int] = typer.Option(None, "--timeout", help="覆盖任务默认超时（秒）"),
     runs: int = typer.Option(1, "--runs", min=1, max=20, help="运行次数（采样，对抗非确定性）"),
+    json_output: bool = typer.Option(False, "--json", help="输出结构化 JSON（适合程序调用）"),
+    quiet: bool = typer.Option(False, "--quiet", help="静默模式，只输出最终结果（配合 --json）"),
 ) -> None:
-    """对单个任务执行评测；--runs N 时输出采样统计（best/mean/std/pass_rate）。"""
+    """对单个任务执行评测；--runs N 时输出采样统计（best/mean/std/pass_rate）。
+
+    退出码：0=通过，1=未通过，2=参数错误，3=API Key问题，4=超时，5=内部错误。
+    """
     from agent_eval.runner import run_one
     from agent_eval.spec import find_tasks_dir, load_task_pack
     from agent_eval.stats import summarize_scores
@@ -67,36 +114,122 @@ def run(
 
     tasks = {t.id: t for t in load_task_pack(find_tasks_dir())}
     if task not in tasks:
-        typer.echo(f"错误：找不到任务 {task}，可用: {sorted(tasks)}")
-        raise typer.Exit(code=1)
+        msg = f"错误：找不到任务 {task}，可用: {sorted(tasks)}"
+        if json_output:
+            typer.echo(json.dumps({"error": msg, "exit_code": EXIT_PARAM}, ensure_ascii=False))
+        else:
+            typer.echo(msg)
+        raise typer.Exit(code=EXIT_PARAM)
 
     # 执行前提示预计 LLM 成本（实测基准 / 分级估算）
     est = estimate_cost(
-        agent, task, level=tasks[task].level, verifier=tasks[task].verifier, runs=runs
+        agent, task, level=tasks[task].level, verifier=tasks[task].verifier, runs=runs, model=model
     )
     src = "实测基准" if est["source"] == "measured" else "分级估算"
-    typer.echo(
-        f"预计成本: ¥{est['cost_cny']:.4f}（{agent} × {runs} run · {src} · {est['note']}）"
-    )
+    if not json_output and not quiet:
+        typer.echo(
+            f"预计成本: ¥{est['cost_cny']:.4f}（{agent} × {runs} run · {src} · {est['note']}）"
+        )
 
     config: dict = {"agent": {"model": model}}
     if timeout is not None:
         config["agent"]["timeout_s"] = timeout
 
     if runs <= 1:
-        _print_record(run_one(tasks[task], agent, config=config))
-        return
+        rec = run_one(tasks[task], agent, config=config)
+        if json_output:
+            _emit_run_json(rec, est)
+        else:
+            _print_record(rec)
+        # 退出码：根据 status 和 pass_rate 判断
+        if rec.status == "timeout":
+            raise typer.Exit(code=EXIT_TIMEOUT)
+        if rec.status == "error":
+            if "API Key" in (rec.error or "") or "api_key" in (rec.error or "").lower():
+                raise typer.Exit(code=EXIT_API_KEY)
+            raise typer.Exit(code=EXIT_INTERNAL)
+        # completed / max_steps：检查是否通过
+        passed = sum(1 for v in rec.verdicts if v.get("passed"))
+        total = len(rec.verdicts)
+        if total > 0 and passed < total:
+            raise typer.Exit(code=EXIT_FAIL)
+        raise typer.Exit(code=EXIT_OK)
 
+    # 多次采样
     records = []
     for i in range(1, runs + 1):
         rec = run_one(tasks[task], agent, config=config)
         records.append(rec)
         score = rec.metrics.get("score", 0.0)
-        typer.echo(f"run {i}/{runs}: {rec.run_id}  {rec.status}  {rec.duration_s}s  score={score}")
+        if not json_output and not quiet:
+            typer.echo(f"run {i}/{runs}: {rec.run_id}  {rec.status}  {rec.duration_s}s  score={score}")
     stats = summarize_scores([r.metrics.get("score", 0.0) for r in records])
-    typer.echo(
-        f"统计 (N={stats['n']}): best={stats['best']} mean={stats['mean']} std={stats['std']} pass_rate={stats['pass_rate']}"
-    )
+    pass_count = sum(1 for r in records if all(v.get("passed") for v in r.verdicts) if r.verdicts)
+    pass_rate = pass_count / len(records) if records else 0.0
+
+    if json_output:
+        typer.echo(json.dumps({
+            "task_id": task,
+            "agent": agent,
+            "model": model,
+            "runs": runs,
+            "estimated_cost_cny": round(est["cost_cny"], 4),
+            "stats": {
+                "n": stats["n"],
+                "best": stats["best"],
+                "mean": stats["mean"],
+                "std": stats["std"],
+                "pass_rate": pass_rate,
+            },
+            "runs": [_run_to_dict(r) for r in records],
+        }, ensure_ascii=False, indent=2))
+    else:
+        typer.echo(
+            f"统计 (N={stats['n']}): best={stats['best']} mean={stats['mean']} "
+            f"std={stats['std']} pass_rate={pass_rate:.0%}"
+        )
+    # 多次采样：pass_rate < 100% 视为未通过
+    if pass_rate < 1.0:
+        raise typer.Exit(code=EXIT_FAIL)
+    raise typer.Exit(code=EXIT_OK)
+
+
+def _run_to_dict(rec) -> dict:
+    """将 RunRecord 转为适合 JSON 输出的精简字典。"""
+    usage = rec.metrics.get("usage") or {}
+    return {
+        "run_id": rec.run_id,
+        "task_id": rec.task_id,
+        "agent": rec.agent_id,
+        "agent_version": rec.agent_ver,
+        "status": rec.status,
+        "duration_s": rec.duration_s,
+        "steps_count": len(rec.steps),
+        "score": rec.metrics.get("score", 0.0),
+        "weight": rec.metrics.get("weight", 0.0),
+        "pass_rate": (
+            sum(1 for v in rec.verdicts if v.get("passed")) / len(rec.verdicts)
+            if rec.verdicts else None
+        ),
+        "verdicts": rec.verdicts,
+        "tokens": {
+            "prompt_tokens": usage.get("prompt_tokens"),
+            "completion_tokens": usage.get("completion_tokens"),
+        },
+        "cost_cny": rec.metrics.get("cost_cny"),
+        "failure_attribution": rec.metrics.get("failure_attribution"),
+        "hard_gate_blocked": rec.metrics.get("hard_gate_blocked", False),
+        "confidence": rec.metrics.get("confidence"),
+        "error": rec.error or None,
+    }
+
+
+def _emit_run_json(rec, est: dict) -> None:
+    """输出单次运行的 JSON 结果。"""
+    out = _run_to_dict(rec)
+    out["estimated_cost_cny"] = round(est["cost_cny"], 4)
+    out["cost_source"] = est["source"]
+    typer.echo(json.dumps(out, ensure_ascii=False, indent=2))
 
 
 def _print_record(record) -> None:
@@ -119,6 +252,123 @@ def _print_record(record) -> None:
         weight = record.metrics.get("weight", 0)
         typer.echo(f"score:  {score} / {weight}")
     typer.echo(f"detail: {record.workspace}" if record.workspace else "detail: （工作目录已清理）")
+
+
+@app.command("preflight")
+def preflight(
+    task: str = typer.Option(..., "--task", help="任务 ID，如 T001"),
+    agent: str = typer.Option("minimal-react", "--agent", help="后端 Agent 名称"),
+    model: str = typer.Option("deepseek-chat", "--model", help="LLM 模型名"),
+    runs: int = typer.Option(1, "--runs", min=1, max=20, help="运行次数（影响成本预估）"),
+    json_output: bool = typer.Option(False, "--json", help="输出结构化 JSON"),
+) -> None:
+    """执行前预检：检查 API Key、模型连通性、任务完整性、成本预估。
+
+    在实际评测前确认所有前置条件，避免跑了一半才发现配置问题。
+    退出码：0=就绪，3=API Key问题，2=参数/任务错误。
+    """
+    from agent_eval.backends import get_backend
+    from agent_eval.spec import find_tasks_dir, load_task_pack
+    from agent_eval.costing import estimate_cost
+
+    result = {
+        "task": task,
+        "agent": agent,
+        "model": model,
+        "runs": runs,
+        "checks": {},
+        "ready": True,
+        "errors": [],
+    }
+
+    # 1. 检查任务是否存在
+    tasks = {t.id: t for t in load_task_pack(find_tasks_dir())}
+    if task not in tasks:
+        result["checks"]["task_exists"] = {"ok": False, "message": f"任务 {task} 不存在"}
+        result["ready"] = False
+        result["errors"].append(f"任务 {task} 不存在，可用: {sorted(tasks)}")
+        if json_output:
+            typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            typer.echo(f"✗ 任务不存在: {task}")
+            typer.echo(f"  可用任务: {', '.join(sorted(tasks)[:10])}{'...' if len(tasks) > 10 else ''}")
+        raise typer.Exit(code=EXIT_PARAM)
+
+    t = tasks[task]
+    result["checks"]["task_exists"] = {"ok": True, "message": f"{t.title} ({t.level})"}
+
+    # 2. 检查任务 fixtures 是否完整
+    from pathlib import Path
+    task_dir = find_tasks_dir() / task
+    fixtures_ok = task_dir.is_dir()
+    fixture_files = []
+    if fixtures_ok:
+        fixture_files = [str(p.relative_to(task_dir)) for p in task_dir.rglob("*") if p.is_file()]
+    result["checks"]["fixtures"] = {
+        "ok": fixtures_ok,
+        "message": f"{len(fixture_files)} 个文件" if fixtures_ok else "任务目录不存在",
+        "files": fixture_files[:20],
+    }
+    if not fixtures_ok:
+        result["ready"] = False
+        result["errors"].append(f"任务目录不存在: {task_dir}")
+
+    # 3. 检查后端是否可用
+    try:
+        backend = get_backend(agent, model=model)
+        result["checks"]["backend"] = {"ok": True, "message": f"{backend.name} v{backend.version}"}
+    except (ValueError, KeyError) as e:
+        result["checks"]["backend"] = {"ok": False, "message": str(e)}
+        result["ready"] = False
+        result["errors"].append(f"后端不可用: {e}")
+        if json_output:
+            typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            typer.echo(f"✗ 后端不可用: {agent} - {e}")
+        raise typer.Exit(code=EXIT_PARAM)
+
+    # 4. 检查 API Key 连通性（调用后端的 check_api_key）
+    api_check = backend.check_api_key()
+    result["checks"]["api_key"] = {
+        "ok": api_check.get("ok", False),
+        "status": api_check.get("status", "unknown"),
+        "message": api_check.get("message", ""),
+        "latency_ms": api_check.get("latency_ms"),
+    }
+    if not api_check.get("ok", False):
+        result["ready"] = False
+        result["errors"].append(f"API Key: {api_check.get('status')} - {api_check.get('message')}")
+
+    # 5. 成本预估
+    est = estimate_cost(
+        agent, task, level=t.level, verifier=t.verifier, runs=runs, model=model
+    )
+    result["estimated_cost"] = {
+        "cny": round(est["cost_cny"], 4),
+        "source": est["source"],
+        "note": est.get("note", ""),
+        "runs": runs,
+    }
+
+    # 输出
+    if json_output:
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        typer.echo(f"预检: {task} × {agent} @ {model}")
+        typer.echo("-" * 50)
+        for name, check in result["checks"].items():
+            mark = "✓" if check["ok"] else "✗"
+            typer.echo(f"  {mark} {name}: {check['message']}")
+        typer.echo(f"  预计成本: ¥{est['cost_cny']:.4f}（{est['source']}，{runs} run）")
+        typer.echo("-" * 50)
+        if result["ready"]:
+            typer.echo("✓ 就绪，可以开始评测")
+        else:
+            typer.echo("✗ 未就绪，请修复以上问题后重试")
+            for err in result["errors"]:
+                typer.echo(f"  - {err}")
+
+    raise typer.Exit(code=EXIT_OK if result["ready"] else EXIT_API_KEY)
 
 
 @app.command("ci")
@@ -148,10 +398,10 @@ def ci(
         )
     except (FileNotFoundError, ValueError) as e:
         typer.echo(f"错误: {e}")
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=EXIT_PARAM)
     if not ok:
         typer.echo(f"\ngate={gate} 未通过，退出码 1（CI 将阻断合并）")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=EXIT_FAIL)
 
 
 @app.command("report")
