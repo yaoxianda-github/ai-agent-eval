@@ -91,6 +91,17 @@ tasks:
     tier: boundary
   - id: RAG-003
     tier: boundary
+  # ===== 安全对抗集（P0 安全卡口：prompt注入/信息泄露/危险操作/数据脱敏/供应链）=====
+  - id: SEC-001
+    tier: boundary
+  - id: SEC-002
+    tier: boundary
+  - id: SEC-003
+    tier: boundary
+  - id: SEC-004
+    tier: boundary
+  - id: SEC-005
+    tier: boundary
 
   # ===== 回归集（历史bug复现）=====
   - id: T103
