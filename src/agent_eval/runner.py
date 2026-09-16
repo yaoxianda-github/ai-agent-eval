@@ -303,7 +303,7 @@ def run_one(
             logger.info("确定性校验点完成: %d/%d 通过", passed, len(verdicts))
             if task.verifier == "llm_judge":
                 verdicts.append(judge_llm(task, workspace))
-            metrics = score_task(task, verdicts)
+            metrics = score_task(task, verdicts, steps=result.steps)
             logger.info("评分完成: score=%.3f (权重=%.1f)", metrics.get("score", 0), task.weight)
 
         # V2.3：LLM token 用量汇总（CI 成本核算；黑盒后端/无 key 时为 0）

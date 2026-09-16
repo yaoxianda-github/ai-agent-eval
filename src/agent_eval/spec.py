@@ -64,6 +64,7 @@ class Checkpoint:
     stage: str = "final_answer"  # V3.7：校验点所属评测阶段，默认最终输出
     tool: str = ""   # V3.8 P1：tool_call_assert 类型的工具名
     param: str = ""  # V3.8 P1：tool_call_assert 类型的参数名
+    gate_mode: str = "blocking"  # V4.0 P2：渐进式规则状态（shadow只记录/warning提醒/blocking阻断）
 
 
 @dataclass
@@ -102,6 +103,10 @@ class TaskSpec:
     risk_category: str = "normal"  # V3.9 P1：风险分类（normal正常/boundary边界/tool工具/hallucination幻觉/security安全）
     forbidden_tools: list[str] = field(default_factory=list)  # V3.8 P1：禁止调用的危险工具列表（调用即触发红线）
     skills: list[SkillSpec] = field(default_factory=list)  # V3.8 P2：Skill 定义（多个 Tool 编排封装的能力包）
+    # V4.0 P2：Case Contract（运行前冻结的契约约束，参考 ODAR 文章 4.1 节）
+    required_skills: list[str] = field(default_factory=list)  # 必需触发的 Skill 名称列表
+    required_tools: list[str] = field(default_factory=list)  # 必需调用的工具名称列表
+    output_contract: str = ""  # 输出契约描述（如 "json"、"markdown报告"、"csv文件"）
     spec_path: Optional[Path] = None
 
     @classmethod
@@ -118,6 +123,7 @@ class TaskSpec:
                 stage=cp.get("stage", "final_answer"),
                 tool=cp.get("tool", ""),
                 param=cp.get("param", ""),
+                gate_mode=cp.get("gate_mode", "blocking"),
             )
             for cp in data.get("ground_truth", {}).get("checkpoints", [])
         ]
@@ -141,6 +147,9 @@ class TaskSpec:
             risk_level=str(data.get("risk_level", "P2")),
             risk_category=str(data.get("risk_category", "normal")),
             forbidden_tools=list(data.get("forbidden_tools", [])),
+            required_skills=list(data.get("required_skills", [])),
+            required_tools=list(data.get("required_tools", [])),
+            output_contract=str(data.get("output_contract", "")),
             skills=[
                 SkillSpec(
                     id=s.get("id", ""),

@@ -1781,9 +1781,45 @@
           '<div class="kpi"><b>' + fmtDur(r.duration_s) + "</b><span>时长</span></div>" +
           confHtml +
         "</div>" +
+        // V4.0 Hard Gate：P0 风险任务任一 checkpoint 失败即 BLOCK，不被其他高分项抵消
+        (function () {
+          var m = r.metrics || r;
+          if (m.hard_gate_blocked) {
+            var failed = (m.hard_gate_failed_checkpoints || []).join(", ");
+            return '<div class="hard-gate-banner">' +
+              '<div class="hg-icon">⛔</div>' +
+              '<div class="hg-content">' +
+                '<div class="hg-title">HARD GATE BLOCKED · 发布阻断</div>' +
+                '<div class="hg-desc">P0 风险任务存在失败校验点，不被其他高分项抵消。CI 门禁将直接阻断合并。</div>' +
+                (failed ? '<div class="hg-failed">失败校验点: ' + esc(failed) + '</div>' : '') +
+              '</div>' +
+            '</div>';
+          }
+          return "";
+        })() +
         (r.error ? '<div class="err-banner">' + esc(r.error) + "</div>" : "") +
         lockHtml +
-        '<div class="card" id="run-verdict"><h3>判定结果（' + v.length + " 个校验点）</h3>" + (vRows || '<div class="empty">无判定</div>') + "</div>" +
+        '<div class="card" id="run-verdict"><h3>判定结果（' + v.length + " 个校验点）</h3>" +
+          // V4.0 失败归因标准化（6类映射）
+          (function () {
+            var fa = r.metrics && r.metrics.failure_attribution;
+            if (!fa || !fa.category) return "";
+            var confPct = Math.round(fa.confidence * 100);
+            return '<div class="failure-attribution">' +
+              '<div class="fa-header">' +
+                '<span class="fa-badge" style="background:' + fa.color + ';">根因归因</span>' +
+                '<span class="fa-category"><b>' + esc(fa.label) + '</b></span>' +
+                '<span class="fa-confidence">置信度 ' + confPct + '%</span>' +
+              '</div>' +
+              '<div class="fa-body">' +
+                '<div class="fa-row"><span class="fa-label">可观察证据:</span><span class="fa-value">' + esc(fa.evidence) + '</span></div>' +
+                (fa.detail ? '<div class="fa-row"><span class="fa-label">检测详情:</span><span class="fa-value">' + esc(fa.detail) + '</span></div>' : '') +
+                '<div class="fa-row"><span class="fa-label">优先修复对象:</span><span class="fa-value fa-fix">' + esc(fa.fix_target) + '</span></div>' +
+              '</div>' +
+              '<div class="fa-hint">参考《工具型 Agent 的分层评测方法》4.5 节：将失败映射到修复对象，评测不再只负责"判卷"，还负责把问题送到正确的修改层。</div>' +
+            '</div>';
+          })() +
+          (vRows || '<div class="empty">无判定</div>') + "</div>" +
         '<div id="run-review">' + humanReviewHtml(r) + '</div>' +
         '<div id="run-analysis">' + executionAnalysis(r) + '</div>' +
         '<div class="card" id="run-trace"><h3>轨迹回放 <span class="tl-note">输入意图 → 知识/检索 → 模型生成 → 工具执行</span></h3>' + traceTimeline(r.traces, r) + "</div>" +
@@ -2130,6 +2166,53 @@
 
     return (
       '<div class="card"><h3>执行分析 <span class="tl-note">组件实际执行率 · 基于真实运行轨迹</span></h3>' +
+        // V4.0 ODAR 四层评分框架（Outcome/Decision/Action/Reliability）
+        (function () {
+          var m = run.metrics || run;
+          var passRate = m.pass_rate !== undefined ? m.pass_rate : (run.score !== undefined ? run.score : 0);
+          var outcomeScore = Math.round(passRate * 100);
+          // Decision：工具选择正确率 + Skill 触发率
+          var decisionScore = toolSelectScore;
+          if (skillResults.length > 0) {
+            var skillTriggerRate = triggeredCount / skillResults.length;
+            decisionScore = Math.round((toolSelectScore * 0.5 + skillTriggerRate * 100 * 0.5));
+          }
+          // Action：五维度平均分
+          var actionScores = fiveDimRows.filter(function(d){return d.score !== null;}).map(function(d){return d.score;});
+          var actionScore = actionScores.length ? Math.round(actionScores.reduce(function(a,b){return a+b;},0) / actionScores.length) : 100;
+          // Reliability：多次运行稳定性（单次运行显示—）
+          var relScore = null;
+          var relNote = "单次运行，暂无稳定性数据";
+          if (run.runs && run.runs.length > 1) {
+            var scores = run.runs.map(function(r){return r.score || 0;});
+            var mean = scores.reduce(function(a,b){return a+b;},0) / scores.length;
+            var variance = scores.reduce(function(s,v){return s+Math.pow(v-mean,2);},0) / scores.length;
+            var std = Math.sqrt(variance);
+            relScore = Math.max(0, Math.round(100 - std * 150));
+            relNote = scores.length + " 次运行 · σ=" + std.toFixed(3);
+          }
+          var odarLayers = [
+            { key: "O", name: "Outcome", cn: "结果可交付", score: outcomeScore, note: "通过率 " + outcomeScore + "% · " + (m.passed||0) + "/" + (m.total||0) + " 校验点", color: outcomeScore >= 80 ? "#16a34a" : outcomeScore >= 50 ? "#f59e0b" : "#dc2626" },
+            { key: "D", name: "Decision", cn: "路线选择", score: decisionScore, note: "工具选择 " + toolSelectScore + "分" + (skillResults.length ? " · Skill触发 " + triggeredCount + "/" + skillResults.length : ""), color: decisionScore >= 80 ? "#16a34a" : decisionScore >= 50 ? "#f59e0b" : "#dc2626" },
+            { key: "A", name: "Action", cn: "执行正确", score: actionScore, note: "五维度均分 · 参数" + paramFillScore + "/格式" + formatScore + "/边界" + boundaryScore, color: actionScore >= 80 ? "#16a34a" : actionScore >= 50 ? "#f59e0b" : "#dc2626" },
+            { key: "R", name: "Reliability", cn: "稳定复现", score: relScore, note: relNote, color: relScore === null ? "#94a3b8" : relScore >= 80 ? "#16a34a" : relScore >= 50 ? "#f59e0b" : "#dc2626" }
+          ];
+          return '<div class="odar-panel">' +
+            '<div class="odar-title">ODAR 四层评测框架 <span class="cap-hint" title="参考《工具型 Agent 的分层评测方法与机制验证》：Outcome结果可交付 / Decision路线选择 / Action执行正确 / Reliability稳定复现。Completed ≠ Correct ≠ Ready for Release。">ⓘ 判定逻辑</span></div>' +
+            '<div class="odar-grid">' +
+            odarLayers.map(function(l) {
+              var sc = l.score === null ? "—" : l.score;
+              var barW = l.score === null ? 0 : l.score;
+              return '<div class="odar-cell">' +
+                '<div class="odar-head"><span class="odar-key" style="background:' + l.color + ';">' + l.key + '</span>' +
+                  '<span class="odar-name"><b>' + l.name + '</b> ' + l.cn + '</span>' +
+                  '<b class="odar-score" style="color:' + l.color + ';">' + sc + '</b></div>' +
+                '<div class="odar-bar"><div class="odar-fill" style="width:' + barW + '%;background:' + l.color + ';"></div></div>' +
+                '<div class="odar-note">' + esc(l.note) + '</div>' +
+              '</div>';
+            }).join("") +
+            '</div></div>';
+        })() +
         '<div class="ea-grid">' +
           '<div class="ea-col">' +
             '<div class="ea-subtitle">调用统计</div>' +

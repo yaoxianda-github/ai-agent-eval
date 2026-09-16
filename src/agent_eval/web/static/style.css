@@ -737,6 +737,47 @@ pre.code {
   background: var(--danger-bg); color: var(--danger);
   border-radius: 8px; padding: 12px 14px; font-size: 13px; margin-bottom: 14px;
 }
+/* V4.0 Hard Gate 发布阻断横幅 */
+.hard-gate-banner {
+  display: flex; align-items: flex-start; gap: 14px;
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  border: 2px solid #dc2626; border-radius: 10px;
+  padding: 16px 18px; margin-bottom: 16px;
+}
+.hard-gate-banner .hg-icon { font-size: 28px; line-height: 1; flex-shrink: 0; }
+.hard-gate-banner .hg-content { flex: 1; }
+.hard-gate-banner .hg-title {
+  font-weight: 800; font-size: 15px; color: #991b1b;
+  letter-spacing: 0.5px; margin-bottom: 4px;
+}
+.hard-gate-banner .hg-desc { font-size: 13px; color: #7f1d1d; line-height: 1.5; }
+.hard-gate-banner .hg-failed {
+  margin-top: 8px; font-size: 12px; color: #991b1b;
+  background: rgba(220,38,38,0.08); padding: 6px 10px; border-radius: 6px;
+  font-family: monospace;
+}
+/* V4.0 失败归因标准化面板 */
+.failure-attribution {
+  background: var(--bg-secondary); border-radius: 10px; padding: 14px 16px;
+  margin-bottom: 14px; border: 1px solid var(--border-light);
+  border-left: 4px solid var(--border-color);
+}
+.fa-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.fa-badge {
+  display: inline-block; padding: 3px 10px; border-radius: 12px;
+  color: #fff; font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+}
+.fa-category { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.fa-confidence { margin-left: auto; font-size: 12px; color: var(--text-muted); }
+.fa-body { font-size: 13px; line-height: 1.7; }
+.fa-row { display: flex; gap: 8px; margin-bottom: 4px; }
+.fa-label { color: var(--text-muted); min-width: 90px; flex-shrink: 0; }
+.fa-value { color: var(--text-primary); }
+.fa-fix { font-weight: 600; color: #dc2626; }
+.fa-hint {
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-light);
+  font-size: 11px; color: var(--text-muted); line-height: 1.5; font-style: italic;
+}
 .success-banner {
   padding: 12px 14px; background: var(--success-bg); color: #065f46;
   border-radius: 8px; margin-top: 12px; font-size: 13px;
@@ -1120,6 +1161,20 @@ table.matrix th { position: sticky; top: 0; z-index: 1; }
 .ea-q-err { background: var(--danger); }
 .ea-q-val { width: 40px; text-align: right; font-size: 12px; font-weight: 600; color: var(--text-primary); font-family: var(--font-mono); }
 .ea-q-detail { margin-top: 8px; font-size: 11px; color: var(--text-muted); }
+
+/* ---------- ODAR 四层评测框架（V4.0） ---------- */
+.odar-panel { background: var(--bg-secondary); border-radius: 10px; padding: 14px; margin-bottom: 14px; border: 1px solid var(--border-light); }
+.odar-title { font-size: 14px; font-weight: 700; color: var(--text-primary); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+.odar-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.odar-cell { background: var(--bg-primary); border-radius: 8px; padding: 10px 12px; border: 1px solid var(--border-light); }
+.odar-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.odar-key { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; color: #fff; font-size: 12px; font-weight: 800; flex-shrink: 0; }
+.odar-name { flex: 1; font-size: 12px; color: var(--text-secondary); }
+.odar-name b { color: var(--text-primary); font-size: 13px; }
+.odar-score { font-size: 18px; font-family: var(--font-mono); font-weight: 700; }
+.odar-bar { height: 4px; background: var(--border-light); border-radius: 2px; overflow: hidden; margin-bottom: 6px; }
+.odar-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
+.odar-note { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
 
 /* ---------- 工具调用五维度评分卡（V3.8） ---------- */
 .five-dim-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 8px; }
