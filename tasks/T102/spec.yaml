@@ -31,6 +31,20 @@ ground_truth:
     cmd: python @scripts/verify_t102.py .
     desc: 汇总结果与原始数据重算一致
     stage: tool_use
+  - id: c4
+    type: tool_call_assert
+    tool: read_file
+    param: path
+    pattern: sales\.csv
+    desc: 组件层校验：调用 read_file 时 path 参数指向 sales.csv（防止读错文件）
+    stage: tool_use
+  - id: c5
+    type: tool_call_assert
+    tool: write_file
+    param: path
+    pattern: summary\.csv
+    desc: 组件层校验：调用 write_file 时 path 参数指向 summary.csv（防止写错文件）
+    stage: tool_use
 verifier: deterministic
 weight: 1.2
 cost_budget_usd: 0.1
