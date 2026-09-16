@@ -1024,6 +1024,14 @@ table.matrix th { position: sticky; top: 0; z-index: 1; }
   font-size: 10px; font-weight: 600; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.3px;
 }
+/* V3.9 P1：任务风险标签 */
+.risk-badge {
+  display: inline-block; padding: 2px 7px; border-radius: 4px;
+  font-size: 10px; font-weight: 700; font-family: var(--font-mono);
+  letter-spacing: 0.3px;
+}
+.risk-cat { font-size: 10px; color: var(--text-muted); }
+.tcol-risk { white-space: nowrap; }
 .tier-stats { margin-left: 12px; font-size: 12px; font-weight: normal; }
 .tier-stat { margin-right: 12px; }
 .mx-drill { font-size: 12.5px; }
@@ -1122,6 +1130,19 @@ table.matrix th { position: sticky; top: 0; z-index: 1; }
 .five-dim-bar { height: 4px; background: var(--border-light); border-radius: 2px; overflow: hidden; margin-bottom: 6px; }
 .five-dim-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
 .five-dim-note { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+
+/* ---------- Step Efficiency 步骤效率（V3.9 P1 路径层评测） ---------- */
+.se-panel { background: var(--bg-secondary); border-radius: 8px; padding: 12px; margin-top: 8px; border: 1px solid var(--border-light); }
+.se-score-row { display: flex; gap: 16px; align-items: center; }
+.se-score { text-align: center; min-width: 70px; }
+.se-score b { display: block; font-size: 28px; font-family: var(--font-mono); line-height: 1; }
+.se-score span { font-size: 11px; color: var(--text-muted); }
+.se-meta { flex: 1; font-size: 12px; color: var(--text-secondary); line-height: 1.8; }
+.se-meta b { color: var(--text-primary); font-family: var(--font-mono); }
+.se-redundant-list { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-light); }
+.se-redundant-title { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+.se-redundant-item { font-size: 11px; color: var(--text-muted); padding: 2px 0; }
+.se-redundant-item code { background: var(--bg-tertiary); padding: 1px 5px; border-radius: 3px; font-size: 10px; color: #dc2626; }
 
 /* ---------- Skill 层评估（V3.8 P2 Tool vs Skill 分层） ---------- */
 .skill-summary { display: flex; gap: 12px; margin: 8px 0; }

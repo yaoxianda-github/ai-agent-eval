@@ -98,6 +98,8 @@ class TaskSpec:
     capabilities: list[str] = field(default_factory=list)  # V2.5：任务考察的 Harness 能力（六类）
     mcp_servers: list[dict] = field(default_factory=list)  # M2：任务声明的 MCP server 列表（stdio 模式）
     tier: str = ""  # V3.1：数据集分层（golden/boundary/regression/random）
+    risk_level: str = "P2"  # V3.9 P1：任务风险等级（P0=核心卡口必须100%通过 / P1=重要≥90% / P2=一般≥80%）
+    risk_category: str = "normal"  # V3.9 P1：风险分类（normal正常/boundary边界/tool工具/hallucination幻觉/security安全）
     forbidden_tools: list[str] = field(default_factory=list)  # V3.8 P1：禁止调用的危险工具列表（调用即触发红线）
     skills: list[SkillSpec] = field(default_factory=list)  # V3.8 P2：Skill 定义（多个 Tool 编排封装的能力包）
     spec_path: Optional[Path] = None
@@ -136,6 +138,8 @@ class TaskSpec:
             capabilities=list(data.get("capabilities", [])),
             mcp_servers=list(data.get("mcp_servers", [])),
             tier=str(data.get("tier", "")),
+            risk_level=str(data.get("risk_level", "P2")),
+            risk_category=str(data.get("risk_category", "normal")),
             forbidden_tools=list(data.get("forbidden_tools", [])),
             skills=[
                 SkillSpec(

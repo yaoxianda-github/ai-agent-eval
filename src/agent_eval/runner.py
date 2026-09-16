@@ -395,6 +395,12 @@ def run_one(
                     "expected_order": skill.expected_order,
                 })
 
+        # V3.9 P1：Step Efficiency 步骤效率评分（路径层评测）
+        # 检测重复调用、无意义调用、绕路，量化"答案对了但路线稀烂"
+        step_efficiency = _calc_step_efficiency(traces)
+        if step_efficiency:
+            metrics["step_efficiency"] = step_efficiency
+
         record = RunRecord(
             run_id=run_id,
             agent_id=agent_id,
@@ -663,3 +669,81 @@ def _auto_create_badcase(
         logger.debug("web.store不可用，跳过自动创建badcase")
     except Exception as e:
         logger.debug("自动创建badcase失败: %s", e)
+
+
+def _calc_step_efficiency(traces: list[dict]) -> dict | None:
+    """V3.9 P1：Step Efficiency 步骤效率评分（路径层评测）。
+
+    量化"答案对了但路线稀烂"：重复调用、无意义调用、绕路。
+    基于 DeepEval StepEfficiencyMetric 思路实现。
+
+    计算维度：
+    - total_tool_calls：工具调用总数（排除 finish/intent/llm）
+    - duplicate_calls：同一工具+同一参数被调用多次的次数
+    - consecutive_duplicates：连续调用同一工具且参数相同的次数
+    - unique_tool_args：去重后的 (工具, 参数) 组合数
+    - efficiency_score：效率分 = unique_tool_args / total_tool_calls（0~1，越高越好）
+    - redundant_ratio：冗余调用比例 = (total - unique) / total
+    """
+    from collections import Counter
+
+    # 提取工具调用序列（含参数）
+    tool_calls = []
+    for t in traces:
+        tool_name = t.get("tool") or t.get("action") or ""
+        if not tool_name or tool_name == "finish":
+            continue
+        if t.get("kind") in ("intent", "llm"):
+            continue
+        args = t.get("args") or {}
+        # 参数序列化用于去重（排序键以保证一致性）
+        try:
+            args_key = json.dumps(args, sort_keys=True, default=str)
+        except Exception:
+            args_key = str(args)[:200]
+        tool_calls.append({"tool": tool_name, "args_key": args_key, "args": args})
+
+    if not tool_calls:
+        return None
+
+    total = len(tool_calls)
+
+    # 重复调用：同一 (tool, args) 出现多次
+    call_counter = Counter((c["tool"], c["args_key"]) for c in tool_calls)
+    unique_count = len(call_counter)
+    duplicate_calls = sum(count - 1 for count in call_counter.values() if count > 1)
+
+    # 连续重复：相邻两次调用同一工具且参数相同
+    consecutive_duplicates = 0
+    for i in range(1, len(tool_calls)):
+        if (tool_calls[i]["tool"] == tool_calls[i - 1]["tool"] and
+                tool_calls[i]["args_key"] == tool_calls[i - 1]["args_key"]):
+            consecutive_duplicates += 1
+
+    # 效率分：去重调用数 / 总调用数
+    efficiency_score = round(unique_count / total, 3) if total > 0 else 1.0
+    redundant_ratio = round((total - unique_count) / total, 3) if total > 0 else 0.0
+
+    # 工具调用频次（用于展示哪些工具被重复调用）
+    tool_freq = Counter(c["tool"] for c in tool_calls)
+    top_redundant = []
+    for (tool, args_key), count in call_counter.most_common(5):
+        if count > 1:
+            top_redundant.append({"tool": tool, "count": count, "args_preview": args_key[:80]})
+
+    return {
+        "total_tool_calls": total,
+        "unique_tool_args": unique_count,
+        "duplicate_calls": duplicate_calls,
+        "consecutive_duplicates": consecutive_duplicates,
+        "efficiency_score": efficiency_score,
+        "redundant_ratio": redundant_ratio,
+        "tool_frequency": dict(tool_freq),
+        "top_redundant_calls": top_redundant,
+        "grade": (
+            "excellent" if efficiency_score >= 0.9
+            else "good" if efficiency_score >= 0.75
+            else "fair" if efficiency_score >= 0.5
+            else "poor"
+        ),
+    }

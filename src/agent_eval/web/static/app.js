@@ -553,6 +553,15 @@
         var t = tiersCache[tier];
         return '<span class="tier-badge" style="background:' + (t.color || '#6b7280') + '20;color:' + (t.color || '#6b7280') + ';">' + esc(t.label || tier) + '</span>';
       }
+      // V3.9 P1：任务风险标签（P0核心卡口/P1重要/P2一般 + 风险分类）
+      function riskBadge(riskLevel, riskCategory) {
+        var colors = { "P0": "#dc2626", "P1": "#f59e0b", "P2": "#6b7280" };
+        var c = colors[riskLevel] || "#6b7280";
+        var catLabels = { normal: "正常", boundary: "边界", tool: "工具", hallucination: "幻觉", security: "安全" };
+        var cat = catLabels[riskCategory] || riskCategory || "正常";
+        return '<span class="risk-badge" style="background:' + c + '18;color:' + c + ';border:1px solid ' + c + '30;">' + esc(riskLevel || "P2") + '</span>' +
+               '<span class="risk-cat" style="margin-left:4px;font-size:10px;color:var(--text-muted);">' + esc(cat) + '</span>';
+      }
       // 按 tier 统计
       var tierStats = {};
       tasksCache.forEach(function (t) {
@@ -592,7 +601,7 @@
           var costTxt = ce ? (ce.source === "measured" ? "" : "~") + "¥" + ce.cost_cny.toFixed(4) : "—";
           var modTxt = t.last_modified ? fmtTime(t.last_modified) : "—";
           return "<tr data-task-id='" + esc(t.id) + "'><td class='tcol-check'><input type='checkbox' class='task-check' value='" + esc(t.id) + "'></td><td class='tcol-id'>" + esc(t.id) + "</td><td class='tcol-title'>" + esc(t.title) + "</td><td class='tcol-tier'>" + tierBadge(t.tier) +
-            "</td><td class='tcol-usage'>" + usageBadge(t.tier) + "</td><td class='tcol-level'>" + esc(t.level) +
+            "</td><td class='tcol-risk'>" + riskBadge(t.risk_level, t.risk_category) + "</td><td class='tcol-usage'>" + usageBadge(t.tier) + "</td><td class='tcol-level'>" + esc(t.level) +
             "</td><td class='tcol-verifier'>" + esc(t.verifier) + "</td><td class='tcol-weight'>" + esc(t.weight) + "</td><td class='tcol-cp'>" +
             (t.checkpoints ? t.checkpoints.length : 0) + " 个</td><td class='tcol-timeout'>" + esc(t.timeout_s) + "s</td><td class='tcol-mod'>" +
             modTxt + "</td><td class='tcol-cost'>" + costTxt + "</td></tr>";
@@ -618,7 +627,9 @@
               '</label><select id="usage-filter"><option value="">全部用途</option><option value="dev">开发集</option><option value="eval">评测集</option></select></div>' +
           "</div>" +
           '<div id="task-table" class="table-scroll">' +
-          '<table><tr><th class="tcol-check"><input type="checkbox" id="check-all"></th><th class="tcol-id">ID</th><th class="tcol-title">标题</th><th class="tcol-tier">分层</th><th class="tcol-usage">用途</th><th class="tcol-level">级别</th><th class="tcol-verifier">判定</th><th class="tcol-weight">权重</th><th class="tcol-cp">校验点</th><th class="tcol-timeout">超时</th><th class="tcol-mod">最后修改</th><th class="tcol-cost">预计成本/run' +
+          '<table><tr><th class="tcol-check"><input type="checkbox" id="check-all"></th><th class="tcol-id">ID</th><th class="tcol-title">标题</th><th class="tcol-tier">分层</th><th class="tcol-risk">风险' +
+          costTip("P0=核心卡口任务，必须100%通过才能上线；P1=重要任务，≥90%通过；P2=一般任务，≥80%通过。<br><br>风险分类：normal正常/boundary边界/tool工具/hallucination幻觉/security安全。<br>在 spec.yaml 中设置 risk_level 和 risk_category 字段。") +
+          '</th><th class="tcol-usage">用途</th><th class="tcol-level">级别</th><th class="tcol-verifier">判定</th><th class="tcol-weight">权重</th><th class="tcol-cp">校验点</th><th class="tcol-timeout">超时</th><th class="tcol-mod">最后修改</th><th class="tcol-cost">预计成本/run' +
           costTip("预计成本 = 单次 run 的 token 消耗 × 模型单价。<br>默认模型 deepseek-chat：输入 ¥2/百万 token、输出 ¥3/百万 token（缓存未命中口径）。<br><br>有实测：取该后端（minimal-react）在此任务的历史 run 的 metrics.usage 均值；<br>无实测：按任务级别 L1-L5 估算，数值前标「~」。<br><br>单价可用环境变量 LLM_INPUT_CNY_PER_M / LLM_OUTPUT_CNY_PER_M 覆盖。") +
           "</th></tr>" +
           renderRows("", "") + "</table></div></div>" +
@@ -1756,12 +1767,12 @@
           '</span>' +
         '</h2>' +
         '<div class="anchor-nav" id="run-anchor-nav">' +
-          '<a href="#run-verdict" class="anchor-link">判定结果</a>' +
-          '<a href="#run-review" class="anchor-link">人工复核</a>' +
-          '<a href="#run-analysis" class="anchor-link">执行分析</a>' +
-          '<a href="#run-trace" class="anchor-link">轨迹回放</a>' +
-          '<a href="#run-steps" class="anchor-link">执行轨迹</a>' +
-          '<a href="#run-files" class="anchor-link">产物文件</a>' +
+          '<a href="#/run/' + esc(runId) + '" class="anchor-link" data-anchor="run-verdict" onclick="return false;">判定结果</a>' +
+          '<a href="#/run/' + esc(runId) + '" class="anchor-link" data-anchor="run-review" onclick="return false;">人工复核</a>' +
+          '<a href="#/run/' + esc(runId) + '" class="anchor-link" data-anchor="run-analysis" onclick="return false;">执行分析</a>' +
+          '<a href="#/run/' + esc(runId) + '" class="anchor-link" data-anchor="run-trace" onclick="return false;">轨迹回放</a>' +
+          '<a href="#/run/' + esc(runId) + '" class="anchor-link" data-anchor="run-steps" onclick="return false;">执行轨迹</a>' +
+          '<a href="#/run/' + esc(runId) + '" class="anchor-link" data-anchor="run-files" onclick="return false;">产物文件</a>' +
         "</div>" +
         '<div class="kpi-row">' +
           '<div class="kpi"><b>' + esc(r.run_id) + "</b><span>run_id</span></div>" +
@@ -1835,6 +1846,20 @@
           });
         };
       }
+      // 锚点导航：点击平滑滚动到对应区域（避免被 SPA hash 路由拦截）
+      var anchorLinks = document.querySelectorAll("#run-anchor-nav .anchor-link");
+      anchorLinks.forEach(function (link) {
+        link.addEventListener("click", function (e) {
+          e.preventDefault();
+          var targetId = link.getAttribute("data-anchor");
+          var target = document.getElementById(targetId);
+          if (target) {
+            target.scrollIntoView({ behavior: "smooth", block: "start" });
+            anchorLinks.forEach(function (l) { l.classList.remove("active"); });
+            link.classList.add("active");
+          }
+        });
+      });
     }).catch(function (e) { renderErr(e.message); });
   }
 
@@ -2006,6 +2031,32 @@
       { label: "结果使用", score: resultUseScore, note: resultUseScore === null ? "无工具调用" : (resultUseScore >= 80 ? "结果有效利用" : resultUseScore >= 60 ? "部分有效" : "利用不足") },
       { label: "工具边界", score: boundaryScore, note: boundaryNote || "调用合理" }
     ];
+    // V3.9 P1：Step Efficiency 步骤效率评分（路径层评测）
+    var se = run.metrics && run.metrics.step_efficiency;
+    var seHtml = "";
+    if (se) {
+      var seScore = Math.round(se.efficiency_score * 100);
+      var seColor = se.efficiency_score >= 0.9 ? "#16a34a" : se.efficiency_score >= 0.75 ? "#f59e0b" : se.efficiency_score >= 0.5 ? "#f97316" : "#dc2626";
+      var seGrade = {excellent: "优秀", good: "良好", fair: "一般", poor: "较差"}[se.grade] || se.grade;
+      var seRedundant = Math.round(se.redundant_ratio * 100);
+      var seTopRedundant = (se.top_redundant_calls || []).map(function(c) {
+        return '<div class="se-redundant-item"><code>' + esc(c.tool) + '</code> × ' + c.count + ' 次 <span class="muted">' + esc(c.args_preview || "") + '</span></div>';
+      }).join("");
+      seHtml =
+        '<div class="ea-subtitle" style="margin-top:14px;">步骤效率 Step Efficiency <span class="cap-hint" title="路径层评测：检测重复调用、无意义调用、绕路。效率分=去重调用数/总调用数，越高越好。基于 DeepEval StepEfficiencyMetric 思路。">ⓘ 判定逻辑</span></div>' +
+        '<div class="se-panel">' +
+          '<div class="se-score-row">' +
+            '<div class="se-score" style="color:' + seColor + ';"><b>' + seScore + '</b><span>效率分</span></div>' +
+            '<div class="se-meta">' +
+              '<div>总调用 <b>' + se.total_tool_calls + '</b> · 去重 <b>' + se.unique_tool_args + '</b></div>' +
+              '<div>重复调用 <b>' + se.duplicate_calls + '</b> · 连续重复 <b>' + se.consecutive_duplicates + '</b></div>' +
+              '<div>冗余率 <b style="color:' + (seRedundant > 30 ? "#dc2626" : seRedundant > 15 ? "#f59e0b" : "#16a34a") + ';">' + seRedundant + '%</b> · 评级 <b style="color:' + seColor + ';">' + seGrade + '</b></div>' +
+            '</div>' +
+          '</div>' +
+          (seTopRedundant ? '<div class="se-redundant-list"><div class="se-redundant-title">高频重复调用：</div>' + seTopRedundant + '</div>' : '') +
+        '</div>';
+    }
+
     var fiveDimHtml = (forbiddenCalls.length > 0 ?
       '<div class="danger-banner" style="margin-top:12px;padding:10px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;color:#dc2626;font-size:13px;">' +
         '<b>⚠ 危险工具调用</b>：本次运行调用了 ' + forbiddenCalls.length + ' 个禁止工具（' + forbiddenCalls.map(function(c){return c.tool;}).join(", ") + '），触发红线！' +
@@ -2106,6 +2157,7 @@
               '<div class="ea-q-row"><span class="ea-q-label">参数错误率</span><div class="ea-q-bar"><div class="ea-q-fill ea-q-err" style="width:' + paramErrorRate + '%;"></div></div><span class="ea-q-val">' + paramErrorRate + '%</span></div>' +
               '<div class="ea-q-detail">总调用 ' + toolCalls + ' 次 · 失败 ' + toolFailures + ' 次 · 重试 ' + toolRetries + ' 次 · 参数错误 ' + paramErrors + ' 次</div>' +
             '</div>' +
+            seHtml +
             fiveDimHtml +
             skillHtml +
           '</div>' +
