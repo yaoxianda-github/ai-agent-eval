@@ -624,6 +624,38 @@ def runs_show(
     if verdicts:
         passed = sum(1 for v in verdicts if v.get("passed"))
         typer.echo(f"  判定: {passed}/{len(verdicts)} 通过")
+        # V4.1 P1：按 category 分层展示通过率（业务结果/硬门禁/软质量）
+        try:
+            from agent_eval.spec import find_tasks_dir, load_task_pack
+            tasks = {t.id: t for t in load_task_pack(find_tasks_dir())}
+            task_spec = tasks.get(data.get("task_id"))
+            cp_category = {}
+            if task_spec:
+                for c in getattr(task_spec, "checkpoints", []):
+                    cp_category[c.id] = getattr(c, "category", "outcome")
+            # 按 category 统计
+            cat_stats = {}
+            for v in verdicts:
+                cat = cp_category.get(v.get("id", ""), "outcome")
+                if cat not in cat_stats:
+                    cat_stats[cat] = {"total": 0, "passed": 0}
+                cat_stats[cat]["total"] += 1
+                if v.get("passed"):
+                    cat_stats[cat]["passed"] += 1
+            cat_labels = {"outcome": "业务结果", "gate": "硬门禁", "quality": "软质量"}
+            cat_summary_parts = []
+            for cat in ["outcome", "gate", "quality"]:
+                if cat in cat_stats:
+                    s = cat_stats[cat]
+                    rate = s["passed"] / s["total"] if s["total"] else 0
+                    cat_summary_parts.append(f"{cat_labels.get(cat, cat)} {s['passed']}/{s['total']} ({rate:.0%})")
+            if cat_summary_parts:
+                typer.echo(f"  分层: {' | '.join(cat_summary_parts)}")
+                # 硬门禁失败时高亮警告
+                if "gate" in cat_stats and cat_stats["gate"]["passed"] < cat_stats["gate"]["total"]:
+                    typer.echo(f"  ⚠ 硬门禁未通过：此任务应判失败，不被软质量高分平均")
+        except Exception:  # noqa: BLE001 - 分层统计失败不影响主流程
+            pass
         for v in verdicts:
             mark = "✓" if v.get("passed") else "✗"
             typer.echo(f"    {mark} [{v.get('id')}] {v.get('type')}: {v.get('detail', '')[:60]}")
@@ -660,15 +692,67 @@ def tasks_show(
     typer.echo(f"  描述: {t.description[:100] if t.description else '(无)'}")
     if getattr(t, "risk_level", None):
         typer.echo(f"  风险等级: {t.risk_level} ({getattr(t, 'risk_category', 'normal')})")
+    if getattr(t, "scenario_type", None):
+        scenario_labels = {"happy_path": "正常路径", "boundary": "边界情况", "error_recovery": "异常恢复", "adversarial": "对抗样本"}
+        typer.echo(f"  场景类型: {t.scenario_type} ({scenario_labels.get(t.scenario_type, t.scenario_type)})")
     if getattr(t, "required_skills", None):
         typer.echo(f"  必需 Skill: {', '.join(t.required_skills)}")
     if getattr(t, "required_tools", None):
         typer.echo(f"  必需工具: {', '.join(t.required_tools)}")
-    typer.echo(f"  校验点 ({len(getattr(t, 'checkpoints', []))} 个):")
-    for c in getattr(t, "checkpoints", []):
+    # 按 category 分层统计 checkpoint
+    cps = getattr(t, "checkpoints", [])
+    cat_counts = {}
+    for c in cps:
+        cat = getattr(c, "category", "outcome")
+        cat_counts[cat] = cat_counts.get(cat, 0) + 1
+    cat_labels = {"outcome": "业务结果", "gate": "硬门禁", "quality": "软质量"}
+    cat_summary = " / ".join(f"{cat_labels.get(k, k)}:{v}" for k, v in sorted(cat_counts.items()))
+    typer.echo(f"  校验点 ({len(cps)} 个) [{cat_summary}]:")
+    for c in cps:
         gate = getattr(c, "gate_mode", "blocking")
+        cat = getattr(c, "category", "outcome")
         desc = getattr(c, "desc", "") or getattr(c, "description", "")
-        typer.echo(f"    [{c.id}] {c.type} (gate={gate}): {desc[:60]}")
+        typer.echo(f"    [{c.id}] {c.type} (cat={cat}, gate={gate}): {desc[:50]}")
+
+
+@app.command("badcase-discover")
+def badcase_discover(
+    limit: int = typer.Option(20, "--limit", min=1, max=100, help="返回候选数"),
+    agent_id: Optional[str] = typer.Option(None, "--agent", help="按 Agent 筛选"),
+    days: int = typer.Option(30, "--days", min=1, max=365, help="扫描最近 N 天"),
+    json_output: bool = typer.Option(False, "--json", help="输出结构化 JSON"),
+) -> None:
+    """V4.1 P0：从运行历史自动挖掘 badcase 候选（回归失败/Hard Gate/完全失败/部分失败）。"""
+    store = _get_store()
+    candidates = store.discover_badcase_candidates(limit=limit, agent_id=agent_id, days=days)
+
+    if json_output:
+        typer.echo(json.dumps({
+            "total": len(candidates),
+            "by_severity": {
+                "P0": sum(1 for c in candidates if c["severity"] == "P0"),
+                "P1": sum(1 for c in candidates if c["severity"] == "P1"),
+                "P2": sum(1 for c in candidates if c["severity"] == "P2"),
+            },
+            "by_type": {
+                t: sum(1 for c in candidates if c["candidate_type"] == t)
+                for t in ["regression", "hard_gate", "total_failure", "partial_failure"]
+            },
+            "candidates": candidates,
+        }, ensure_ascii=False, indent=2, default=str))
+        return
+
+    typer.echo(f"挖掘到 {len(candidates)} 个 badcase 候选（最近 {days} 天）")
+    typer.echo("=" * 90)
+    typer.echo(f"{'严重度':<6}{'类型':<16}{'run_id':<14}{'任务':<8}{'Agent':<16}{'通过率':<8}{'原因'}")
+    typer.echo("-" * 90)
+    for c in candidates:
+        typer.echo(
+            f"{c['severity']:<6}{c['candidate_type']:<16}{c['run_id']:<14}"
+            f"{c['task_id']:<8}{c['agent_id']:<16}{c['pass_rate']:<8.0%}{c['reason'][:40]}"
+        )
+    typer.echo("=" * 90)
+    typer.echo("提示: 使用 agent-eval badcase-show <run_id> 查看详情，或在 Web 端 badcase 模块一键转化")
 
 
 @app.command("badcase-list")

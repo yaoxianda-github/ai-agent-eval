@@ -65,6 +65,7 @@ class Checkpoint:
     tool: str = ""   # V3.8 P1：tool_call_assert 类型的工具名
     param: str = ""  # V3.8 P1：tool_call_assert 类型的参数名
     gate_mode: str = "blocking"  # V4.0 P2：渐进式规则状态（shadow只记录/warning提醒/blocking阻断）
+    category: str = "outcome"  # V4.1 P1：成功标准三层分类（outcome业务结果/gate硬门禁/quality软质量）
 
 
 @dataclass
@@ -107,6 +108,7 @@ class TaskSpec:
     required_skills: list[str] = field(default_factory=list)  # 必需触发的 Skill 名称列表
     required_tools: list[str] = field(default_factory=list)  # 必需调用的工具名称列表
     output_contract: str = ""  # 输出契约描述（如 "json"、"markdown报告"、"csv文件"）
+    scenario_type: str = "happy_path"  # V4.1 P1：测试集四层场景类型（happy_path正常/boundary边界/error_recovery异常恢复/adversarial对抗）
     spec_path: Optional[Path] = None
 
     @classmethod
@@ -124,6 +126,7 @@ class TaskSpec:
                 tool=cp.get("tool", ""),
                 param=cp.get("param", ""),
                 gate_mode=cp.get("gate_mode", "blocking"),
+                category=cp.get("category", "outcome"),
             )
             for cp in data.get("ground_truth", {}).get("checkpoints", [])
         ]
@@ -150,6 +153,7 @@ class TaskSpec:
             required_skills=list(data.get("required_skills", [])),
             required_tools=list(data.get("required_tools", [])),
             output_contract=str(data.get("output_contract", "")),
+            scenario_type=str(data.get("scenario_type", "happy_path")),
             skills=[
                 SkillSpec(
                     id=s.get("id", ""),

@@ -751,6 +751,116 @@ class RunStore:
                 continue
         return n
 
+    def discover_badcase_candidates(
+        self,
+        limit: int = 50,
+        agent_id: str | None = None,
+        days: int = 30,
+    ) -> list[dict]:
+        """V4.1 P0：从运行历史自动挖掘 badcase 候选。
+
+        挖掘规则（按优先级）：
+        1. 回归样本：同一 task+agent 之前通过(pass_rate=1)但最近失败
+        2. Hard Gate 触发：P0 任务且 pass_rate<1（从 run.json 读取 hard_gate_blocked）
+        3. 完全失败：status=error/timeout 或 pass_rate=0
+        4. 部分失败：0 < pass_rate < 1
+
+        排除已存在于 badcases 表中的 run_id。
+        """
+        from datetime import timedelta
+        since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        # 已存在的 badcase run_id 集合
+        with self._lock:
+            existing = {r[0] for r in self._conn.execute(
+                "SELECT DISTINCT run_id FROM badcases WHERE run_id != ''"
+            ).fetchall()}
+
+        # 查询最近的失败运行
+        sql = """
+            SELECT * FROM runs
+            WHERE created_at >= ?
+              AND (pass_rate < 1.0 OR status IN ('error','timeout','max_steps'))
+        """
+        args: list = [since]
+        if agent_id:
+            sql += " AND agent_id=?"
+            args.append(agent_id)
+        sql += " ORDER BY created_at DESC LIMIT 500"
+
+        with self._lock:
+            rows = self._conn.execute(sql, args).fetchall()
+        cols = [d[0] for d in self._conn.execute("SELECT * FROM runs LIMIT 1").description]
+
+        candidates = []
+        # 用于回归检测：记录每个 (task_id, agent_id) 是否有过通过记录
+        pass_history: dict[tuple, bool] = {}
+        with self._lock:
+            for tid, aid in self._conn.execute(
+                "SELECT DISTINCT task_id, agent_id FROM runs WHERE pass_rate >= 1.0 AND status='completed'"
+            ).fetchall():
+                pass_history[(tid, aid)] = True
+
+        for row in rows:
+            rec = dict(zip(cols, row))
+            rid = rec["run_id"]
+            if rid in existing:
+                continue
+            # 判定候选类型和严重度
+            is_regression = pass_history.get((rec["task_id"], rec["agent_id"]), False)
+            is_total_fail = rec["pass_rate"] == 0 or rec["status"] in ("error", "timeout")
+            # 尝试从 run.json 读取 hard_gate_blocked
+            hard_gate = False
+            run_json_path = Path("results/runs") / rid / "run.json"
+            if run_json_path.exists():
+                try:
+                    run_data = json.loads(run_json_path.read_text(encoding="utf-8"))
+                    hard_gate = bool(run_data.get("hard_gate_blocked", False))
+                except Exception:  # noqa: BLE001
+                    pass
+
+            if is_regression:
+                candidate_type = "regression"
+                severity = "P0"
+                reason = f"回归失败：{rec['task_id']} @ {rec['agent_id']} 之前通过，最近失败"
+            elif hard_gate:
+                candidate_type = "hard_gate"
+                severity = "P0"
+                reason = f"Hard Gate 触发：{rec['task_id']} 核心卡口未通过"
+            elif is_total_fail:
+                candidate_type = "total_failure"
+                severity = "P1"
+                reason = f"完全失败：{rec['task_id']} @ {rec['agent_id']} status={rec['status']}, pass_rate=0"
+            else:
+                candidate_type = "partial_failure"
+                severity = "P2"
+                reason = f"部分失败：{rec['task_id']} @ {rec['agent_id']} pass_rate={rec['pass_rate']:.0%}"
+
+            candidates.append({
+                "run_id": rid,
+                "task_id": rec["task_id"],
+                "agent_id": rec["agent_id"],
+                "status": rec["status"],
+                "score": rec["score"],
+                "pass_rate": rec["pass_rate"],
+                "duration_s": rec["duration_s"],
+                "created_at": rec["created_at"],
+                "candidate_type": candidate_type,
+                "severity": severity,
+                "reason": reason,
+                "hard_gate_blocked": hard_gate,
+                "is_regression": is_regression,
+            })
+
+        # 按严重度排序：P0 > P1 > P2，同级别按时间倒序
+        sev_order = {"P0": 0, "P1": 1, "P2": 2}
+        candidates.sort(key=lambda x: (sev_order.get(x["severity"], 3), x["created_at"]), reverse=False)
+        # 同严重度内按时间倒序（时间字符串格式标准，可直接比较）
+        from itertools import groupby
+        result = []
+        for sev, group in groupby(candidates, key=lambda x: x["severity"]):
+            result.extend(sorted(group, key=lambda x: x["created_at"], reverse=True))
+        return result[:limit]
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()
