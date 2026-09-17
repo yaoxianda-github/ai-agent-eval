@@ -72,6 +72,20 @@ def classify_failure(verdicts: list[dict], steps: list[dict] | None = None) -> d
     if not failed_verdicts:
         return {"category": None, "label": "无失败", "fix_target": "", "evidence": "全部通过", "color": "#16a34a", "confidence": 1.0}
 
+    # 0. V4.2：检测 Decision 层失败（required_tools/required_skills 未调用）
+    decision_failures = [v for v in failed_verdicts if v.get("type") == "decision_check" or v.get("id") == "decision_layer"]
+    if decision_failures:
+        cat = FAILURE_CATEGORIES["skill_routing"]
+        return {"category": "skill_routing", **cat, "confidence": 0.95,
+                "detail": f"Decision 层失败: {decision_failures[0].get('detail', '必需能力未调用')}"}
+
+    # 0.5 V4.2：检测 Action 层失败（工具失败未修复/顺序错误/死循环）
+    action_failures = [v for v in failed_verdicts if v.get("type") == "action_check" or v.get("id") == "action_layer"]
+    if action_failures:
+        cat = FAILURE_CATEGORIES["tool_param"]
+        return {"category": "tool_param", **cat, "confidence": 0.9,
+                "detail": f"Action 层失败: {action_failures[0].get('detail', '工具执行异常')}"}
+
     # 1. 检测环境/权限错误
     env_keywords = ["permission denied", "not found", "no such file", "command not found",
                      "error", "exception", "traceback", "unavailable", "timeout", "connection"]

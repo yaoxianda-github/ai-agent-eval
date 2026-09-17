@@ -401,6 +401,41 @@ def run_one(
         if step_efficiency:
             metrics["step_efficiency"] = step_efficiency
 
+        # V4.2 P0：Decision 层校验——required_tools/required_skills 运行时检查
+        # 文章核心观点：本应调用权威数据源，却用模型记忆直接回答 = Decision 失败
+        decision_layer = _check_decision_layer(task, traces, skill_results)
+        metrics["decision_layer"] = decision_layer
+        # 将 Decision 层校验结果作为 verdict 加入（不影响原有 checkpoint 评分）
+        if not decision_layer["passed"]:
+            verdicts.append({
+                "id": "decision_layer",
+                "type": "decision_check",
+                "passed": False,
+                "detail": decision_layer["summary"],
+                "category": "gate",  # Decision 失败属于硬门禁
+            })
+
+        # V4.2 P1：Action 层增强——工具调用顺序、失败处理、重复执行检测
+        action_layer = _check_action_layer(task, traces)
+        metrics["action_layer"] = action_layer
+        if not action_layer["passed"]:
+            verdicts.append({
+                "id": "action_layer",
+                "type": "action_check",
+                "passed": False,
+                "detail": action_layer["summary"],
+                "category": "gate",
+            })
+
+        # V4.2 P0：Completed ≠ Correct ≠ Ready for Release 三态分离
+        # completed: Runtime 认为执行结束（status 字段）
+        # correct: Outcome 层通过（业务结果正确）
+        # release_ready: Hard Gate + Outcome + Decision + Action 全部通过（可发布）
+        three_state = _calc_three_state(task, result.status, verdicts, decision_layer, action_layer)
+        metrics["three_state"] = three_state
+        metrics["outcome_passed"] = three_state["correct"]
+        metrics["release_ready"] = three_state["release_ready"]
+
         record = RunRecord(
             run_id=run_id,
             agent_id=agent_id,
@@ -746,4 +781,238 @@ def _calc_step_efficiency(traces: list[dict]) -> dict | None:
             else "fair" if efficiency_score >= 0.5
             else "poor"
         ),
+    }
+
+
+def _check_decision_layer(task: TaskSpec, traces: list[dict], skill_results: list[dict]) -> dict:
+    """V4.2 P0：Decision 层校验——检查 Agent 是否选择了正确的 Skill 和工具。
+
+    文章核心观点：本应调用权威数据源，却用模型记忆直接回答 = Decision 失败。
+    检查项：
+    1. required_tools：Case Contract 声明的必需工具是否真的被调用
+    2. required_skills：Case Contract 声明的必需 Skill 是否真的被触发
+    3. 输出：passed / missing_tools / missing_skills / called_tools / summary
+    """
+    # 从 traces 提取所有调用过的工具名
+    called_tools: set[str] = set()
+    for t in traces:
+        tool_name = t.get("tool") or t.get("action") or ""
+        if tool_name and tool_name != "finish" and t.get("kind") not in ("intent", "llm"):
+            called_tools.add(tool_name)
+
+    # 检查必需工具
+    required_tools = list(getattr(task, "required_tools", []) or [])
+    missing_tools = [t for t in required_tools if t not in called_tools]
+
+    # 检查必需 Skill（通过 skill_results 中的 triggered 字段）
+    required_skills = list(getattr(task, "required_skills", []) or [])
+    triggered_skills = {s["id"] for s in skill_results if s.get("triggered")}
+    missing_skills = [s for s in required_skills if s not in triggered_skills]
+
+    # 如果没有声明必需能力，Decision 层默认通过（不做无依据的判定）
+    has_requirements = bool(required_tools or required_skills)
+    passed = (not missing_tools) and (not missing_skills)
+
+    # 生成摘要
+    parts = []
+    if missing_tools:
+        parts.append(f"缺失必需工具: {', '.join(missing_tools)}")
+    if missing_skills:
+        parts.append(f"缺失必需 Skill: {', '.join(missing_skills)}")
+    if not parts:
+        if has_requirements:
+            parts.append("所有必需能力均已调用")
+        else:
+            parts.append("未声明必需能力（Decision 层不适用）")
+
+    return {
+        "passed": passed,
+        "has_requirements": has_requirements,
+        "required_tools": required_tools,
+        "required_skills": required_skills,
+        "called_tools": sorted(called_tools),
+        "missing_tools": missing_tools,
+        "missing_skills": missing_skills,
+        "summary": "; ".join(parts),
+    }
+
+
+def _calc_three_state(
+    task: TaskSpec,
+    status: str,
+    verdicts: list[dict],
+    decision_layer: dict,
+    action_layer: dict | None = None,
+) -> dict:
+    """V4.2 P0：Completed ≠ Correct ≠ Ready for Release 三态分离。
+
+    - completed: Runtime 认为执行结束（status=completed）
+    - correct: Outcome 层通过（所有 category=outcome 的 checkpoint 通过）
+    - release_ready: Hard Gate + Outcome + Decision + Action 全部通过（可发布）
+
+    文章核心观点：Runtime 的 completed 不能自动证明数据正确、业务口径正确，
+    更不能证明结果已经满足发布条件。
+    """
+    completed = status == "completed"
+
+    # Outcome 层：所有 category=outcome 的 checkpoint 通过
+    # （category 字段在 V4.1 加入；老任务没有 category 时默认所有 checkpoint 都是 outcome）
+    outcome_verdicts = [
+        v for v in verdicts
+        if v.get("category", "outcome") == "outcome" and v.get("id") not in ("decision_layer", "action_layer")
+    ]
+    if outcome_verdicts:
+        correct = all(v.get("passed") for v in outcome_verdicts)
+    else:
+        # 没有 outcome 类 checkpoint 时，用所有非 gate 层的 verdict 判定
+        other_verdicts = [v for v in verdicts if v.get("id") not in ("decision_layer", "action_layer") and v.get("category") != "gate"]
+        correct = all(v.get("passed") for v in other_verdicts) if other_verdicts else completed
+
+    # Hard Gate：所有 category=gate 的 checkpoint 通过 + 危险工具未调用
+    gate_verdicts = [v for v in verdicts if v.get("category") == "gate"]
+    gate_passed = all(v.get("passed") for v in gate_verdicts) if gate_verdicts else True
+
+    # Decision 层
+    decision_passed = decision_layer.get("passed", True)
+
+    # Action 层（V4.2 P1）
+    action_passed = action_layer.get("passed", True) if action_layer else True
+
+    # Release Ready：completed + correct + gate_passed + decision_passed + action_passed
+    release_ready = completed and correct and gate_passed and decision_passed and action_passed
+
+    # 判定不可发布的原因
+    blockers = []
+    if not completed:
+        blockers.append(f"执行未正常结束（status={status}）")
+    if not correct:
+        blockers.append("Outcome 层未通过（业务结果不正确）")
+    if not gate_passed:
+        blockers.append("Hard Gate 未通过（硬门禁失败）")
+    if not decision_passed:
+        blockers.append("Decision 层未通过（必需能力未调用）")
+    if not action_passed and action_layer:
+        blockers.append("Action 层未通过（" + action_layer.get("summary", "工具执行异常") + "）")
+
+    return {
+        "completed": completed,
+        "correct": correct,
+        "gate_passed": gate_passed,
+        "decision_passed": decision_passed,
+        "action_passed": action_passed,
+        "release_ready": release_ready,
+        "blockers": blockers,
+        "state_label": (
+            "release_ready" if release_ready
+            else "correct_not_releasable" if (completed and correct and not release_ready)
+            else "completed_incorrect" if (completed and not correct)
+            else "not_completed"
+        ),
+    }
+
+
+def _check_action_layer(task: TaskSpec, traces: list[dict]) -> dict:
+    """V4.2 P1：Action 层增强——检查工具调用是否正确执行。
+
+    文章核心观点：Decision 正确不代表执行正确。Action 需要检查：
+    1. 工具失败后是否被错误地当成成功（status=error 但后续无重试/修复）
+    2. 工具调用顺序是否满足依赖（如果 task 定义了 expected_tool_order）
+    3. 是否存在死循环式重复执行（同一工具同一参数连续调用 ≥3 次）
+
+    输出：passed / issues / failed_tools / order_violations / repeat_loops / summary
+    """
+    issues: list[str] = []
+    failed_tools: list[dict] = []
+    order_violations: list[str] = []
+    repeat_loops: list[dict] = []
+
+    # 提取工具调用序列（按时间排序）
+    tool_calls = []
+    for t in traces:
+        tool_name = t.get("tool") or t.get("action") or ""
+        if not tool_name or tool_name == "finish":
+            continue
+        if t.get("kind") in ("intent", "llm"):
+            continue
+        tool_calls.append({
+            "tool": tool_name,
+            "status": t.get("status") or t.get("result") or "ok",
+            "ts": t.get("ts", 0.0),
+            "args": t.get("args") or {},
+        })
+
+    if not tool_calls:
+        return {
+            "passed": True,
+            "has_tool_calls": False,
+            "issues": [],
+            "failed_tools": [],
+            "order_violations": [],
+            "repeat_loops": [],
+            "summary": "无工具调用（Action 层不适用）",
+        }
+
+    # 1. 工具失败误判成功：status=error 且后续没有同一工具的成功调用
+    failed_set = set()
+    for i, call in enumerate(tool_calls):
+        status_str = str(call["status"]).lower()
+        if status_str in ("error", "failed", "failure", "exception"):
+            # 检查后续是否有同一工具的成功调用
+            has_retry_success = any(
+                c["tool"] == call["tool"] and str(c["status"]).lower() in ("ok", "success", "succeeded")
+                for c in tool_calls[i + 1:]
+            )
+            if not has_retry_success:
+                failed_tools.append({"tool": call["tool"], "ts": call["ts"]})
+                failed_set.add(call["tool"])
+
+    if failed_tools:
+        issues.append(f"工具失败未修复: {', '.join(sorted(failed_set))}")
+
+    # 2. 工具调用顺序依赖检查（如果 task 定义了 expected_tool_order）
+    expected_order = getattr(task, "expected_tool_order", None) or []
+    if expected_order and len(expected_order) > 1:
+        # 检查预期工具序列是否按顺序出现在运行序列中
+        idx = 0
+        actual_order = [c["tool"] for c in tool_calls]
+        for at in actual_order:
+            if idx < len(expected_order) and at == expected_order[idx]:
+                idx += 1
+        if idx < len(expected_order):
+            missing = expected_order[idx:]
+            order_violations.append(f"顺序依赖未满足: 缺少 {', '.join(missing)} 的顺序调用")
+            issues.append(f"工具顺序错误: 预期 {' → '.join(expected_order)}")
+
+    # 3. 死循环式重复执行：同一工具同一参数连续调用 ≥3 次
+    consecutive_count = 1
+    for i in range(1, len(tool_calls)):
+        prev = tool_calls[i - 1]
+        curr = tool_calls[i]
+        if prev["tool"] == curr["tool"] and prev["args"] == curr["args"]:
+            consecutive_count += 1
+            if consecutive_count >= 3:
+                repeat_loops.append({
+                    "tool": curr["tool"],
+                    "count": consecutive_count,
+                    "args_preview": str(curr["args"])[:80],
+                })
+        else:
+            consecutive_count = 1
+
+    if repeat_loops:
+        loop_tools = {r["tool"] for r in repeat_loops}
+        issues.append(f"疑似死循环重复调用: {', '.join(sorted(loop_tools))}")
+
+    passed = len(issues) == 0
+    summary = "; ".join(issues) if issues else f"工具调用正常（{len(tool_calls)} 次调用，无异常）"
+
+    return {
+        "passed": passed,
+        "has_tool_calls": True,
+        "total_tool_calls": len(tool_calls),
+        "issues": issues,
+        "failed_tools": failed_tools,
+        "order_violations": order_violations,
+        "repeat_loops": repeat_loops,
+        "summary": summary,
     }

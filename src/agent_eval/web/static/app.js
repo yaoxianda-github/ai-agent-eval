@@ -2171,11 +2171,23 @@
           var m = run.metrics || run;
           var passRate = m.pass_rate !== undefined ? m.pass_rate : (run.score !== undefined ? run.score : 0);
           var outcomeScore = Math.round(passRate * 100);
-          // Decision：工具选择正确率 + Skill 触发率
+          // V4.2：Decision 层使用 required_tools/required_skills 运行时校验结果
+          var dl = m.decision_layer;
           var decisionScore = toolSelectScore;
+          var decisionNote = "工具选择 " + toolSelectScore + "分";
           if (skillResults.length > 0) {
             var skillTriggerRate = triggeredCount / skillResults.length;
             decisionScore = Math.round((toolSelectScore * 0.5 + skillTriggerRate * 100 * 0.5));
+            decisionNote += " · Skill触发 " + triggeredCount + "/" + skillResults.length;
+          }
+          if (dl && dl.has_requirements) {
+            if (!dl.passed) {
+              // 必需能力缺失：Decision 层直接判低分
+              decisionScore = Math.min(decisionScore, 30);
+              decisionNote = "⚠ " + dl.summary;
+            } else {
+              decisionNote += " · 必需能力✓";
+            }
           }
           // Action：五维度平均分
           var actionScores = fiveDimRows.filter(function(d){return d.score !== null;}).map(function(d){return d.score;});
@@ -2193,10 +2205,35 @@
           }
           var odarLayers = [
             { key: "O", name: "Outcome", cn: "结果可交付", score: outcomeScore, note: "通过率 " + outcomeScore + "% · " + (m.passed||0) + "/" + (m.total||0) + " 校验点", color: outcomeScore >= 80 ? "#16a34a" : outcomeScore >= 50 ? "#f59e0b" : "#dc2626" },
-            { key: "D", name: "Decision", cn: "路线选择", score: decisionScore, note: "工具选择 " + toolSelectScore + "分" + (skillResults.length ? " · Skill触发 " + triggeredCount + "/" + skillResults.length : ""), color: decisionScore >= 80 ? "#16a34a" : decisionScore >= 50 ? "#f59e0b" : "#dc2626" },
+            { key: "D", name: "Decision", cn: "路线选择", score: decisionScore, note: decisionNote, color: decisionScore >= 80 ? "#16a34a" : decisionScore >= 50 ? "#f59e0b" : "#dc2626" },
             { key: "A", name: "Action", cn: "执行正确", score: actionScore, note: "五维度均分 · 参数" + paramFillScore + "/格式" + formatScore + "/边界" + boundaryScore, color: actionScore >= 80 ? "#16a34a" : actionScore >= 50 ? "#f59e0b" : "#dc2626" },
             { key: "R", name: "Reliability", cn: "稳定复现", score: relScore, note: relNote, color: relScore === null ? "#94a3b8" : relScore >= 80 ? "#16a34a" : relScore >= 50 ? "#f59e0b" : "#dc2626" }
           ];
+          // V4.2：三态分离状态条（Completed ≠ Correct ≠ Ready for Release）
+          var ts = m.three_state;
+          var threeStateHtml = "";
+          if (ts) {
+            var stateLabels = {
+              release_ready: { text: "✓ 可发布", color: "#16a34a", bg: "#f0fdf4" },
+              correct_not_releasable: { text: "⚠ 结果正确但不可发布", color: "#f59e0b", bg: "#fffbeb" },
+              completed_incorrect: { text: "✗ 执行结束但结果不正确", color: "#dc2626", bg: "#fef2f2" },
+              not_completed: { text: "✗ 执行未正常结束", color: "#dc2626", bg: "#fef2f2" }
+            };
+            var sl = stateLabels[ts.state_label] || stateLabels.not_completed;
+            var blockersHtml = ts.blockers.length ? '<div class="ts-blockers">' + ts.blockers.map(function(b){return '<span class="ts-blocker">✗ ' + esc(b) + '</span>';}).join("") + '</div>' : '';
+            threeStateHtml =
+              '<div class="ts-panel" style="margin-top:10px;padding:10px 14px;background:' + sl.bg + ';border:1px solid ' + sl.color + '33;border-radius:8px;">' +
+                '<div class="ts-row">' +
+                  '<span class="ts-state" style="color:' + sl.color + ';font-weight:600;">' + sl.text + '</span>' +
+                  '<span class="ts-dots">' +
+                    '<span class="ts-dot ' + (ts.completed ? 'ts-dot-ok' : 'ts-dot-err') + '" title="Completed: 执行结束">' + (ts.completed ? '✓' : '✗') + ' Completed</span>' +
+                    '<span class="ts-dot ' + (ts.correct ? 'ts-dot-ok' : 'ts-dot-err') + '" title="Correct: 结果正确">' + (ts.correct ? '✓' : '✗') + ' Correct</span>' +
+                    '<span class="ts-dot ' + (ts.release_ready ? 'ts-dot-ok' : 'ts-dot-err') + '" title="Release Ready: 可发布">' + (ts.release_ready ? '✓' : '✗') + ' Release</span>' +
+                  '</span>' +
+                '</div>' +
+                blockersHtml +
+              '</div>';
+          }
           return '<div class="odar-panel">' +
             '<div class="odar-title">ODAR 四层评测框架 <span class="cap-hint" title="参考《工具型 Agent 的分层评测方法与机制验证》：Outcome结果可交付 / Decision路线选择 / Action执行正确 / Reliability稳定复现。Completed ≠ Correct ≠ Ready for Release。">ⓘ 判定逻辑</span></div>' +
             '<div class="odar-grid">' +
@@ -2211,7 +2248,9 @@
                 '<div class="odar-note">' + esc(l.note) + '</div>' +
               '</div>';
             }).join("") +
-            '</div></div>';
+            '</div>' +
+            threeStateHtml +
+            '</div>';
         })() +
         '<div class="ea-grid">' +
           '<div class="ea-col">' +
