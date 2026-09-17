@@ -10,6 +10,8 @@ V3.9：CLI 能力开放——所有命令支持 --json 结构化输出，新增 
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -95,35 +97,103 @@ def list_tasks(
 
 @app.command("run")
 def run(
-    task: str = typer.Option(..., "--task", help="任务 ID，如 T001"),
+    task: Optional[str] = typer.Option(None, "--task", help="任务 ID，如 T001（--stdin 模式下可省略）"),
     agent: str = typer.Option("minimal-react", "--agent", help="后端 Agent 名称"),
     model: str = typer.Option("deepseek-chat", "--model", help="LLM 模型名"),
     timeout: Optional[int] = typer.Option(None, "--timeout", help="覆盖任务默认超时（秒）"),
     runs: int = typer.Option(1, "--runs", min=1, max=20, help="运行次数（采样，对抗非确定性）"),
+    stdin: bool = typer.Option(False, "--stdin", help="从 stdin 读取任务 spec（YAML/JSON），动态创建任务"),
     json_output: bool = typer.Option(False, "--json", help="输出结构化 JSON（适合程序调用）"),
     quiet: bool = typer.Option(False, "--quiet", help="静默模式，只输出最终结果（配合 --json）"),
 ) -> None:
     """对单个任务执行评测；--runs N 时输出采样统计（best/mean/std/pass_rate）。
 
+    --stdin 模式：从 stdin 读取任务 spec（YAML 或 JSON），动态创建临时任务执行评测，
+    适合外部系统通过管道传入动态任务。
+
     退出码：0=通过，1=未通过，2=参数错误，3=API Key问题，4=超时，5=内部错误。
     """
     from agent_eval.runner import run_one
-    from agent_eval.spec import find_tasks_dir, load_task_pack
+    from agent_eval.spec import find_tasks_dir, load_task_pack, TaskSpec
     from agent_eval.stats import summarize_scores
     from agent_eval.costing import estimate_cost
+    import yaml
+    import tempfile
 
-    tasks = {t.id: t for t in load_task_pack(find_tasks_dir())}
-    if task not in tasks:
-        msg = f"错误：找不到任务 {task}，可用: {sorted(tasks)}"
-        if json_output:
-            typer.echo(json.dumps({"error": msg, "exit_code": EXIT_PARAM}, ensure_ascii=False))
-        else:
-            typer.echo(msg)
-        raise typer.Exit(code=EXIT_PARAM)
+    if stdin:
+        # 从 stdin 读取任务 spec（YAML 或 JSON）
+        spec_text = sys.stdin.read()
+        if not spec_text.strip():
+            msg = "错误：--stdin 模式下 stdin 为空"
+            if json_output:
+                typer.echo(json.dumps({"error": msg, "exit_code": EXIT_PARAM}, ensure_ascii=False))
+            else:
+                typer.echo(msg)
+            raise typer.Exit(code=EXIT_PARAM)
+        try:
+            spec_data = yaml.safe_load(spec_text)
+        except yaml.YAMLError:
+            try:
+                spec_data = json.loads(spec_text)
+            except json.JSONDecodeError:
+                msg = "错误：stdin 内容不是有效的 YAML 或 JSON"
+                if json_output:
+                    typer.echo(json.dumps({"error": msg, "exit_code": EXIT_PARAM}, ensure_ascii=False))
+                else:
+                    typer.echo(msg)
+                raise typer.Exit(code=EXIT_PARAM)
+        # 构造临时任务：创建临时目录，写入 spec.yaml 和 fixtures
+        import atexit
+        import shutil
+        tmpdir = tempfile.mkdtemp(prefix="agent-eval-stdin-")
+        # 注册退出时清理临时目录
+        atexit.register(shutil.rmtree, tmpdir, ignore_errors=True)
+        task_id = spec_data.get("id", "STDIN")
+        spec_data["id"] = task_id
+        (Path(tmpdir) / "spec.yaml").write_text(yaml.dump(spec_data, allow_unicode=True), encoding="utf-8")
+        # 从 spec 中提取 fixtures（如果有 inline_fixtures 字段）
+        fixtures = spec_data.get("inline_fixtures", {})
+        if fixtures:
+            fixtures_dir = Path(tmpdir) / "fixtures"
+            fixtures_dir.mkdir(exist_ok=True)
+            fixtures_root = fixtures_dir.resolve()
+            for rel_path, content in fixtures.items():
+                fpath = (fixtures_dir / rel_path).resolve()
+                # 安全校验：写入路径必须在 fixtures 目录内，防止路径遍历
+                if not str(fpath).startswith(str(fixtures_root) + "/") and fpath != fixtures_root:
+                    msg = f"错误：inline_fixtures 路径越界（禁止路径遍历）: {rel_path}"
+                    if json_output:
+                        typer.echo(json.dumps({"error": msg, "exit_code": EXIT_PARAM}, ensure_ascii=False))
+                    else:
+                        typer.echo(msg)
+                    raise typer.Exit(code=EXIT_PARAM)
+                fpath.parent.mkdir(parents=True, exist_ok=True)
+                fpath.write_text(content, encoding="utf-8")
+        # 加载临时任务
+        t = TaskSpec.from_yaml(Path(tmpdir) / "spec.yaml")
+        if not json_output and not quiet:
+            typer.echo(f"stdin 任务: {t.id} - {t.title} ({t.level})")
+    else:
+        if not task:
+            msg = "错误：必须指定 --task 或使用 --stdin 模式"
+            if json_output:
+                typer.echo(json.dumps({"error": msg, "exit_code": EXIT_PARAM}, ensure_ascii=False))
+            else:
+                typer.echo(msg)
+            raise typer.Exit(code=EXIT_PARAM)
+        tasks = {t.id: t for t in load_task_pack(find_tasks_dir())}
+        if task not in tasks:
+            msg = f"错误：找不到任务 {task}，可用: {sorted(tasks)}"
+            if json_output:
+                typer.echo(json.dumps({"error": msg, "exit_code": EXIT_PARAM}, ensure_ascii=False))
+            else:
+                typer.echo(msg)
+            raise typer.Exit(code=EXIT_PARAM)
+        t = tasks[task]
 
     # 执行前提示预计 LLM 成本（实测基准 / 分级估算）
     est = estimate_cost(
-        agent, task, level=tasks[task].level, verifier=tasks[task].verifier, runs=runs, model=model
+        agent, t.id, level=t.level, verifier=t.verifier, runs=runs, model=model
     )
     src = "实测基准" if est["source"] == "measured" else "分级估算"
     if not json_output and not quiet:
@@ -136,7 +206,7 @@ def run(
         config["agent"]["timeout_s"] = timeout
 
     if runs <= 1:
-        rec = run_one(tasks[task], agent, config=config)
+        rec = run_one(t, agent, config=config)
         if json_output:
             _emit_run_json(rec, est)
         else:
@@ -158,7 +228,7 @@ def run(
     # 多次采样
     records = []
     for i in range(1, runs + 1):
-        rec = run_one(tasks[task], agent, config=config)
+        rec = run_one(t, agent, config=config)
         records.append(rec)
         score = rec.metrics.get("score", 0.0)
         if not json_output and not quiet:
@@ -369,6 +439,309 @@ def preflight(
                 typer.echo(f"  - {err}")
 
     raise typer.Exit(code=EXIT_OK if result["ready"] else EXIT_API_KEY)
+
+
+@app.command("commands")
+def commands(
+    json_output: bool = typer.Option(False, "--json", help="输出结构化 JSON"),
+) -> None:
+    """显示完整命令清单和用法速查。"""
+    cmd_list = [
+        {
+            "category": "评测执行",
+            "commands": [
+                {"name": "run", "desc": "单任务评测", "usage": "agent-eval run --task T001 --agent claude-code", "options": "--task, --agent, --model, --runs, --json, --stdin, --quiet"},
+                {"name": "preflight", "desc": "执行前预检（API Key/模型/任务/成本）", "usage": "agent-eval preflight --task T001 --agent claude-code", "options": "--task, --agent, --model, --runs, --json"},
+                {"name": "ci", "desc": "CI 门禁评测（支持 gate 阻断）", "usage": "agent-eval ci --agent claude-code --gate core", "options": "--agent, --model, --gate, --runs, --output"},
+            ],
+        },
+        {
+            "category": "查询分析",
+            "commands": [
+                {"name": "runs-list", "desc": "历史运行列表（分页+筛选）", "usage": "agent-eval runs-list --agent claude-code --limit 20", "options": "--limit, --offset, --task, --agent, --status, --json"},
+                {"name": "runs-show", "desc": "单次运行完整详情", "usage": "agent-eval runs-show <run_id>", "options": "--json"},
+                {"name": "tasks-show", "desc": "任务 spec 完整详情", "usage": "agent-eval tasks-show T001", "options": "--json"},
+                {"name": "list-tasks", "desc": "任务包列表（含预计成本）", "usage": "agent-eval list-tasks", "options": "--json"},
+                {"name": "report", "desc": "生成评测报告", "usage": "agent-eval report --run <run_id>", "options": "--run, --output, --format"},
+                {"name": "dreaming", "desc": "系统性模式分析（失败归因）", "usage": "agent-eval dreaming --agent claude-code", "options": "--agent, --task, --min-pattern, --auto-badcase"},
+            ],
+        },
+        {
+            "category": "资源管理",
+            "commands": [
+                {"name": "badcase-list", "desc": "Badcase 列表（分页+筛选）", "usage": "agent-eval badcase-list --severity P0 --status pending", "options": "--limit, --offset, --task, --agent, --severity, --status, --json"},
+                {"name": "badcase-show", "desc": "Badcase 完整详情", "usage": "agent-eval badcase-show <badcase_id>", "options": "--json"},
+                {"name": "taskpack", "desc": "任务包管理（list/info/install）", "usage": "agent-eval taskpack list", "options": "子命令: list, info, install"},
+            ],
+        },
+        {
+            "category": "平台管理",
+            "commands": [
+                {"name": "workbench", "desc": "启动 Web 评测工作台", "usage": "agent-eval workbench", "options": "--host, --port, --reload"},
+                {"name": "convert", "desc": "格式转换（OpenAPI spec → 任务）", "usage": "agent-eval convert --input spec.yaml --output tasks/", "options": "--input, --output, --format"},
+            ],
+        },
+    ]
+
+    exit_codes = [
+        {"code": 0, "meaning": "成功 / 评测全部通过"},
+        {"code": 1, "meaning": "评测未通过（有失败 checkpoint）"},
+        {"code": 2, "meaning": "参数错误 / 任务不存在"},
+        {"code": 3, "meaning": "API Key 缺失或无效"},
+        {"code": 4, "meaning": "执行超时"},
+        {"code": 5, "meaning": "内部错误"},
+    ]
+
+    if json_output:
+        typer.echo(json.dumps({
+            "commands": cmd_list,
+            "exit_codes": exit_codes,
+            "total_commands": sum(len(c["commands"]) for c in cmd_list),
+        }, ensure_ascii=False, indent=2))
+        return
+
+    typer.echo("=" * 70)
+    typer.echo("  agent-eval 命令清单")
+    typer.echo("=" * 70)
+    for cat in cmd_list:
+        typer.echo(f"\n【{cat['category']}】")
+        typer.echo("-" * 70)
+        for cmd in cat["commands"]:
+            typer.echo(f"  {cmd['name']:<14} {cmd['desc']}")
+            typer.echo(f"  {'':14} 用法: {cmd['usage']}")
+            typer.echo(f"  {'':14} 选项: {cmd['options']}")
+            typer.echo("")
+
+    typer.echo("【退出码】")
+    typer.echo("-" * 70)
+    for ec in exit_codes:
+        typer.echo(f"  {ec['code']}  {ec['meaning']}")
+
+    typer.echo("\n提示: 任何命令加 --help 查看详细参数，加 --json 输出结构化结果")
+    typer.echo("=" * 70)
+
+
+def _get_store():
+    """获取 RunStore 实例（CLI 用）。"""
+    from pathlib import Path
+    from agent_eval.web.store import RunStore
+    db_path = Path("results") / "run_history.db"
+    return RunStore(db_path)
+
+
+@app.command("runs-list")
+def runs_list(
+    limit: int = typer.Option(20, "--limit", min=1, max=500, help="返回条数"),
+    offset: int = typer.Option(0, "--offset", min=0, help="偏移量"),
+    task_id: Optional[str] = typer.Option(None, "--task", help="按任务 ID 筛选"),
+    agent_id: Optional[str] = typer.Option(None, "--agent", help="按 Agent 筛选"),
+    status: Optional[str] = typer.Option(None, "--status", help="按状态筛选"),
+    json_output: bool = typer.Option(False, "--json", help="输出结构化 JSON"),
+) -> None:
+    """列出历史运行记录（分页 + 筛选）。"""
+    store = _get_store()
+    rows, total = store.list_runs(limit=limit, offset=offset, task_id=task_id, agent_id=agent_id, status=status)
+
+    if json_output:
+        typer.echo(json.dumps({
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "runs": rows,
+        }, ensure_ascii=False, indent=2, default=str))
+        return
+
+    typer.echo(f"历史运行（共 {total} 条，显示 {offset+1}-{offset+len(rows)}）")
+    typer.echo(f"{'run_id':<14}{'task':<8}{'agent':<16}{'status':<12}{'score':<7}{'dur(s)':<8}{'created_at'}")
+    typer.echo("-" * 90)
+    for r in rows:
+        typer.echo(
+            f"{r['run_id']:<14}{r['task_id']:<8}{r['agent_id']:<16}"
+            f"{r['status']:<12}{r['score']:<7.2f}{r['duration_s']:<8.1f}{r['created_at']}"
+        )
+
+
+@app.command("runs-show")
+def runs_show(
+    run_id: str = typer.Argument(..., help="运行 ID"),
+    json_output: bool = typer.Option(False, "--json", help="输出结构化 JSON"),
+) -> None:
+    """查看单次运行的完整详情（从 results/runs/<run_id>/run.json 读取）。"""
+    from pathlib import Path
+    import re
+    # 安全校验：run_id 只允许字母数字，防止路径遍历
+    if not re.match(r'^[a-zA-Z0-9]+$', run_id):
+        msg = f"错误：无效的 run_id 格式（只允许字母数字）"
+        if json_output:
+            typer.echo(json.dumps({"error": msg, "exit_code": EXIT_PARAM}, ensure_ascii=False))
+        else:
+            typer.echo(msg)
+        raise typer.Exit(code=EXIT_PARAM)
+    runs_root = Path("results/runs").resolve()
+    run_path = (runs_root / run_id / "run.json").resolve()
+    # 双重校验：规范化后路径必须在 runs 目录内
+    if not str(run_path).startswith(str(runs_root) + "/"):
+        msg = f"错误：无效的 run_id（路径越界）"
+        if json_output:
+            typer.echo(json.dumps({"error": msg, "exit_code": EXIT_PARAM}, ensure_ascii=False))
+        else:
+            typer.echo(msg)
+        raise typer.Exit(code=EXIT_PARAM)
+    if not run_path.exists():
+        msg = f"错误：找不到运行 {run_id}（{run_path} 不存在）"
+        if json_output:
+            typer.echo(json.dumps({"error": msg, "exit_code": EXIT_PARAM}, ensure_ascii=False))
+        else:
+            typer.echo(msg)
+        raise typer.Exit(code=EXIT_PARAM)
+
+    data = json.loads(run_path.read_text(encoding="utf-8"))
+
+    if json_output:
+        typer.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    typer.echo(f"运行详情: {run_id}")
+    typer.echo("-" * 50)
+    typer.echo(f"  任务: {data.get('task_id')} ({data.get('task_level')})")
+    typer.echo(f"  Agent: {data.get('agent_id')} @ {data.get('agent_ver')}")
+    typer.echo(f"  状态: {data.get('status')}")
+    typer.echo(f"  耗时: {data.get('duration_s', 0):.1f}s")
+    typer.echo(f"  步骤: {len(data.get('steps', []))}")
+    m = data.get("metrics", {})
+    typer.echo(f"  得分: {m.get('score', 0):.3f} (权重 {m.get('weight', 0)})")
+    usage = m.get("usage", {})
+    if usage:
+        typer.echo(f"  Token: {usage.get('prompt_tokens', 0)}/{usage.get('completion_tokens', 0)}")
+    if m.get("cost_cny"):
+        typer.echo(f"  成本: ¥{m['cost_cny']:.4f}")
+    if m.get("failure_attribution"):
+        fa = m["failure_attribution"]
+        typer.echo(f"  失败归因: {fa.get('category')} - {fa.get('label')}")
+    if m.get("hard_gate_blocked"):
+        typer.echo(f"  Hard Gate: 已阻断")
+    verdicts = data.get("verdicts", [])
+    if verdicts:
+        passed = sum(1 for v in verdicts if v.get("passed"))
+        typer.echo(f"  判定: {passed}/{len(verdicts)} 通过")
+        for v in verdicts:
+            mark = "✓" if v.get("passed") else "✗"
+            typer.echo(f"    {mark} [{v.get('id')}] {v.get('type')}: {v.get('detail', '')[:60]}")
+
+
+@app.command("tasks-show")
+def tasks_show(
+    task_id: str = typer.Argument(..., help="任务 ID"),
+    json_output: bool = typer.Option(False, "--json", help="输出结构化 JSON"),
+) -> None:
+    """查看任务 spec 完整详情。"""
+    from agent_eval.spec import find_tasks_dir, load_task_pack
+    tasks = {t.id: t for t in load_task_pack(find_tasks_dir())}
+    if task_id not in tasks:
+        msg = f"错误：找不到任务 {task_id}"
+        if json_output:
+            typer.echo(json.dumps({"error": msg, "exit_code": EXIT_PARAM}, ensure_ascii=False))
+        else:
+            typer.echo(msg)
+        raise typer.Exit(code=EXIT_PARAM)
+
+    t = tasks[task_id]
+    if json_output:
+        from dataclasses import asdict
+        typer.echo(json.dumps(asdict(t), ensure_ascii=False, indent=2, default=str))
+        return
+
+    typer.echo(f"任务详情: {task_id}")
+    typer.echo("-" * 50)
+    typer.echo(f"  标题: {t.title}")
+    typer.echo(f"  级别: {t.level}")
+    typer.echo(f"  权重: {t.weight}")
+    typer.echo(f"  判定: {t.verifier}")
+    typer.echo(f"  描述: {t.description[:100] if t.description else '(无)'}")
+    if getattr(t, "risk_level", None):
+        typer.echo(f"  风险等级: {t.risk_level} ({getattr(t, 'risk_category', 'normal')})")
+    if getattr(t, "required_skills", None):
+        typer.echo(f"  必需 Skill: {', '.join(t.required_skills)}")
+    if getattr(t, "required_tools", None):
+        typer.echo(f"  必需工具: {', '.join(t.required_tools)}")
+    typer.echo(f"  校验点 ({len(getattr(t, 'checkpoints', []))} 个):")
+    for c in getattr(t, "checkpoints", []):
+        gate = getattr(c, "gate_mode", "blocking")
+        desc = getattr(c, "desc", "") or getattr(c, "description", "")
+        typer.echo(f"    [{c.id}] {c.type} (gate={gate}): {desc[:60]}")
+
+
+@app.command("badcase-list")
+def badcase_list(
+    limit: int = typer.Option(20, "--limit", min=1, max=500, help="返回条数"),
+    offset: int = typer.Option(0, "--offset", min=0, help="偏移量"),
+    task_id: Optional[str] = typer.Option(None, "--task", help="按任务 ID 筛选"),
+    agent_id: Optional[str] = typer.Option(None, "--agent", help="按 Agent 筛选"),
+    severity: Optional[str] = typer.Option(None, "--severity", help="按严重度筛选 (P0/P1/P2)"),
+    status: Optional[str] = typer.Option(None, "--status", help="按状态筛选"),
+    json_output: bool = typer.Option(False, "--json", help="输出结构化 JSON"),
+) -> None:
+    """列出 badcase 记录（分页 + 筛选）。"""
+    store = _get_store()
+    rows, total = store.list_badcases(limit=limit, offset=offset, task_id=task_id, agent_id=agent_id, severity=severity, status=status)
+
+    if json_output:
+        typer.echo(json.dumps({
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "badcases": rows,
+        }, ensure_ascii=False, indent=2, default=str))
+        return
+
+    typer.echo(f"Badcase（共 {total} 条，显示 {offset+1}-{offset+len(rows)}）")
+    typer.echo(f"{'id':<10}{'task':<8}{'agent':<14}{'severity':<9}{'status':<10}{'category':<16}title")
+    typer.echo("-" * 90)
+    for b in rows:
+        typer.echo(
+            f"{b['id']:<10}{b['task_id']:<8}{b['agent_id']:<14}"
+            f"{b['severity']:<9}{b['status']:<10}{b['category']:<16}{b['title'][:30]}"
+        )
+
+
+@app.command("badcase-show")
+def badcase_show(
+    badcase_id: str = typer.Argument(..., help="Badcase ID"),
+    json_output: bool = typer.Option(False, "--json", help="输出结构化 JSON"),
+) -> None:
+    """查看单个 badcase 完整详情。"""
+    store = _get_store()
+    b = store.get_badcase(badcase_id)
+    if not b:
+        msg = f"错误：找不到 badcase {badcase_id}"
+        if json_output:
+            typer.echo(json.dumps({"error": msg, "exit_code": EXIT_PARAM}, ensure_ascii=False))
+        else:
+            typer.echo(msg)
+        raise typer.Exit(code=EXIT_PARAM)
+
+    if json_output:
+        typer.echo(json.dumps(b, ensure_ascii=False, indent=2, default=str))
+        return
+
+    typer.echo(f"Badcase 详情: {badcase_id}")
+    typer.echo("-" * 50)
+    typer.echo(f"  标题: {b['title']}")
+    typer.echo(f"  任务: {b['task_id']}")
+    typer.echo(f"  Agent: {b['agent_id']}")
+    typer.echo(f"  严重度: {b['severity']}")
+    typer.echo(f"  状态: {b['status']}")
+    typer.echo(f"  分类: {b['category']}")
+    typer.echo(f"  描述: {b['description'][:200]}")
+    if b.get("root_cause"):
+        typer.echo(f"  根因: {b['root_cause'][:200]}")
+    if b.get("fix_plan"):
+        typer.echo(f"  修复方案: {b['fix_plan'][:200]}")
+    if b.get("regression_task_id"):
+        typer.echo(f"  回归用例: {b['regression_task_id']}")
+    if b.get("tags"):
+        typer.echo(f"  标签: {', '.join(b['tags'])}")
+    typer.echo(f"  创建: {b['created_at']}")
 
 
 @app.command("ci")
