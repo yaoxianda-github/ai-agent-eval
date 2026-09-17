@@ -80,7 +80,12 @@ def _parse_score(text: str) -> dict:
 
 
 class LLMJudge:
-    """语义判分器。client 可注入（测试），默认走 OpenAI 兼容接口（DeepSeek）。"""
+    """语义判分器。client 可注入（测试），默认走 OpenAI 兼容接口。
+
+    V4.3 P1-2：支持独立 judge 配置（JUDGE_MODEL / JUDGE_API_KEY / JUDGE_BASE_URL），
+    避免与被测模型相同导致"自恋偏差"。judge 模型可以比被测模型便宜 10-20 倍。
+    优先级：显式参数 > JUDGE_* 环境变量 > DEEPSEEK_* / LLM_* 环境变量。
+    """
 
     def __init__(
         self,
@@ -89,8 +94,13 @@ class LLMJudge:
         base_url: str | None = None,
         client=None,
     ) -> None:
-        self.model = model
-        self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get(
+        # V4.3 P1-2：独立 judge 配置优先
+        judge_model = os.environ.get("JUDGE_MODEL")
+        judge_api_key = os.environ.get("JUDGE_API_KEY")
+        judge_base_url = os.environ.get("JUDGE_BASE_URL")
+
+        self.model = model if model != "deepseek-chat" else (judge_model or model)
+        self.api_key = api_key or judge_api_key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get(
             "LLM_API_KEY"
         )
         self.client = client
@@ -101,6 +111,7 @@ class LLMJudge:
             self.client = openai.OpenAI(
                 api_key=self.api_key,
                 base_url=base_url
+                or judge_base_url
                 or os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
             )
 
@@ -215,3 +226,117 @@ class LLMJudge:
 def judge_llm(task, workspace: Path) -> dict:
     """便捷函数：按环境变量构造判分器并判分。"""
     return LLMJudge().judge(task, workspace)
+
+
+# ---------- V4.3 P1-1：LLM Judge 校准闭环 ----------
+
+def calibrate_judge(
+    labeled_path: str | Path,
+    judge: LLMJudge | None = None,
+    rubric: str | None = None,
+) -> dict:
+    """LLM Judge 校准闭环：用人工标注集计算一致率。
+
+    文章核心：judge 不是写完 prompt 就能用的。50 条人工标注，一致率 <80% 改 rubric 重跑，
+    >85% 才有资格参与自动化决策。
+
+    人工标注集格式（JSON 文件）：
+    [
+      {"id": "case-001", "input": "用户问题", "output": "Agent 产物", "human_pass": true, "human_score": 85},
+      ...
+    ]
+
+    返回：{"agreement_rate": float, "passed": bool, "threshold": 0.85,
+           "total": int, "agree": int, "conflicts": [...], "recommendation": str}
+    """
+    labeled_path = Path(labeled_path)
+    if not labeled_path.exists():
+        raise FileNotFoundError(f"人工标注集不存在: {labeled_path}")
+
+    with open(labeled_path, encoding="utf-8") as f:
+        cases = json.load(f)
+
+    if not isinstance(cases, list) or not cases:
+        raise ValueError("人工标注集格式错误：应为非空 JSON 数组")
+
+    judge = judge or LLMJudge()
+    if judge.client is None:
+        return {
+            "agreement_rate": 0.0,
+            "passed": False,
+            "threshold": 0.85,
+            "total": len(cases),
+            "agree": 0,
+            "conflicts": [],
+            "recommendation": "缺少 LLM API Key（JUDGE_API_KEY 或 DEEPSEEK_API_KEY），无法执行校准",
+        }
+
+    agree = 0
+    conflicts = []
+    for i, case in enumerate(cases):
+        cid = case.get("id", f"case-{i+1}")
+        human_pass = bool(case.get("human_pass", case.get("pass", False)))
+        human_score = case.get("human_score")
+
+        # 构造临时 task 对象用于 judge
+        import types
+        tmp_task = types.SimpleNamespace(
+            id=cid,
+            description=case.get("input", case.get("description", "")),
+            rubric=rubric or DEFAULT_RUBRIC,
+        )
+
+        # 构造临时 workspace（把 output 写入 output/ 目录）
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir) / "output"
+            out_dir.mkdir(exist_ok=True)
+            (out_dir / "result.txt").write_text(
+                str(case.get("output", case.get("agent_output", ""))), encoding="utf-8"
+            )
+            verdict = judge.judge(tmp_task, Path(tmpdir))
+
+        judge_pass = verdict.get("passed", False)
+        judge_score = verdict.get("score", 0.0)
+
+        if judge_pass == human_pass:
+            agree += 1
+        else:
+            conflicts.append({
+                "id": cid,
+                "human_pass": human_pass,
+                "judge_pass": judge_pass,
+                "human_score": human_score,
+                "judge_score": round(judge_score, 3),
+                "judge_reasoning": verdict.get("reasoning", "")[:200],
+                "input_preview": str(case.get("input", ""))[:100],
+            })
+
+    agreement_rate = round(agree / len(cases), 3)
+    passed = agreement_rate >= 0.85
+
+    if agreement_rate < 0.80:
+        recommendation = (
+            f"一致率 {agreement_rate:.1%} < 80%，建议修改 rubric 后重跑。"
+            f"重点检查 {len(conflicts)} 个冲突样本的判分理由。"
+        )
+    elif agreement_rate < 0.85:
+        recommendation = (
+            f"一致率 {agreement_rate:.1%} 在 80%-85% 之间，接近达标但未上岗。"
+            f"建议优化 rubric 中模糊项后再校准。"
+        )
+    else:
+        recommendation = (
+            f"一致率 {agreement_rate:.1%} >= 85%，judge 可以上岗参与自动化决策。"
+            f"建议定期（每月）用新增标注集复校。"
+        )
+
+    return {
+        "agreement_rate": agreement_rate,
+        "passed": passed,
+        "threshold": 0.85,
+        "total": len(cases),
+        "agree": agree,
+        "conflicts": conflicts,
+        "recommendation": recommendation,
+    }

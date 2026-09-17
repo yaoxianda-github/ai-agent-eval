@@ -120,8 +120,11 @@ def run_passed(record) -> bool:
     return float(record.metrics.get("pass_rate", 0.0)) >= 1.0
 
 
-def judge_task(records: list, task_pass_ratio: float) -> dict:
-    """task 级多数制判定。records: 同一任务的 runs 次 RunRecord。"""
+def judge_task(records: list, task_pass_ratio: float, task_spec=None) -> dict:
+    """task 级多数制判定。records: 同一任务的 runs 次 RunRecord。
+
+    V4.3 P0：增加 risk_level 字段，用于按失败代价加权门禁。
+    """
     n = len(records)
     passed_runs = sum(1 for r in records if run_passed(r))
     task_passed = (passed_runs / n) >= task_pass_ratio if n else False
@@ -134,9 +137,11 @@ def judge_task(records: list, task_pass_ratio: float) -> dict:
             s["total"] += 1
             if v.get("passed"):
                 s["passed"] += 1
+    risk_level = getattr(task_spec, "risk_level", None) if task_spec else None
     return {
         "task_id": records[0].task_id if records else "?",
         "level": records[0].task_level if records else "",
+        "risk_level": risk_level,  # V4.3 P0：风险等级（P0/P1/P2/None）
         "runs": n,
         "passed_runs": passed_runs,
         "task_passed": task_passed,
@@ -147,11 +152,48 @@ def judge_task(records: list, task_pass_ratio: float) -> dict:
 
 
 def judge_gate(task_results: list[dict], min_pass_rate: float) -> tuple[bool, float]:
-    """gate 判定：通过任务数 / 总任务数 >= min_pass_rate。返回 (是否通过, 通过率)。"""
+    """gate 判定：按失败代价加权。
+
+    V4.3 P0：按任务 risk_level 加权门禁
+    - P0 任务任一失败：直接 BLOCK（零容忍）
+    - P1 任务失败：计入通过率（正常计算）
+    - P2 任务失败：降级为 warning（不阻断，但记录）
+    - 无 risk_level 的任务：按 P1 处理（计入通过率）
+
+    返回 (是否通过, 通过率)。通过率仅统计 P1+无等级任务，P0/P2 单独处理。
+    """
     if not task_results:
         return False, 0.0
-    passed = sum(1 for t in task_results if t["task_passed"])
-    rate = passed / len(task_results)
+
+    # P0 任务零容忍：任一失败直接 BLOCK
+    p0_failed = [
+        t for t in task_results
+        if t.get("risk_level") == "P0" and not t["task_passed"]
+    ]
+    if p0_failed:
+        failed_ids = [t["task_id"] for t in p0_failed]
+        logger.warning("P0 任务失败，门禁直接 BLOCK: %s", failed_ids)
+        return False, 0.0
+
+    # P2 任务失败降级为 warning（不阻断，但记录）
+    p2_failed = [
+        t for t in task_results
+        if t.get("risk_level") == "P2" and not t["task_passed"]
+    ]
+    if p2_failed:
+        logger.info("P2 任务失败（降级为 warning，不阻断）: %s", [t["task_id"] for t in p2_failed])
+
+    # 通过率仅统计 P1 + 无等级任务（P0 已零容忍，P2 已降级）
+    weighted_tasks = [
+        t for t in task_results
+        if t.get("risk_level") in (None, "P1")
+    ]
+    if not weighted_tasks:
+        # 全部是 P0/P2 且 P0 全部通过、P2 失败已降级
+        return True, 1.0
+
+    passed = sum(1 for t in weighted_tasks if t["task_passed"])
+    rate = passed / len(weighted_tasks)
     return rate >= min_pass_rate, round(rate, 3)
 
 
@@ -363,7 +405,7 @@ def run_gate(
                 u = rec.metrics.get("usage") or {}
                 a_tokens["prompt_tokens"] += u.get("prompt_tokens", 0) or 0
                 a_tokens["completion_tokens"] += u.get("completion_tokens", 0) or 0
-            tr = judge_task(records, g["task_pass_ratio"])
+            tr = judge_task(records, g["task_pass_ratio"], task_spec=tasks[tid])
             tr["expected_runs"] = runs
             a_task_results.append(tr)
             logger.info(

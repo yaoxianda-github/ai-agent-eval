@@ -867,6 +867,114 @@
     });
   }
 
+  // ---------- V4.3 P1-3：通过率趋势与慢漂移检测 ----------
+  function renderTrendChart(runs) {
+    var container = el("h-trend");
+    if (!container) return;
+    if (!runs || runs.length < 2) {
+      container.innerHTML = '<div class="empty">数据不足（至少需要 2 次运行）</div>';
+      return;
+    }
+
+    // 按时间正序（API 返回是倒序）
+    var ordered = runs.slice().reverse();
+    var data = ordered.map(function (r, i) {
+      var verdicts = r.verdicts || r.metrics_verdicts || [];
+      var passed = 0, total = 0;
+      if (r.metrics && r.metrics.pass_rate !== undefined) {
+        passed = Math.round(r.metrics.pass_rate * 100);
+        total = 100;
+      } else if (verdicts.length) {
+        passed = verdicts.filter(function (v) { return v.passed; }).length;
+        total = verdicts.length;
+      }
+      return {
+        idx: i,
+        run_id: r.run_id,
+        task: r.task_id,
+        agent: r.agent_id,
+        pass_rate: total ? (passed / total) : 0,
+        time: r.created_at,
+      };
+    });
+
+    // 慢漂移检测：最近 N 次连续下降 >5%
+    var driftAlert = null;
+    var windowSize = Math.min(5, data.length);
+    if (windowSize >= 3) {
+      var recent = data.slice(-windowSize);
+      var declines = 0;
+      for (var i = 1; i < recent.length; i++) {
+        if (recent[i].pass_rate < recent[i - 1].pass_rate - 0.05) {
+          declines++;
+        }
+      }
+      if (declines >= 2) {
+        var firstRate = (recent[0].pass_rate * 100).toFixed(0);
+        var lastRate = (recent[recent.length - 1].pass_rate * 100).toFixed(0);
+        driftAlert = "⚠ 慢漂移告警：最近 " + windowSize + " 次运行通过率从 " + firstRate + "% 降至 " + lastRate + "%，建议检查是否有 prompt/模型/工具变更导致回归";
+      }
+    }
+
+    // SVG 折线图
+    var W = 800, H = 200, padL = 50, padR = 20, padT = 20, padB = 40;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var n = data.length;
+    var xStep = n > 1 ? plotW / (n - 1) : 0;
+
+    function xPos(i) { return padL + i * xStep; }
+    function yPos(rate) { return padT + plotH - (rate * plotH); }
+
+    var points = data.map(function (d, i) {
+      return xPos(i).toFixed(1) + "," + yPos(d.pass_rate).toFixed(1);
+    }).join(" ");
+
+    // 90% 参考线
+    var thresholdY = yPos(0.9);
+
+    var svg = '<svg width="100%" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" style="max-width:100%;">';
+    // 网格线
+    for (var g = 0; g <= 4; g++) {
+      var gy = padT + (plotH / 4) * g;
+      var gv = (100 - g * 25);
+      svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '" stroke="var(--border-color)" stroke-dasharray="3,3"/>';
+      svg += '<text x="' + (padL - 8) + '" y="' + (gy + 4) + '" text-anchor="end" fill="var(--text-secondary)" font-size="11">' + gv + '%</text>';
+    }
+    // 90% 阈值线
+    svg += '<line x1="' + padL + '" y1="' + thresholdY + '" x2="' + (W - padR) + '" y2="' + thresholdY + '" stroke="#f59e0b" stroke-dasharray="6,3" stroke-width="1.5"/>';
+    svg += '<text x="' + (W - padR - 4) + '" y="' + (thresholdY - 4) + '" text-anchor="end" fill="#f59e0b" font-size="10">门禁阈值 90%</text>';
+    // 折线
+    svg += '<polyline points="' + points + '" fill="none" stroke="var(--accent-color,#3b82f6)" stroke-width="2.5"/>';
+    // 数据点
+    data.forEach(function (d, i) {
+      var color = d.pass_rate >= 0.9 ? "#16a34a" : (d.pass_rate >= 0.7 ? "#f59e0b" : "#dc2626");
+      svg += '<circle cx="' + xPos(i).toFixed(1) + '" cy="' + yPos(d.pass_rate).toFixed(1) + '" r="4" fill="' + color + '">';
+      svg += '<title>' + d.task + ' / ' + d.agent + '\\n通过率: ' + (d.pass_rate * 100).toFixed(0) + '%\\n' + (d.time || '') + '</title></circle>';
+    });
+    // X 轴标签（只显示首尾和中间）
+    var labelIdxs = n <= 6 ? data.map(function (_, i) { return i; }) : [0, Math.floor(n / 2), n - 1];
+    labelIdxs.forEach(function (i) {
+      var label = data[i].task;
+      if (label.length > 8) label = label.substring(0, 8) + "…";
+      svg += '<text x="' + xPos(i).toFixed(1) + '" y="' + (H - padB + 18) + '" text-anchor="middle" fill="var(--text-secondary)" font-size="10">' + esc(label) + '</text>';
+    });
+    svg += "</svg>";
+
+    // 统计摘要
+    var avgRate = (data.reduce(function (s, d) { return s + d.pass_rate; }, 0) / n * 100).toFixed(1);
+    var passCount = data.filter(function (d) { return d.pass_rate >= 0.9; }).length;
+    var summary = '<div style="display:flex;gap:24px;margin-top:12px;flex-wrap:wrap;">' +
+      '<div><span class="muted">样本数:</span> <b>' + n + '</b></div>' +
+      '<div><span class="muted">平均通过率:</span> <b>' + avgRate + '%</b></div>' +
+      '<div><span class="muted">达标次数(≥90%):</span> <b style="color:#16a34a;">' + passCount + '</b></div>' +
+      '<div><span class="muted">未达标次数:</span> <b style="color:#dc2626;">' + (n - passCount) + '</b></div>' +
+      "</div>";
+
+    var alertHtml = driftAlert ? '<div style="margin-top:12px;padding:10px 14px;background:#fef3c7;border-left:4px solid #f59e0b;border-radius:4px;font-size:13px;">' + esc(driftAlert) + "</div>" : "";
+
+    container.innerHTML = svg + summary + alertHtml;
+  }
+
   // ---------- 视图：运行历史 ----------
   function viewHistory() {
     Promise.all([loadTasks(), loadBackends()]).then(function () {
@@ -878,6 +986,11 @@
       }).join("");
       renderHTML(
         '<h2 class="page-title">运行历史</h2>' +
+        // V4.3 P1-3：通过率趋势与慢漂移检测
+        '<div class="card" id="h-trend-card">' +
+          '<h3>通过率趋势 <span class="tl-note">最近 20 次运行 · 慢漂移检测</span></h3>' +
+          '<div id="h-trend"><div class="empty">加载中…</div></div>' +
+        "</div>" +
         '<div class="card">' +
           '<div class="filter-bar">' +
             '<div class="filter-item"><label>任务</label><select id="h-task">' + taskOpts + "</select></div>" +
@@ -915,6 +1028,8 @@
       var list = el("h-list");
       if (!d.runs || !d.runs.length) { list.innerHTML = '<div class="empty">暂无运行记录</div>'; return; }
       var runs = d.runs;
+      // V4.3 P1-3：渲染通过率趋势图 + 慢漂移检测
+      renderTrendChart(runs.slice(0, 20));
       // 时间范围过滤
       if (timeRange) {
         var now = Date.now();
