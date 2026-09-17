@@ -30,6 +30,9 @@ CheckpointType = Literal[
     "http_status",         # path=URL, pattern=状态码（如 "200"、"2"、"200-299"）
     # V3.8 P1：参数级 checkpoint——断言工具调用的参数值
     "tool_call_assert",    # tool=工具名, param=参数名, pattern=参数值正则（值域判断）
+    # V4.3 P0：轨迹级 checkpoint——断言工具调用顺序与无死循环
+    "tool_order_assert",   # tools=[工具1,工具2,...]，按顺序检查是否依次调用
+    "no_loop_assert",      # max_consecutive=N，同一工具同一参数连续调用不超过N次
 ]
 
 LEVELS = {"L1", "L2", "L3", "L4", "L5"}
@@ -64,6 +67,8 @@ class Checkpoint:
     stage: str = "final_answer"  # V3.7：校验点所属评测阶段，默认最终输出
     tool: str = ""   # V3.8 P1：tool_call_assert 类型的工具名
     param: str = ""  # V3.8 P1：tool_call_assert 类型的参数名
+    tools: list[str] = field(default_factory=list)  # V4.3 P0：tool_order_assert 类型的工具序列
+    max_consecutive: int = 3  # V4.3 P0：no_loop_assert 类型的最大连续重复次数
     gate_mode: str = "blocking"  # V4.0 P2：渐进式规则状态（shadow只记录/warning提醒/blocking阻断）
     category: str = "outcome"  # V4.1 P1：成功标准三层分类（outcome业务结果/gate硬门禁/quality软质量）
 
@@ -108,7 +113,7 @@ class TaskSpec:
     required_skills: list[str] = field(default_factory=list)  # 必需触发的 Skill 名称列表
     required_tools: list[str] = field(default_factory=list)  # 必需调用的工具名称列表
     output_contract: str = ""  # 输出契约描述（如 "json"、"markdown报告"、"csv文件"）
-    scenario_type: str = "happy_path"  # V4.1 P1：测试集四层场景类型（happy_path正常/boundary边界/error_recovery异常恢复/adversarial对抗）
+    scenario_type: str = "happy_path"  # V4.1 P1：测试集场景类型（happy_path正常/boundary边界/error_recovery异常恢复/adversarial对抗/off_topic离题诱导 V4.3 P2-2）
     spec_path: Optional[Path] = None
 
     @classmethod
@@ -125,6 +130,8 @@ class TaskSpec:
                 stage=cp.get("stage", "final_answer"),
                 tool=cp.get("tool", ""),
                 param=cp.get("param", ""),
+                tools=cp.get("tools", []),
+                max_consecutive=cp.get("max_consecutive", 3),
                 gate_mode=cp.get("gate_mode", "blocking"),
                 category=cp.get("category", "outcome"),
             )

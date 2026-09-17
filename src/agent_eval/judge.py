@@ -340,3 +340,92 @@ def calibrate_judge(
         "conflicts": conflicts,
         "recommendation": recommendation,
     }
+
+
+# ---------- V4.3 P2-1：A/B Pairwise Judge + 换位测试 ----------
+
+def pairwise_compare(
+    task_description: str,
+    output_a: str,
+    output_b: str,
+    label_a: str = "Agent A",
+    label_b: str = "Agent B",
+    judge: LLMJudge | None = None,
+    rubric: str | None = None,
+) -> dict:
+    """A/B Pairwise 对比 + 换位测试。
+
+    文章核心：分别打分有偏差，pairwise 对比更稳定；换位测试防止位置偏差。
+    流程：A 在前 B 在后评一次 → B 在前 A 在后再评一次 → 取两次一致结果，
+    不一致时标注为"存疑"需要人工复核。
+
+    返回：{"winner": "A"/"B"/"tie"/"inconclusive", "agreement": bool,
+           "round1": {"winner":..., "reasoning":...}, "round2": {...},
+           "position_bias_risk": bool}
+    """
+    judge = judge or LLMJudge()
+    if judge.client is None:
+        return {"winner": "inconclusive", "agreement": False, "error": "缺少 LLM API Key"}
+
+    rubric_text = (rubric or DEFAULT_RUBRIC).strip()
+
+    def _one_round(first_label: str, first_output: str, second_label: str, second_output: str) -> dict:
+        user_msg = (
+            f"任务：{task_description}\n\n"
+            f"评分标准：\n{rubric_text}\n\n"
+            f"【{first_label} 的输出】\n{first_output[:4000]}\n\n"
+            f"【{second_label} 的输出】\n{second_output[:4000]}\n\n"
+            "请对比两个输出，仅输出一个 JSON 对象：\n"
+            '{"winner": "first"/"second"/"tie", '
+            '"reasoning": "选择理由（50字以内）", '
+            '"score_first": 0-100, "score_second": 0-100}'
+        )
+        try:
+            resp = judge.client.chat.completions.create(
+                model=judge.model,
+                messages=[
+                    {"role": "system", "content": "你是严格的 AI Agent 输出对比评审员，只看输出质量不看标签。"},
+                    {"role": "user", "content": user_msg},
+                ],
+                temperature=0.0,
+                max_tokens=300,
+            )
+            raw = resp.choices[0].message.content or ""
+            data = _parse_score(raw)
+            return {
+                "winner": data.get("winner", "tie"),
+                "reasoning": str(data.get("reasoning", ""))[:200],
+                "score_first": float(data.get("score_first", 0)),
+                "score_second": float(data.get("score_second", 0)),
+            }
+        except Exception as e:  # noqa: BLE001
+            return {"winner": "tie", "reasoning": f"judge 调用失败: {e}", "score_first": 0, "score_second": 0}
+
+    # 第一轮：A 在前，B 在后
+    r1 = _one_round(label_a, output_a, label_b, output_b)
+    # 第二轮：B 在前，A 在后（换位）
+    r2 = _one_round(label_b, output_b, label_a, output_a)
+
+    # 映射回原始标签
+    r1_winner = "A" if r1["winner"] == "first" else ("B" if r1["winner"] == "second" else "tie")
+    r2_winner = "B" if r2["winner"] == "first" else ("A" if r2["winner"] == "second" else "tie")
+
+    agreement = r1_winner == r2_winner
+    position_bias_risk = not agreement and r1_winner != "tie" and r2_winner != "tie"
+
+    if agreement:
+        winner = r1_winner
+    elif r1_winner == "tie" or r2_winner == "tie":
+        winner = r1_winner if r1_winner != "tie" else r2_winner
+    else:
+        winner = "inconclusive"  # 两次结果矛盾，需人工复核
+
+    return {
+        "winner": winner,
+        "agreement": agreement,
+        "position_bias_risk": position_bias_risk,
+        "round1": {"winner": r1_winner, "reasoning": r1["reasoning"], "score_a": r1["score_first"], "score_b": r1["score_second"]},
+        "round2": {"winner": r2_winner, "reasoning": r2["reasoning"], "score_a": r2["score_second"], "score_b": r2["score_first"]},
+        "avg_score_a": round((r1["score_first"] + r2["score_second"]) / 2, 1),
+        "avg_score_b": round((r1["score_second"] + r2["score_first"]) / 2, 1),
+    }

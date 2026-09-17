@@ -755,6 +755,111 @@ def badcase_discover(
     typer.echo("提示: 使用 agent-eval badcase-show <run_id> 查看详情，或在 Web 端 badcase 模块一键转化")
 
 
+@app.command("judge-calibrate")
+def judge_calibrate(
+    labeled: str = typer.Option(..., "--labeled", "-l", help="人工标注集 JSON 文件路径"),
+    rubric: Optional[str] = typer.Option(None, "--rubric", "-r", help="自定义评分标准文本（覆盖默认）"),
+    json_output: bool = typer.Option(False, "--json", help="输出结构化 JSON"),
+) -> None:
+    """V4.3 P1-1：LLM Judge 校准闭环——用人工标注集计算一致率。
+
+    校准流程：50 条人工标注 → judge 跑同样 50 条 → 一致率 <80% 改 rubric 重跑 → >85% 才上岗。
+    人工标注集格式：[{"id":"case-001","input":"...","output":"...","human_pass":true,"human_score":85}, ...]
+    """
+    from agent_eval.judge import LLMJudge, calibrate_judge
+
+    try:
+        result = calibrate_judge(labeled, judge=LLMJudge(), rubric=rubric)
+    except (FileNotFoundError, ValueError) as e:
+        typer.echo(f"错误: {e}")
+        raise typer.Exit(code=EXIT_PARAM)
+
+    if json_output:
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        if not result["passed"]:
+            raise typer.Exit(code=EXIT_FAIL)
+        return
+
+    typer.echo("=" * 70)
+    typer.echo("LLM Judge 校准报告")
+    typer.echo("=" * 70)
+    typer.echo(f"标注样本数: {result['total']}")
+    typer.echo(f"一致数: {result['agree']}")
+    typer.echo(f"一致率: {result['agreement_rate']:.1%}（上岗阈值 {result['threshold']:.0%}）")
+    status = "✅ 通过，可以上岗" if result["passed"] else "❌ 未通过，需优化 rubric"
+    typer.echo(f"校准结果: {status}")
+    typer.echo("-" * 70)
+    typer.echo(f"建议: {result['recommendation']}")
+    if result["conflicts"]:
+        typer.echo("-" * 70)
+        typer.echo(f"冲突样本（{len(result['conflicts'])} 个，前 10 个）:")
+        for c in result["conflicts"][:10]:
+            typer.echo(
+                f"  {c['id']}: 人工={'PASS' if c['human_pass'] else 'FAIL'} "
+                f"vs Judge={'PASS' if c['judge_pass'] else 'FAIL'} "
+                f"(score {c.get('human_score', '?')} vs {c['judge_score']})"
+            )
+            if c.get("judge_reasoning"):
+                typer.echo(f"    Judge 理由: {c['judge_reasoning'][:80]}")
+    typer.echo("=" * 70)
+
+    if not result["passed"]:
+        raise typer.Exit(code=EXIT_FAIL)
+
+
+@app.command("pairwise")
+def pairwise(
+    task_desc: str = typer.Option(..., "--task", "-t", help="任务描述"),
+    output_a: str = typer.Option(..., "--output-a", help="Agent A 输出文件路径"),
+    output_b: str = typer.Option(..., "--output-b", help="Agent B 输出文件路径"),
+    label_a: str = typer.Option("Agent A", "--label-a", help="Agent A 标签"),
+    label_b: str = typer.Option("Agent B", "--label-b", help="Agent B 标签"),
+    json_output: bool = typer.Option(False, "--json", help="输出结构化 JSON"),
+) -> None:
+    """V4.3 P2-1：A/B Pairwise 对比 + 换位测试。
+
+    两个输出正反各评一次，取一致结果；不一致标注为存疑需人工复核。
+    防止位置偏差（先出现的输出容易被偏好）。
+    """
+    from pathlib import Path
+    from agent_eval.judge import LLMJudge, pairwise_compare
+
+    try:
+        text_a = Path(output_a).read_text(encoding="utf-8")
+        text_b = Path(output_b).read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError) as e:
+        typer.echo(f"错误: 读取输出文件失败: {e}")
+        raise typer.Exit(code=EXIT_PARAM)
+
+    result = pairwise_compare(task_desc, text_a, text_b, label_a, label_b, judge=LLMJudge())
+
+    if json_output:
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        if result.get("winner") == "inconclusive":
+            raise typer.Exit(code=EXIT_FAIL)
+        return
+
+    typer.echo("=" * 60)
+    typer.echo("A/B Pairwise 对比 + 换位测试")
+    typer.echo("=" * 60)
+    typer.echo(f"任务: {task_desc[:60]}")
+    typer.echo(f"Agent A: {label_a} (均分 {result.get('avg_score_a', 0)})")
+    typer.echo(f"Agent B: {label_b} (均分 {result.get('avg_score_b', 0)})")
+    typer.echo("-" * 60)
+    typer.echo(f"第一轮 (A在前): 胜者={result['round1']['winner']}  理由: {result['round1']['reasoning'][:60]}")
+    typer.echo(f"第二轮 (B在前): 胜者={result['round2']['winner']}  理由: {result['round2']['reasoning'][:60]}")
+    typer.echo("-" * 60)
+    winner_map = {"A": label_a, "B": label_b, "tie": "平局", "inconclusive": "存疑（需人工复核）"}
+    typer.echo(f"最终结果: {winner_map.get(result['winner'], result['winner'])}")
+    typer.echo(f"两次一致: {'是' if result.get('agreement') else '否'}")
+    if result.get("position_bias_risk"):
+        typer.echo("⚠ 位置偏差风险：两次结果相反，建议人工复核或增加第三轮")
+    typer.echo("=" * 60)
+
+    if result.get("winner") == "inconclusive":
+        raise typer.Exit(code=EXIT_FAIL)
+
+
 @app.command("badcase-list")
 def badcase_list(
     limit: int = typer.Option(20, "--limit", min=1, max=500, help="返回条数"),

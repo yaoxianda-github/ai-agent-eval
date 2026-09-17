@@ -1605,6 +1605,8 @@ def create_app(
             "level": "L2",
             "description": description,
             "tags": ["regression", b.get("category", "other")],
+            "scenario_type": "error_recovery",  # V4.3 P2-3：回归用例默认标记为异常恢复场景
+            "risk_level": "P1",  # V4.3 P2-3：从 badcase 转化的用例默认 P1（生产失败回流）
             "fixtures": {"source": "fixtures/"},
             "ground_truth": {
                 "checkpoints": [
