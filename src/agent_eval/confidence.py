@@ -475,3 +475,150 @@ def confidence_level_color(level: str) -> str:
         "medium": "#f59e0b",  # 橙色
         "low": "#ef4444",  # 红色
     }.get(level, "#6b7280")
+
+
+# P1 改进：坑三修复 — 标准误与置信区间计算
+def calculate_pass_rate_confidence(
+    pass_runs: int,
+    total_runs: int,
+    confidence_level: float = 0.95,
+) -> dict[str, Any]:
+    """计算通过率的标准误和置信区间（Wilson Score Interval）。
+
+    对应 AliExpress 文章坑三：同一个数据集四次跑出四个分数。
+    单次通过率有噪声，需要置信区间来判断"真退化还是波动"。
+
+    Args:
+        pass_runs: 通过的运行次数
+        total_runs: 总运行次数
+        confidence_level: 置信水平（默认 0.95 = 95%）
+
+    Returns:
+        {
+            "pass_rate": 通过率（0-1）,
+            "standard_error": 标准误,
+            "ci_lower": 置信区间下限,
+            "ci_upper": 置信区间上限,
+            "margin_of_error": 误差幅度,
+            "n": 样本量,
+            "interpretation": 中文解释
+        }
+    """
+    if total_runs == 0:
+        return {
+            "pass_rate": 0.0,
+            "standard_error": 0.0,
+            "ci_lower": 0.0,
+            "ci_upper": 0.0,
+            "margin_of_error": 0.0,
+            "n": 0,
+            "interpretation": "无运行数据",
+        }
+
+    p = pass_runs / total_runs
+
+    # Wilson Score Interval（二项分布置信区间，比正态近似更准确）
+    # z 值：95% → 1.96
+    z = 1.96 if abs(confidence_level - 0.95) < 0.01 else 2.576
+    if abs(confidence_level - 0.99) < 0.01:
+        z = 2.576
+
+    denominator = 1 + z**2 / total_runs
+    center = (p + z**2 / (2 * total_runs)) / denominator
+    margin = z * math.sqrt(p * (1 - p) / total_runs + z**2 / (4 * total_runs**2)) / denominator
+
+    ci_lower = max(0.0, center - margin)
+    ci_upper = min(1.0, center + margin)
+    se = math.sqrt(p * (1 - p) / total_runs) if total_runs > 0 else 0.0
+
+    # 生成解释
+    if total_runs < 5:
+        interpretation = (
+            f"样本量太小（n={total_runs}），置信区间宽至 [{ci_lower:.1%}, {ci_upper:.1%}]，"
+            f"无法可靠区分真退化还是波动"
+        )
+    elif ci_upper - ci_lower < 0.05:
+        interpretation = (
+            f"样本量充足，95% 置信区间 [{ci_lower:.1%}, {ci_upper:.1%}] 较窄，结果可靠"
+        )
+    else:
+        interpretation = (
+            f"95% 置信区间 [{ci_lower:.1%}, {ci_upper:.1%}]，"
+            f"比较两个版本时需检查区间是否重叠"
+        )
+
+    return {
+        "pass_rate": round(p, 4),
+        "standard_error": round(se, 4),
+        "ci_lower": round(ci_lower, 4),
+        "ci_upper": round(ci_upper, 4),
+        "margin_of_error": round(margin, 4),
+        "n": total_runs,
+        "interpretation": interpretation,
+    }
+
+
+def compare_pass_rates_with_ci(
+    baseline_p: float,
+    baseline_n: int,
+    current_p: float,
+    current_n: int,
+    confidence_level: float = 0.95,
+) -> dict[str, Any]:
+    """比较两个通过率，考虑置信区间重叠。
+
+    对应 AliExpress 文章坑三：基线 62%，这次跑出 60%，是真退化还是抖了一下？
+
+    Args:
+        baseline_p: 基线通过率
+        baseline_n: 基线样本量
+        current_p: 当前通过率
+        current_n: 当前样本量
+
+    Returns:
+        {
+            "baseline_ci": 基线置信区间,
+            "current_ci": 当前置信区间,
+            "ci_overlap": 两个区间是否重叠,
+            "is_significant_degradation": 是否显著退化,
+            "conclusion": 中文结论
+        }
+    """
+    baseline = calculate_pass_rate_confidence(
+        int(baseline_p * baseline_n), baseline_n, confidence_level
+    )
+    current = calculate_pass_rate_confidence(
+        int(current_p * current_n), current_n, confidence_level
+    )
+
+    # 区间重叠判断
+    ci_overlap = not (
+        baseline["ci_upper"] < current["ci_lower"]
+        or current["ci_upper"] < baseline["ci_lower"]
+    )
+
+    # 显著退化：当前区间完全低于基线区间
+    is_significant_degradation = current["ci_upper"] < baseline["ci_lower"]
+
+    if is_significant_degradation:
+        conclusion = (
+            f"当前通过率 {current_p:.1%} 显著低于基线 {baseline_p:.1%}，"
+            f"置信区间不重叠，确认为真退化"
+        )
+    elif ci_overlap:
+        conclusion = (
+            f"当前通过率 {current_p:.1%} 与基线 {baseline_p:.1%} 的置信区间重叠，"
+            f"无法区分是真退化还是正常波动"
+        )
+    else:
+        conclusion = (
+            f"当前通过率 {current_p:.1%} 高于基线 {baseline_p:.1%}，置信区间不重叠，确认为提升"
+        )
+
+    return {
+        "baseline_ci": baseline,
+        "current_ci": current,
+        "ci_overlap": ci_overlap,
+        "is_significant_degradation": is_significant_degradation,
+        "conclusion": conclusion,
+    }
