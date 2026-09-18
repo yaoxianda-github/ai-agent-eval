@@ -39,6 +39,12 @@ LEVELS = {"L1", "L2", "L3", "L4", "L5"}
 VERIFIERS = {"deterministic", "llm_judge"}
 # HarnessDev 论文归纳的六类 Harness 控制能力
 CAPABILITIES = {"execution", "tools", "context", "state", "lifecycle", "verification"}
+# P1 改进：能力评测 vs 回归评测分离（对应 AliExpress 文章）
+EVAL_TYPES = {"capability", "regression"}
+EVAL_TYPE_LABELS = {
+    "capability": "能力评测",
+    "regression": "回归评测",
+}
 # V3.7：评测分层——校验点所属阶段（单元/链路/端到端三层评测体系）
 CHECKPOINT_STAGES = {
     "retrieval",      # 检索/读取阶段：文件读取、信息获取、知识召回
@@ -114,6 +120,7 @@ class TaskSpec:
     required_tools: list[str] = field(default_factory=list)  # 必需调用的工具名称列表
     output_contract: str = ""  # 输出契约描述（如 "json"、"markdown报告"、"csv文件"）
     scenario_type: str = "happy_path"  # V4.1 P1：测试集场景类型（happy_path正常/boundary边界/error_recovery异常恢复/adversarial对抗/off_topic离题诱导 V4.3 P2-2）
+    eval_type: str = "regression"  # P1 改进：能力评测 vs 回归评测（capability能力测试要难/regression回归测试要稳）
     spec_path: Optional[Path] = None
 
     @classmethod
@@ -161,6 +168,7 @@ class TaskSpec:
             required_tools=list(data.get("required_tools", [])),
             output_contract=str(data.get("output_contract", "")),
             scenario_type=str(data.get("scenario_type", "happy_path")),
+            eval_type=str(data.get("eval_type", "regression")),  # P1 改进
             skills=[
                 SkillSpec(
                     id=s.get("id", ""),
@@ -190,6 +198,10 @@ class TaskSpec:
             errors.append(
                 f"verifier 必须为 {sorted(VERIFIERS)} 之一，当前: {self.verifier}"
             )
+        # P0 改进：坑二修复 — checkpoint schema 校验
+        # 没有任何校验点的任务无法判定通过/失败，应标记为配置异常
+        if not self.checkpoints:
+            errors.append("任务缺少任何校验点（checkpoints 为空），无法判定通过/失败")
         for cp in self.checkpoints:
             if not cp.id:
                 errors.append("存在缺少 id 的校验点")
@@ -197,9 +209,23 @@ class TaskSpec:
                 errors.append(f"校验点 {cp.id} 类型非法: {cp.type}")
             if cp.stage not in CHECKPOINT_STAGES:
                 errors.append(f"校验点 {cp.id} stage 非法: {cp.stage}，必须为 {sorted(CHECKPOINT_STAGES)} 之一")
+            # 按类型检查必填字段（防止 expected/path 为空导致静默判 FAIL）
+            if cp.type == "file_exists" and not cp.path:
+                errors.append(f"校验点 {cp.id} (file_exists) 缺少 path 字段")
+            if cp.type == "file_not_exists" and not cp.path:
+                errors.append(f"校验点 {cp.id} (file_not_exists) 缺少 path 字段")
+            if cp.type == "content_contains" and (not cp.path or not cp.pattern):
+                errors.append(f"校验点 {cp.id} (content_contains) 缺少 path 或 pattern 字段")
+            if cp.type == "content_not_contains" and (not cp.path or not cp.pattern):
+                errors.append(f"校验点 {cp.id} (content_not_contains) 缺少 path 或 pattern 字段")
+            if cp.type == "cmd_exit_zero" and not cp.cmd:
+                errors.append(f"校验点 {cp.id} (cmd_exit_zero) 缺少 cmd 字段")
         for cap in self.capabilities:
             if cap not in CAPABILITIES:
                 errors.append(f"capabilities 包含非法值 '{cap}'，必须为 {sorted(CAPABILITIES)} 之一")
+        # P1 改进：校验 eval_type
+        if self.eval_type not in EVAL_TYPES:
+            errors.append(f"eval_type 必须为 {sorted(EVAL_TYPES)} 之一，当前: {self.eval_type}")
         return errors
 
     def fixtures_dir(self) -> Path:

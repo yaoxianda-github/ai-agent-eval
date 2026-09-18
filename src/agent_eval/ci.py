@@ -151,7 +151,7 @@ def judge_task(records: list, task_pass_ratio: float, task_spec=None) -> dict:
     }
 
 
-def judge_gate(task_results: list[dict], min_pass_rate: float) -> tuple[bool, float]:
+def judge_gate(task_results: list[dict], min_pass_rate: float) -> tuple[bool | None, float]:
     """gate 判定：按失败代价加权。
 
     V4.3 P0：按任务 risk_level 加权门禁
@@ -160,10 +160,28 @@ def judge_gate(task_results: list[dict], min_pass_rate: float) -> tuple[bool, fl
     - P2 任务失败：降级为 warning（不阻断，但记录）
     - 无 risk_level 的任务：按 P1 处理（计入通过率）
 
-    返回 (是否通过, 通过率)。通过率仅统计 P1+无等级任务，P0/P2 单独处理。
+    V4.4 P0：坑一修复 — 最小样本量校验
+    - 任务数 < MIN_SAMPLE_SIZE（默认5个）时，pass 返回 None，表示样本量不足
+    - 样本量不足以支撑发布决策，避免"只跑3个简单用例就100%通过"的假阳性
+
+    返回 (是否通过|None, 通过率)。pass=None 表示样本量不足。
     """
+    MIN_SAMPLE_SIZE = 5  # 最小样本量阈值
+
     if not task_results:
         return False, 0.0
+
+    # P0 改进：坑一修复 — 最小样本量校验
+    # 样本量太少时，通过率没有统计意义，不应参与发布决策
+    if len(task_results) < MIN_SAMPLE_SIZE:
+        logger.warning(
+            "样本量不足 | 任务数=%d < 最小阈值=%d，无法给出可靠的 pass/fail 判定",
+            len(task_results), MIN_SAMPLE_SIZE,
+        )
+        # 仍然计算通过率供参考，但 pass 返回 None
+        passed = sum(1 for t in task_results if t.get("task_passed"))
+        rate = passed / len(task_results) if task_results else 0.0
+        return None, round(rate, 3)
 
     # P0 任务零容忍：任一失败直接 BLOCK
     p0_failed = [
@@ -434,8 +452,9 @@ def run_gate(
             "model": model,
             "runs": runs,
             "task_results": a_task_results,
-            "passed": bool(a_passed),
+            "passed": a_passed,  # P0 改进：坑一修复 — 可能是 None（样本量不足）
             "pass_rate": a_rate,
+            "sample_size": len(a_task_results),  # P0 改进：增加样本量字段
             "duration_s": round(time.time() - a_start, 2),
             "tokens": a_tokens,
             "cost_cny": a_cost,
@@ -451,7 +470,12 @@ def run_gate(
     for ar in agent_results:
         total_tokens["prompt_tokens"] += ar["tokens"]["prompt_tokens"]
         total_tokens["completion_tokens"] += ar["tokens"]["completion_tokens"]
-    all_passed = all(ar["passed"] for ar in agent_results)
+    # P0 改进：坑一修复 — 处理样本量不足的情况
+    # 任何一个 agent 的 passed=None（样本量不足），整体 passed 也为 None
+    if any(ar["passed"] is None for ar in agent_results):
+        all_passed: bool | None = None
+    else:
+        all_passed = all(ar["passed"] for ar in agent_results)
     all_rate = round(min(ar["pass_rate"] for ar in agent_results), 3)
     bal_costs = [ar["balance_cost_cny"] for ar in agent_results]
     total_duration = time.time() - started
@@ -490,9 +514,17 @@ def run_gate(
     # 整体门禁：全部 agent 通过才算 PASS
     gate_all_passed = all(ge["passed"] for ge in gate_evals)
 
+    # P0 改进：坑一修复 — 日志和返回值中处理样本量不足的情况
+    if all_passed is None:
+        passed_label = "INSUFFICIENT_SAMPLE"
+    elif all_passed and gate_all_passed:
+        passed_label = "PASS"
+    else:
+        passed_label = "FAIL"
+
     logger.info(
         "CI 门禁完成 | gate=%s %s | pass_rate=%.3f (阈值%.2f) | 6指标门禁=%s | duration=%.1fs | tokens=%d/%d | agents=%d",
-        gate_name, "PASS" if all_passed else "FAIL",
+        gate_name, passed_label,
         all_rate, g["min_pass_rate"],
         "PASS" if gate_all_passed else "FAIL",
         total_duration,
@@ -509,8 +541,9 @@ def run_gate(
         "task_ids": task_ids,
         "task_results": agent_results[0]["task_results"],
         "agent_results": agent_results,
-        "passed": bool(all_passed and gate_all_passed),  # V3.2：通过率+6指标全部通过
+        "passed": (all_passed and gate_all_passed) if all_passed is not None else None,  # P0 改进：坑一修复
         "pass_rate": all_rate,
+        "sample_size": len(task_ids),  # P0 改进：增加样本量字段
         "gate_evaluation": {  # V3.2：6个blocking指标门禁结果
             "passed": gate_all_passed,
             "per_agent": gate_evals,
@@ -588,10 +621,19 @@ def run_gate_cli(
                 f"{'PASS' if tr['task_passed'] else 'FAIL':<6}"
                 f"{tr['duration_s']:<10.2f}{cp:<14}"
             )
-        status = "PASS" if ar["passed"] else "FAIL"
+        # P0 改进：坑一修复 — 处理样本量不足的情况
+        if ar["passed"] is None:
+            status = "INSUFFICIENT_SAMPLE"
+            status_note = f"（样本量 {ar.get('sample_size', '?')} 不足，不参与发布决策）"
+        elif ar["passed"]:
+            status = "PASS"
+            status_note = ""
+        else:
+            status = "FAIL"
+            status_note = ""
         typer_like("-" * 52)
         typer_like(
-            f"{ar['agent']} 通过率: {ar['pass_rate']} / 阈值 {result['min_pass_rate']}  ->  {status}"
+            f"{ar['agent']} 通过率: {ar['pass_rate']} / 阈值 {result['min_pass_rate']}  ->  {status} {status_note}"
         )
         # 成本口径：余额差分（真实扣费）优先；否则 token 计价；都无则标注未采集
         bal_cost = ar.get("balance_cost_cny")
@@ -608,8 +650,17 @@ def run_gate_cli(
             f"耗时 {ar['duration_s']}s · token {ar['tokens']['prompt_tokens']:,}/"
             f"{ar['tokens']['completion_tokens']:,} · {cost_desc}"
         )
-    status = "PASS" if result["passed"] else "FAIL"
-    typer_like(f"\ngate 判定: {' / '.join(result['agents'])} 全部达标 ->  {status}")
+    # P0 改进：坑一修复 — 整体状态处理样本量不足
+    if result["passed"] is None:
+        status = "INSUFFICIENT_SAMPLE"
+        sample_note = f"（样本量 {result.get('sample_size', '?')} 不足，不参与发布决策）"
+    elif result["passed"]:
+        status = "PASS"
+        sample_note = ""
+    else:
+        status = "FAIL"
+        sample_note = ""
+    typer_like(f"\ngate 判定: {' / '.join(result['agents'])} 全部达标 ->  {status} {sample_note}")
 
     # 报告文件（多 agent 时按 agent 分组；JUnit 每个 agent 一个 suite）
     groups = [(ar["agent"], ar["task_results"]) for ar in agent_results]
