@@ -69,6 +69,12 @@ def _run_checkpoint(cp, workspace: Path, traces: list[dict] | None = None) -> di
     elif name == "tool_call_assert":
         passed, detail = _check_tool_call_assert(cp, traces or [])
         detail = f"{cp.desc}：{detail}" if cp.desc else detail
+    elif name == "tool_order_assert":
+        passed, detail = _check_tool_order_assert(cp, traces or [])
+        detail = f"{cp.desc}：{detail}" if cp.desc else detail
+    elif name == "no_loop_assert":
+        passed, detail = _check_no_loop_assert(cp, traces or [])
+        detail = f"{cp.desc}：{detail}" if cp.desc else detail
     else:
         logger.warning("未知校验点类型: %s (id=%s)", name, cp.id)
         return {"id": cp.id, "type": name, "passed": False, "detail": f"未知校验点类型: {name}", "stage": getattr(cp, "stage", "final_answer")}
@@ -283,3 +289,74 @@ def _check_tool_call_assert(cp, traces: list[dict]) -> tuple[bool, str]:
     else:
         all_vals = [str(c["args"].get(cp.param, "N/A")) for c in tool_calls]
         return False, f"参数 {cp.param} 未匹配 pattern，实际值: {', '.join(all_vals[:3])}"
+
+
+def _check_tool_order_assert(cp, traces: list[dict]) -> tuple[bool, str]:
+    """V4.3 P0：轨迹级 checkpoint——断言工具调用顺序。
+
+    cp.tools = [工具1, 工具2, ...]，按顺序检查是否依次调用。
+    不要求连续调用，只要求相对顺序正确（工具1在工具2之前出现）。
+    """
+    expected = getattr(cp, "tools", []) or []
+    if not expected:
+        return False, "缺少工具序列（tools 字段）"
+
+    # 从 traces 提取工具调用序列（按时间顺序）
+    actual_order = []
+    for t in traces:
+        tool_name = t.get("tool") or t.get("action") or ""
+        if tool_name and tool_name != "finish" and t.get("kind") not in ("intent", "llm"):
+            actual_order.append(tool_name)
+
+    if not actual_order:
+        return False, "无工具调用记录"
+
+    # 检查预期工具是否按顺序出现
+    idx = 0
+    for tool in actual_order:
+        if idx < len(expected) and tool == expected[idx]:
+            idx += 1
+
+    if idx == len(expected):
+        return True, f"工具顺序正确: {' → '.join(expected)}"
+    else:
+        missing = expected[idx:]
+        return False, f"顺序未满足: 缺少 {', '.join(missing)} 的顺序调用（预期 {' → '.join(expected)}）"
+
+
+def _check_no_loop_assert(cp, traces: list[dict]) -> tuple[bool, str]:
+    """V4.3 P0：轨迹级 checkpoint——断言无死循环式重复调用。
+
+    cp.max_consecutive = N（默认3），同一工具同一参数连续调用不超过N次。
+    """
+    max_consec = getattr(cp, "max_consecutive", 3)
+
+    # 从 traces 提取工具调用序列（含参数）
+    tool_calls = []
+    for t in traces:
+        tool_name = t.get("tool") or t.get("action") or ""
+        if tool_name and tool_name != "finish" and t.get("kind") not in ("intent", "llm"):
+            tool_calls.append({"tool": tool_name, "args": t.get("args") or {}})
+
+    if not tool_calls:
+        return True, "无工具调用（不适用）"
+
+    # 检测连续重复
+    consecutive = 1
+    max_found = 1
+    loop_tool = None
+    for i in range(1, len(tool_calls)):
+        prev = tool_calls[i - 1]
+        curr = tool_calls[i]
+        if prev["tool"] == curr["tool"] and prev["args"] == curr["args"]:
+            consecutive += 1
+            if consecutive > max_found:
+                max_found = consecutive
+                loop_tool = curr["tool"]
+        else:
+            consecutive = 1
+
+    if max_found > max_consec:
+        return False, f"疑似死循环: {loop_tool} 连续重复 {max_found} 次（阈值 {max_consec}）"
+    else:
+        return True, f"无死循环（最大连续重复 {max_found} 次，阈值 {max_consec}）"

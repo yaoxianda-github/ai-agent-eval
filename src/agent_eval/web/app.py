@@ -1199,6 +1199,33 @@ def create_app(
         if not ok:
             raise HTTPException(status_code=403, detail=reason)
 
+        # P1 修复：API Key 预检 — 避免余额不足时仍发起大量任务浪费时间
+        preflight_warnings: list[str] = []
+        preflight_failed: list[str] = []
+        for agent_id in agents:
+            try:
+                backend = get_backend(agent_id)
+                if hasattr(backend, "check_api_key"):
+                    result = backend.check_api_key()
+                    if not result.get("ok"):
+                        status = result.get("status", "unknown")
+                        msg = result.get("message", "未知错误")
+                        preflight_failed.append(agent_id)
+                        preflight_warnings.append(f"{agent_id}: API Key 不可用（{status}）— {msg}")
+                        logger.warning("批次预检失败 | agent=%s status=%s msg=%s", agent_id, status, msg)
+                    else:
+                        logger.info("批次预检通过 | agent=%s latency=%sms",
+                                    agent_id, result.get("latency_ms", "?"))
+            except Exception as e:  # noqa: BLE001 - 预检失败不阻断
+                logger.warning("批次预检异常 | agent=%s: %s", agent_id, e, exc_info=True)
+
+        # 如果所有 Agent 都不可用，直接阻断（避免浪费执行时间）
+        if preflight_failed and len(preflight_failed) == len(agents):
+            raise HTTPException(
+                status_code=400,
+                detail=f"所有选中 Agent 的 API Key 均不可用，已阻断批次创建。请检查配置后重试：{'; '.join(preflight_warnings)}"
+            )
+
         scope = str(payload.get("scope", "core"))
         task_ids = _resolve_scope_tasks(scope, payload.get("task_ids") or None)
         if not task_ids:
@@ -1230,7 +1257,12 @@ def create_app(
         )
         t.start()
         logger.info("对比批次已创建 | batch=%s label=%s total=%d", batch_id, label, total)
-        return {"batch_id": batch_id, "total_runs": total}
+        result = {"batch_id": batch_id, "total_runs": total}
+        if preflight_warnings:
+            result["preflight_warnings"] = preflight_warnings
+            result["preflight_failed_agents"] = preflight_failed
+            logger.warning("批次已创建但有预检警告 | batch=%s warnings=%s", batch_id, preflight_warnings)
+        return result
 
     @app.get("/api/batches")
     def list_batches() -> dict:

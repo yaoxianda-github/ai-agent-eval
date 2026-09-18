@@ -582,8 +582,19 @@ class ClaudeCodeBackend(Backend):
                 ]
 
             # 判定完成：退出码 0，或退出码非零但提取到有效 JSON 结果（含 final/text/message）
+            # 但如果 JSON 中明确标记了 is_error 或 api_error_status（如 403 余额不足），必须标记为 error
+            is_api_error = bool(data.get("is_error")) or bool(data.get("api_error_status"))
+            api_error_msg = ""
+            if is_api_error:
+                api_error_status = data.get("api_error_status", "unknown")
+                api_error_msg = (
+                    f"API 错误 (status={api_error_status}): "
+                    f"{str(data.get('result', ''))[:200]}"
+                )
             has_result = bool(final) or bool(data.get("result")) or bool(usage)
-            ok = rc == 0 or (rc != 0 and has_result and bool(data))
+            ok = (rc == 0 and not is_api_error) or (
+                rc != 0 and has_result and bool(data) and not is_api_error
+            )
             cost_usd = data.get("total_cost_usd") or data.get("cost")
             logger.info(
                 "claude-code 完成 | status=%s rc=%d dur=%.1fs steps=%d traces=%d usage=%s cost=$%s session=%s",
@@ -592,7 +603,8 @@ class ClaudeCodeBackend(Backend):
                 "yes" if session_steps else "no",
             )
             if not ok:
-                logger.warning("claude-code 未正常完成: 退出码 %d，stderr 尾部: %s", rc, (err or "")[-300:])
+                err_detail = api_error_msg if is_api_error else f"claude 退出码 {rc}：{(err or out or '')[-400:]}"
+                logger.warning("claude-code 未正常完成: %s", err_detail)
             return BackendResult(
                 status="completed" if ok else "error",
                 steps=steps,
@@ -600,7 +612,7 @@ class ClaudeCodeBackend(Backend):
                 usage=usage,
                 duration_s=round(time.time() - start, 3),
                 stdout=str(final) if final else (out or "")[-1000:],
-                error="" if ok else f"claude 退出码 {rc}：{(err or out or '')[-400:]}",
+                error="" if ok else (api_error_msg if is_api_error else f"claude 退出码 {rc}：{(err or out or '')[-400:]}"),
             )
         finally:
             shutil.rmtree(tmp_home, ignore_errors=True)
