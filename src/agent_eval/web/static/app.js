@@ -1001,7 +1001,19 @@
   }
 
   // ---------- 视图：运行历史 ----------
+  var histSortKey = "time";
+  var histSortDir = "desc";
+
   function viewHistory() {
+    // P2-16: 从 localStorage 恢复筛选条件
+    try {
+      var saved = JSON.parse(localStorage.getItem("histFilter") || "{}");
+      var taskOpts = '<option value="">全部任务</option>' + tasksCache.map(function (t) {
+        return '<option value="' + esc(t.id) + '">' + esc(t.id) + "</option>";
+      }).join("");
+      // 先加载数据再渲染
+    } catch(e) {}
+
     Promise.all([loadTasks(), loadBackends()]).then(function () {
       var taskOpts = '<option value="">全部任务</option>' + tasksCache.map(function (t) {
         return '<option value="' + esc(t.id) + '">' + esc(t.id) + "</option>";
@@ -1041,6 +1053,11 @@
 
   function loadHistory() {
     var q = ["limit=" + histLimit, "offset=" + (histPage * histLimit)];
+    // P2-15: 排序
+    if (histSortKey) {
+      q.push("sort=" + encodeURIComponent(histSortKey));
+      q.push("order=" + encodeURIComponent(histSortDir));
+    }
     var tv = el("h-task") && el("h-task").value;
     var av = el("h-agent") && el("h-agent").value;
     var sv = el("h-status") && el("h-status").value;
@@ -1048,6 +1065,11 @@
     if (tv) q.push("task_id=" + encodeURIComponent(tv));
     if (av) q.push("agent_id=" + encodeURIComponent(av));
     if (sv) q.push("status=" + encodeURIComponent(sv));
+
+    // P2-16: 保存筛选条件到 localStorage
+    try {
+      localStorage.setItem("histFilter", JSON.stringify({task: tv, agent: av, status: sv, time: timeRange}));
+    } catch(e) {}
     // 时间范围：前端过滤（拉取更多数据后过滤）
     var fetchLimit = timeRange ? 200 : histLimit;
     q[0] = "limit=" + fetchLimit;
@@ -1081,7 +1103,8 @@
         var confTxt = "—";
         if (r.confidence_score !== null && r.confidence_score !== undefined) {
           var confColor = r.confidence_level === "high" ? "#22c55e" : r.confidence_level === "medium" ? "#f59e0b" : "#ef4444";
-          confTxt = '<span style="color:' + confColor + ';font-weight:600;">' + r.confidence_score.toFixed(1) + "</span>";
+          var confBg = r.confidence_level === "high" ? "#f0fdf4" : r.confidence_level === "medium" ? "#fffbeb" : "#fef2f2";
+          confTxt = '<span style="color:' + confColor + ';font-weight:600;background:' + confBg + ';padding:2px 8px;border-radius:4px;display:inline-block;">' + r.confidence_score.toFixed(1) + "</span>";
         }
         // V3.7 P2：人工复核状态
         var reviewTxt = '<span class="muted">待复核</span>';
@@ -1100,7 +1123,7 @@
           '<td class="col-task">' + esc(r.task_id) + '</td><td class="col-agent">' + esc(r.agent_id) + "</td>" +
           "<td>" + statusBadge(r.status) + "</td>" +
           '<td class="col-score">' + (function() { var s = r.score || 0; var c = s >= 0.8 ? "#16a34a" : s >= 0.5 ? "#d97706" : "#dc2626"; return '<span style="color:' + c + ';font-weight:600;">' + s.toFixed(2) + '</span>'; })() + '</td><td class="col-duration">' + durTxt + "</td><td>" + esc(r.steps) + "</td>" +
-          '<td class="col-cost">' + costTxt + "</td>" +
+          '<td class="col-cost" style="text-align:right;min-width:90px;">' + costTxt + "</td>" +
           '<td class="col-conf">' + confTxt + "</td>" +
           "<td>" + reviewTxt + "</td>" +
           "</tr>";
@@ -1115,7 +1138,12 @@
         '<button class="btn secondary" id="h-next"' + (histPage >= pages - 1 ? " disabled" : "") + '>下一页 ›</button>' +
         '<button class="btn secondary" id="h-last"' + (histPage >= pages - 1 ? " disabled" : "") + '>尾页 ⟳</button>' +
         "</div>";
-      list.innerHTML = '<div style="overflow-x:auto;"><table style="min-width:1000px;"><tr><th>时间</th><th>run_id</th><th>任务</th><th>后端</th><th>状态</th><th>score</th><th>时长</th><th>步数</th><th>实际成本' +
+      list.innerHTML = '<div style="overflow-x:auto;"><table style="min-width:1000px;"><tr>' +
+        '<th style="cursor:pointer;" data-sort="created_at">时间 ' + (histSortKey==='created_at' ? (histSortDir==='asc'?'↑':'↓') : '') + '</th>' +
+        '<th>run_id</th><th>任务</th><th>后端</th><th>状态</th>' +
+        '<th style="cursor:pointer;" data-sort="score">得分 ' + (histSortKey==='score' ? (histSortDir==='asc'?'↑':'↓') : '') + '</th>' +
+        '<th style="cursor:pointer;" data-sort="duration_s">时长 ' + (histSortKey==='duration_s' ? (histSortDir==='asc'?'↑':'↓') : '') + '</th>' +
+        '<th>步数</th><th>实际成本' +
         costTip("实际成本 = 本次评测实际消耗的 token（run.json 的 metrics.usage）按模型单价折算。<br>默认模型 deepseek-chat：输入 ¥2/百万 token、输出 ¥3/百万 token。<br><br>token 埋点（metrics.usage）之前的历史 run 无记录，显示「—」。<br><br>单价可用环境变量 LLM_INPUT_CNY_PER_M / LLM_OUTPUT_CNY_PER_M 覆盖。") +
         '</th><th>置信度' +
         costTip("评测置信度 = 运行次数(25%) + 校验点类型(25%) + 任务覆盖度(20%) + 历史稳定性(15%) + 任务级别(15%) 加权计算。<br><br>高置信(≥80)：结果可信，可用于决策<br>中置信(60-79)：有一定参考价值，建议补充验证<br>低置信(<60)：结果不可靠，需增加 runs 或扩大任务集") +
@@ -1132,6 +1160,37 @@
       if (prevBtn) prevBtn.onclick = function () { if (histPage > 0) { histPage--; loadHistory(); } };
       if (nextBtn) nextBtn.onclick = function () { if (histPage < pages - 1) { histPage++; loadHistory(); } };
       if (lastBtn) lastBtn.onclick = function () { if (histPage < pages - 1) { histPage = pages - 1; loadHistory(); } };
+
+      // P2-15: 表头排序点击
+      list.querySelectorAll("th[data-sort]").forEach(function(th) {
+        th.onclick = function() {
+          var key = th.getAttribute("data-sort");
+          if (histSortKey === key) {
+            histSortDir = histSortDir === "asc" ? "desc" : "asc";
+          } else {
+            histSortKey = key;
+            histSortDir = "desc";
+          }
+          loadHistory();
+        };
+      });
+
+      // P2-11: 快捷筛选按钮
+      var quickFail = el("h-quick-fail");
+      if (quickFail) quickFail.onclick = function() {
+        el("h-status").value = "error";
+        histPage = 0; loadHistory();
+      };
+      var quickToday = el("h-quick-today");
+      if (quickToday) quickToday.onclick = function() {
+        el("h-time").value = "1d";
+        histPage = 0; loadHistory();
+      };
+      var quickClaude = el("h-quick-claude");
+      if (quickClaude) quickClaude.onclick = function() {
+        el("h-agent").value = "claude-code";
+        histPage = 0; loadHistory();
+      };
       // RUN_ID 点击复制
       list.querySelectorAll(".run-id-copy").forEach(function (el) {
         el.style.cursor = "pointer";
