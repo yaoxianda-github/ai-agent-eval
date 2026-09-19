@@ -1099,9 +1099,11 @@
       var pages = Math.max(1, Math.ceil(total / histLimit));
       var cur = Math.min(histPage + 1, pages);
       var pager = '<div class="pager">' +
+        '<button class="btn secondary small" id="h-first"' + (histPage <= 0 ? " disabled" : "") + '>⟲ 首页</button>' +
         '<button class="btn secondary small" id="h-prev"' + (histPage <= 0 ? " disabled" : "") + '>‹ 上一页</button>' +
         '<span class="pager-info">第 ' + cur + " / " + pages + " 页 · 共 " + total + " 条</span>" +
         '<button class="btn secondary small" id="h-next"' + (histPage >= pages - 1 ? " disabled" : "") + '>下一页 ›</button>' +
+        '<button class="btn secondary small" id="h-last"' + (histPage >= pages - 1 ? " disabled" : "") + '>尾页 ⟳</button>' +
         "</div>";
       list.innerHTML = '<table><tr><th>时间</th><th>run_id</th><th>任务</th><th>后端</th><th>状态</th><th>score</th><th>时长</th><th>步数</th><th>实际成本' +
         costTip("实际成本 = 本次评测实际消耗的 token（run.json 的 metrics.usage）按模型单价折算。<br>默认模型 deepseek-chat：输入 ¥2/百万 token、输出 ¥3/百万 token。<br><br>token 埋点（metrics.usage）之前的历史 run 无记录，显示「—」。<br><br>单价可用环境变量 LLM_INPUT_CNY_PER_M / LLM_OUTPUT_CNY_PER_M 覆盖。") +
@@ -1114,8 +1116,12 @@
         tr.onclick = function () { location.hash = "#/run/" + tr.getAttribute("data-rid"); };
       });
       var prevBtn = el("h-prev"), nextBtn = el("h-next");
+      var firstBtn = el("h-first");
+      var lastBtn = el("h-last");
+      if (firstBtn) firstBtn.onclick = function () { if (histPage > 0) { histPage = 0; loadHistory(); } };
       if (prevBtn) prevBtn.onclick = function () { if (histPage > 0) { histPage--; loadHistory(); } };
       if (nextBtn) nextBtn.onclick = function () { if (histPage < pages - 1) { histPage++; loadHistory(); } };
+      if (lastBtn) lastBtn.onclick = function () { if (histPage < pages - 1) { histPage = pages - 1; loadHistory(); } };
       // RUN_ID 点击复制
       list.querySelectorAll(".run-id-copy").forEach(function (el) {
         el.style.cursor = "pointer";
