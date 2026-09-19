@@ -406,6 +406,7 @@
       onAgentChange();  // 初始化模型默认值
       el("btn-run").onclick = startRun;
       loadRecentRuns();
+      loadBadcaseOverview();
     }).catch(function (e) { renderErr(e.message); });
   }
 
@@ -435,6 +436,30 @@
     }).catch(function () {
       var box = document.getElementById("home-recent-runs");
       if (box) box.innerHTML = '<div class="empty">加载运行记录失败</div>';
+    });
+  }
+
+  function loadBadcaseOverview() {
+    api("/api/badcases?status=open").then(function (d) {
+      var box = document.getElementById("bc-overview");
+      if (!box) return;
+      var s = d.stats || {by_severity: {}};
+      var sevs = ["P0", "P1", "P2"];
+      var colors = {"P0": "#dc2626", "P1": "#f59e0b", "P2": "#3b82f6"};
+      var labels = {"P0": "阻断级", "P1": "重要", "P2": "一般"};
+      var html = "";
+      sevs.forEach(function (sev) {
+        var count = (s.by_severity || {})[sev] || 0;
+        html += '<div style="flex:1;padding:16px;border-radius:8px;background:' + colors[sev] + '15;border-left:4px solid ' + colors[sev] + ';">' +
+          '<div style="font-size:12px;color:#6b7280;">' + labels[sev] + '</div>' +
+          '<div style="font-size:28px;font-weight:700;color:' + colors[sev] + ';">' + count + '</div>' +
+          '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">open badcase</div>' +
+          '</div>';
+      });
+      box.innerHTML = html;
+    }).catch(function () {
+      var box = document.getElementById("bc-overview");
+      if (box) box.innerHTML = '<div class="empty">加载失败</div>';
     });
   }
 
