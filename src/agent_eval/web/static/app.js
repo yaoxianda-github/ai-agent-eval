@@ -3200,7 +3200,7 @@
       '<div class="card" id="mx-trend-card" style="margin-top:16px;"><h3>历史趋势 <span class="muted">各 Agent 分数随批次变化</span></h3><div id="mx-trend"></div></div>';
 
     // 渲染趋势对比图
-    renderTrendChart(b.batch_id);
+    renderBatchTrendChart(b.batch_id);
 
     document.querySelectorAll(".mx-cell[data-agent]").forEach(function (td) {
       td.onclick = function () {
@@ -3224,7 +3224,7 @@
   }
 
   // 渲染历史趋势对比图
-  function renderTrendChart(currentBatchId) {
+  function renderBatchTrendChart(currentBatchId) {
     var box = el("mx-trend");
     if (!box) return;
     // 获取历史批次
