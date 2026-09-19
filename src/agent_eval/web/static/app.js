@@ -1023,12 +1023,12 @@
       }).join("");
       renderHTML(
         '<h2 class="page-title">运行历史</h2>' +
-        // V4.3 P1-3：通过率趋势与慢漂移检测
-        '<div class="card" id="h-trend-card">' +
-          '<h3>通过率趋势 <span class="tl-note">最近 20 次运行 · 慢漂移检测</span></h3>' +
-          '<div id="h-trend"><div class="empty">加载中…</div></div>' +
-        "</div>" +
         '<div class="card">' +
+          // V4.3 P1-3：通过率趋势与慢漂移检测
+          '<div id="h-trend-card" style="border-bottom:1px solid #e5e7eb;padding-bottom:16px;margin-bottom:16px;">' +
+            '<h3 style="margin-top:0;">通过率趋势 <span class="tl-note">最近 20 次运行 · 慢漂移检测</span></h3>' +
+            '<div id="h-trend"><div class="empty">加载中…</div></div>' +
+          "</div>" +
           '<div class="filter-bar" style="flex-wrap:wrap;gap:12px 20px;">' +
             '<div class="filter-item" style="min-width:140px;"><label>任务</label><select id="h-task">' + taskOpts + "</select></div>" +
             '<div class="filter-item" style="min-width:120px;"><label>后端</label><select id="h-agent">' + agentOpts + "</select></div>" +
