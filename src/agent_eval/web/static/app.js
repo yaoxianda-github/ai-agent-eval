@@ -3197,7 +3197,7 @@
         '<div class="muted">点击上方矩阵中的单元格，查看该 Agent 在该任务上的每次运行。</div></div>' +
       '<div class="card totals-card"><h3>Agent 汇总</h3>' +
         '<table class="totals-table">' + totHead + totRows + "</table></div>" +
-      '<div class="card" id="mx-trend-card" style="margin-top:16px;"><h3>历史趋势 <span class="muted">各 Agent 分数随批次变化</span></h3><div id="mx-trend"></div></div>";
+      '<div class="card" id="mx-trend-card" style="margin-top:16px;"><h3>历史趋势 <span class="muted">各 Agent 分数随批次变化</span></h3><div id="mx-trend"></div></div>';
 
     // 渲染趋势对比图
     renderTrendChart(b.batch_id);
