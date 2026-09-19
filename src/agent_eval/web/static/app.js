@@ -1294,6 +1294,82 @@
     }).catch(function (e) { el("bc-list").innerHTML = '<div class="err-banner">' + esc(e.message) + "</div>"; });
   }
 
+  function viewJudgeTrust() {
+    renderHTML(
+      '<h2 class="page-title">评委可信度</h2>' +
+      '<div class="card">' +
+        '<h3>LLM Judge vs 人工复核一致率</h3>' +
+        '<div id="jt-stats" style="display:flex;gap:16px;margin:16px 0;"></div>' +
+        '<div id="jt-list"><div class="empty">加载中...</div></div>' +
+      '</div>'
+    );
+    loadJudgeTrust();
+  }
+
+  function loadJudgeTrust() {
+    api("/api/judge/agreement?limit=100").then(function (d) {
+      var box = el("jt-stats");
+      var listBox = el("jt-list");
+      var stats = d.stats || {};
+      var total = stats.total_reviewed || 0;
+      var agreement = stats.agreement_rate || 0;
+      var fp = stats.false_positive || 0;
+      var fn = stats.false_negative || 0;
+
+      var color = agreement >= 0.9 ? "#22c55e" : agreement >= 0.8 ? "#f59e0b" : "#ef4444";
+      box.innerHTML =
+        '<div style="flex:1;padding:16px;border-radius:8px;background:' + color + '15;border-left:4px solid ' + color + ';">' +
+          '<div style="font-size:12px;color:#6b7280;">一致率</div>' +
+          '<div style="font-size:28px;font-weight:700;color:' + color + ';">' + (agreement * 100).toFixed(1) + '%</div>' +
+          '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">共 ' + total + ' 条人工复核</div>' +
+        '</div>' +
+        '<div style="flex:1;padding:16px;border-radius:8px;background:#ef444415;border-left:4px solid #ef4444;">' +
+          '<div style="font-size:12px;color:#6b7280;">假阳性（Judge过松）</div>' +
+          '<div style="font-size:28px;font-weight:700;color:#ef4444;">' + fp + '</div>' +
+          '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">LLM通过但人工不通过</div>' +
+        '</div>' +
+        '<div style="flex:1;padding:16px;border-radius:8px;background:#3b82f615;border-left:4px solid #3b82f6;">' +
+          '<div style="font-size:12px;color:#6b7280;">假阴性（Judge过严）</div>' +
+          '<div style="font-size:28px;font-weight:700;color:#3b82f6;">' + fn + '</div>' +
+          '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">LLM不通过但人工通过</div>' +
+        '</div>';
+
+      var items = d.items || [];
+      if (!items.length) {
+        listBox.innerHTML = '<div class="empty">暂无人工复核记录。在运行详情页做人工复核后，这里会展示一致率统计。</div>';
+        return;
+      }
+      var rows = items.map(function (r) {
+        var typeColor = {
+          agreed_pass: "#22c55e",
+          agreed_fail: "#6b7280",
+          false_positive: "#ef4444",
+          false_negative: "#3b82f6"
+        }[r.agreement_type] || "#6b7280";
+        var typeLabel = {
+          agreed_pass: "双方通过",
+          agreed_fail: "双方不通过",
+          false_positive: "假阳性",
+          false_negative: "假阴性"
+        }[r.agreement_type] || r.agreement_type;
+        return '<tr class="clickable" data-rid="' + esc(r.run_id) + '">' +
+          '<td><b>' + esc(r.run_id) + '</b></td>' +
+          '<td>' + esc(r.task_id) + '</td>' +
+          '<td>' + esc(r.agent_id) + '</td>' +
+          '<td>' + r.llm_score.toFixed(2) + '</td>' +
+          '<td>' + (r.human_score || "—") + '</td>' +
+          '<td><span style="color:' + typeColor + ';font-weight:600;">' + typeLabel + '</span></td>' +
+          '</tr>';
+      }).join("");
+      listBox.innerHTML = '<table><tr><th>run_id</th><th>任务</th><th>Agent</th><th>LLM分</th><th>人工分</th><th>判定类型</th></tr>' + rows + '</table>';
+      listBox.querySelectorAll("tr.clickable").forEach(function (tr) {
+        tr.onclick = function () { location.hash = "#/run/" + tr.getAttribute("data-rid"); };
+      });
+    }).catch(function (e) {
+      el("jt-stats").innerHTML = "<div class='err-banner'>" + esc(e.message) + "</div>";
+    });
+  }
+
   function viewBadcaseDetail(bid) {
     api("/api/badcases/" + bid).then(function (b) {
       var catOpts = Object.keys(BC_CATEGORY_LABELS).map(function (k) {
@@ -3954,6 +4030,7 @@
     else if (name === "packages") viewPackages();
     else if (name === "history") viewHistory();
     else if (name === "badcases") viewBadcases();
+    else if (name === "judge-trust") viewJudgeTrust();
     else if (name === "memories") viewMemories();
     else if (name === "compare") viewCompare();
     else if (name === "monitor") viewMonitor();
