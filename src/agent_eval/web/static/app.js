@@ -1124,7 +1124,7 @@
         var durColor = dur < 30 ? "#16a34a" : (dur < 120 ? "#d97706" : "#dc2626");
         var durTxt = '<span style="color:' + durColor + ';font-weight:600;">' + fmtDur(dur) + "</span>";
         return '<tr class="clickable" data-rid="' + esc(r.run_id) + '">' +
-          '<td class="col-time" title="' + esc(fmtTime(r.created_at)) + '">' + esc(fmtRelative(r.created_at)) + "</td>" +
+          '<td class="col-time" title="' + esc(fmtTime(r.created_at)) + '">' + esc(fmtTime(r.created_at)) + "</td>" +
           '<td class="col-runid"><b class="run-id-copy" data-id="' + esc(r.run_id) + '" title="' + esc(r.run_id) + ' 点击复制">' + esc(r.run_id.slice(0, 8)) + "</b></td>" +
           '<td class="col-task">' + esc(r.task_id) + '</td><td class="col-agent">' + esc(r.agent_id) + "</td>" +
           "<td>" + statusBadge(r.status) + "</td>" +
