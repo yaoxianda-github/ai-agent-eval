@@ -3784,6 +3784,68 @@
   };
 
   // ---------- 路由 ----------
+  // ---------- 智能评测 ----------
+  function viewAgent() {
+    renderHTML(`
+      <div class="page-header">
+        <h2>智能评测</h2>
+        <p class="page-desc">用自然语言描述你的评测需求，AI 会自动帮你完成评测闭环</p>
+      </div>
+      <div class="agent-box">
+        <textarea id="agent-input" placeholder="例如：帮我对比 minimal-react 和 claude-code 在 L1 任务上的表现，跑 1 次" rows="3" style="width:100%;padding:12px;border:1px solid var(--border);border-radius:8px;font-size:14px;resize:vertical;"></textarea>
+        <div style="margin-top:12px;display:flex;gap:8px;">
+          <button id="agent-run" class="btn btn-primary">开始评测</button>
+          <button id="agent-clear" class="btn btn-ghost">清空</button>
+        </div>
+      </div>
+      <div id="agent-result" style="margin-top:24px;"></div>
+    `);
+    document.getElementById('agent-run').onclick = runAgent;
+    document.getElementById('agent-clear').onclick = function() {
+      document.getElementById('agent-input').value = '';
+      document.getElementById('agent-result').innerHTML = '';
+    };
+  }
+
+  function runAgent() {
+    var query = document.getElementById('agent-input').value.trim();
+    if (!query) return;
+    var resultEl = document.getElementById('agent-result');
+    resultEl.innerHTML = '<div class="loading">AI 正在思考并执行评测...</div>';
+
+    fetch('/api/agent/run', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query: query})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) {
+        resultEl.innerHTML = '<div class="error">' + esc(data.error) + '</div>';
+        return;
+      }
+      var html = '<div class="agent-trajectory">';
+      html += '<h3>执行轨迹</h3>';
+      (data.trajectory || []).forEach(function(step, i) {
+        html += '<div class="step" style="margin:12px 0;padding:12px;border-left:3px solid var(--accent);background:var(--bg-soft);border-radius:0 8px 8px 0;">';
+        html += '<div class="step-num" style="font-size:12px;color:var(--text-muted);">第 ' + (i+1) + ' 步</div>';
+        html += '<div class="step-thought"><b>思考：</b>' + esc(step.thought || '') + '</div>';
+        if (step.action) html += '<div class="step-action" style="margin-top:4px;"><b>调用工具：</b>' + esc(step.action) + '</div>';
+        if (step.observation) html += '<pre style="margin-top:8px;font-size:12px;overflow-x:auto;">' + esc(JSON.stringify(step.observation, null, 2)) + '</pre>';
+        html += '</div>';
+      });
+      html += '</div>';
+      html += '<div class="agent-final" style="margin-top:24px;padding:16px;background:var(--bg-soft);border-radius:8px;">';
+      html += '<h3>最终结论</h3>';
+      html += '<div style="white-space:pre-wrap;">' + esc(data.final_answer || '') + '</div>';
+      html += '</div>';
+      resultEl.innerHTML = html;
+    })
+    .catch(function(e) {
+      resultEl.innerHTML = '<div class="error">请求失败：' + esc(e.message) + '</div>';
+    });
+  }
+
   function router() {
     var h = location.hash || "#/dashboard";
     var parts = h.replace(/^#\//, "").split("/");
@@ -3807,6 +3869,7 @@
     else if (name === "compare") viewCompare();
     else if (name === "monitor") viewMonitor();
     else if (name === "report") viewReport();
+    else if (name === "agent") viewAgent();
     else if (name === "settings") viewSettings();
     else viewDashboard();
   }
