@@ -420,7 +420,7 @@
       var rows = runs.map(function (r) {
         var statusColor = r.status === "completed" ? "#16a34a" : (r.status === "running" ? "#d97706" : "#dc2626");
         return '<tr class="clickable" data-rid="' + esc(r.run_id) + '">' +
-          '<td class="col-time" title="' + esc(fmtTime(r.created_at)) + '">' + esc(fmtRelative(r.created_at)) + "</td>" +
+          '<td class="col-time">' + esc(fmtTime(r.created_at)) + "</td>" +
           '<td class="col-runid"><b>' + esc(r.run_id) + "</b></td>" +
           '<td class="col-task">' + esc(r.task_id) + '</td>' +
           '<td class="col-agent">' + esc(r.agent_id) + "</td>" +
