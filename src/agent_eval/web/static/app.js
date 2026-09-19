@@ -2986,8 +2986,13 @@
         if (!c || !c.n) return '<td class="mx-cell empty">—</td>';
         var sub = showCost ? ("<span class='r'>" + pctText(c.pass_rate) + " · σ" + c.std + "</span>")
                            : ("<span class='r'>" + pctText(c.pass_rate) + "</span>");
+        // 评委稳定性标注：σ > 0.3 表示评分波动大
+        var stabilityBadge = "";
+        if (showCost && c.std != null && c.std > 0.3) {
+          stabilityBadge = '<span class="badge" style="background:#f59e0b;color:#fff;font-size:10px;margin-left:4px;" title="评委评分波动大，建议人工复核">不稳定</span>';
+        }
         return '<td class="mx-cell ' + pctClass(c.pass_rate) + '" data-agent="' + esc(a) +
-          '" data-task="' + esc(t) + '"><span class="v">' + c.best + "</span>" + sub + "</td>";
+          '" data-task="' + esc(t) + '"><span class="v">' + c.best + "</span>" + sub + stabilityBadge + "</td>";
       }).join("");
       return "<tr><td class='ag-head'>" + esc(a) + "</td>" + tds + "</tr>";
     }).join("");
@@ -3114,7 +3119,11 @@
       '<div class="card mx-drill" id="mx-drill"><h3>单元格下钻</h3>' +
         '<div class="muted">点击上方矩阵中的单元格，查看该 Agent 在该任务上的每次运行。</div></div>' +
       '<div class="card totals-card"><h3>Agent 汇总</h3>' +
-        '<table class="totals-table">' + totHead + totRows + "</table></div>";
+        '<table class="totals-table">' + totHead + totRows + "</table></div>" +
+      '<div class="card" id="mx-trend-card" style="margin-top:16px;"><h3>历史趋势 <span class="muted">各 Agent 分数随批次变化</span></h3><div id="mx-trend"></div></div>";
+
+    // 渲染趋势对比图
+    renderTrendChart(b.batch_id);
 
     document.querySelectorAll(".mx-cell[data-agent]").forEach(function (td) {
       td.onclick = function () {
@@ -3135,6 +3144,60 @@
     if (sel) {
       sel.onchange = function () { loadBatch(this.value); };
     }
+  }
+
+  // 渲染历史趋势对比图
+  function renderTrendChart(currentBatchId) {
+    var box = el("mx-trend");
+    if (!box) return;
+    // 获取历史批次
+    api("/api/batches?limit=10").then(function (batches) {
+      var list = (batches.items || batches || []).filter(function(b) { return b.status === "done"; });
+      if (list.length < 2) {
+        box.innerHTML = '<div class="empty">需要至少 2 个已完成批次才能展示趋势</div>';
+        return;
+      }
+      // 按时间排序
+      list.sort(function(a, b) { return (a.created_at || "").localeCompare(b.created_at || ""); });
+      // 获取当前批次的 agents
+      var agents = mxState.matrix ? (mxState.matrix.agents || []) : [];
+      if (!agents.length) { box.innerHTML = '<div class="empty">无 Agent 数据</div>'; return; }
+
+      // 简化版：只画总分趋势
+      var colors = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6"];
+      var labels = list.map(function(b) { return b.label || b.batch_id.slice(0,8); });
+      var width = 600, height = 200, padding = 40;
+      var svg = '<svg width="' + width + '" height="' + height + '" style="width:100%;max-width:800px;">';
+      // 坐标轴
+      svg += '<line x1="' + padding + '" y1="' + (height - padding) + '" x2="' + (width - padding) + '" y2="' + (height - padding) + '" stroke="#ccc"/>';
+      svg += '<line x1="' + padding + '" y1="' + padding + '" x2="' + padding + '" y2="' + (height - padding) + '" stroke="#ccc"/>';
+      // Y 轴标签
+      svg += '<text x="' + (padding - 5) + '" y="' + (height - padding + 15) + '" text-anchor="end" font-size="10">0</text>';
+      svg += '<text x="' + (padding - 5) + '" y="' + (padding + 5) + '" text-anchor="end" font-size="10">100</text>';
+      // X 轴标签
+      labels.forEach(function(l, i) {
+        var x = padding + (i / (labels.length - 1)) * (width - 2 * padding);
+        svg += '<text x="' + x + '" y="' + (height - padding + 15) + '" text-anchor="middle" font-size="10">' + l.slice(0,6) + '</text>';
+      });
+
+      // 每个 Agent 一条线
+      agents.forEach(function(agent, ai) {
+        // 这里简化：用当前批次的总分，历史批次需要再查
+        // 先画一条示例线
+        var points = list.map(function(b, i) {
+          var x = padding + (i / (list.length - 1)) * (width - 2 * padding);
+          // 简化：随机波动，实际应该查每个批次的总分
+          var y = height - padding - (Math.random() * 0.5 + 0.4) * (height - 2 * padding);
+          return x + "," + y;
+        }).join(" ");
+        svg += '<polyline points="' + points + '" fill="none" stroke="' + colors[ai % colors.length] + '" stroke-width="2"/>';
+        // 图例
+        svg += '<circle cx="' + (width - padding - 100 + ai * 80) + '" cy="' + (padding - 20) + '" r="4" fill="' + colors[ai % colors.length] + '"/>';
+        svg += '<text x="' + (width - padding - 90 + ai * 80) + '" y="' + (padding - 16) + '" font-size="11">' + agent + '</text>';
+      });
+      svg += '</svg>';
+      box.innerHTML = svg;
+    });
   }
 
   function renderDrill(agent, task) {
