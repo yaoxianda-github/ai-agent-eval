@@ -254,6 +254,30 @@ class EvalAgent:
 
             trajectory.append(step)
 
+        # 如果循环结束还没给结论，强制总结
+        if not final_answer:
+            logger.info("循环结束未给结论，触发自动总结")
+            summary_prompt = [
+                {"role": "system", "content": "你是一个评测分析助手。根据之前的工具调用结果，给出简洁的对比结论，按：核心结论一句话 + 关键指标（最多4行表格）+ 主要差异点 + 建议 的格式输出。不要列原始数据。"},
+                {"role": "user", "content": f"原始问题：{user_query}\n\n根据之前的工具调用结果，总结结论："},
+            ]
+            # 把之前的 trajectory 摘要加进去
+            for step in trajectory[-3:]:  # 只加最后3步
+                if step.get("observation"):
+                    summary_prompt.append({"role": "user", "content": f"工具结果：{json.dumps(step['observation'], ensure_ascii=False)[:500]}"})
+
+            try:
+                client = self._get_client()
+                resp = client.chat.completions.create(
+                    model=self.model,
+                    messages=summary_prompt,
+                    temperature=0.0,
+                    max_tokens=600,
+                )
+                final_answer = resp.choices[0].message.content or "已完成工具调用，请查看执行轨迹"
+            except Exception as e:
+                final_answer = f"自动总结失败：{e}，请查看执行轨迹"
+
         return {
             "query": user_query,
             "final_answer": final_answer,
