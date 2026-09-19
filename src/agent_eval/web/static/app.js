@@ -1064,9 +1064,8 @@
           return !isNaN(t) && (now - t) <= ms;
         });
       }
-      // 分页截取
-      var pageRuns = runs.slice(histPage * histLimit, (histPage + 1) * histLimit);
-      var rows = pageRuns.map(function (r) {
+      // 后端已经分页，直接用返回的 runs
+      var rows = runs.map(function (r) {
         var costTxt = (r.actual_cost_cny !== null && r.actual_cost_cny !== undefined)
           ? "¥" + r.actual_cost_cny.toFixed(4) : "—";
         var confTxt = "—";
