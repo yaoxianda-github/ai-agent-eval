@@ -2732,7 +2732,8 @@
             '<h3>发起对比</h3>' +
             '<div class="matrix-header-controls">' +
               '<div class="field inline-field"><label>任务集</label>' +
-                '<select id="mx-scope"><option value="core">core 核心卡口包</option>' +
+                '<select id="mx-scope"><option value="golden">golden 黄金集（快速冒烟）</option>' +
+                '<option value="core">core 核心卡口包</option>' +
                 '<option value="full">full 全量任务</option></select></div>' +
               '<div class="field inline-field"><label>每格 runs</label>' +
                 '<input id="mx-runs" type="number" value="1" min="1" max="10"></div>' +
