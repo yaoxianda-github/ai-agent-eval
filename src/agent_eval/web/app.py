@@ -1918,6 +1918,20 @@ def create_app(
         """获取记忆质量统计，用于前端展示治理效果。"""
         return store.get_memory_quality_stats()
 
+    # ---------- 评测 Agent ----------
+    @app.post("/api/agent/run")
+    def eval_agent_run(body: dict) -> dict:
+        """评测 Agent 自然语言入口。"""
+        from agent_eval.agent import EvalAgent
+
+        query = body.get("query", "").strip()
+        if not query:
+            return {"error": "query 不能为空"}
+
+        agent = EvalAgent()
+        result = agent.run(query)
+        return result
+
     # ---------- 静态页 ----------
     @app.middleware("http")
     async def _request_logging(request, call_next):

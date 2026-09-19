@@ -176,9 +176,11 @@ class EvalAgent:
                 trajectory.append(step)
                 break
 
-            # 执行工具
-            if action and action in TOOLS_SCHEMA:
-                result = call_tool(action, action_input)
+            # 执行工具（做小写和去空格处理，兼容 LLM 输出的细微差异）
+            normalized_action = action.lower().replace(" ", "_") if action else ""
+            tool_names = [t["name"] for t in TOOLS_SCHEMA]
+            if normalized_action and normalized_action in tool_names:
+                result = call_tool(normalized_action, action_input)
                 step["observation"] = result
 
                 # 如果是查批次状态，等待轮询
@@ -207,7 +209,7 @@ class EvalAgent:
                 })
                 messages.append({
                     "role": "user",
-                    "content": f"工具 {action} 不存在。可用工具：{[t['name'] for t in TOOLS_SCHEMA]}",
+                    "content": f"工具 {action} 不存在。可用工具：{tool_names}",
                 })
 
             trajectory.append(step)
