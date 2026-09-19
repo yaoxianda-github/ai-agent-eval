@@ -1080,7 +1080,7 @@
           '<div style="font-size:48px;margin-bottom:16px;">📊</div>' +
           '<div style="font-size:18px;color:#374151;margin-bottom:8px;">暂无运行记录</div>' +
           '<div style="font-size:14px;color:#6b7280;margin-bottom:24px;">去工作台发起一次评测，开始你的 Agent 能力测试</div>' +
-          '<button class="btn primary" onclick="location.hash='#/dashboard'">去工作台 →</button>' +
+          '<button class="btn primary" onclick="location.hash=\'#/dashboard\'">去工作台 →</button>' +
         '</div>';
         return;
       }
