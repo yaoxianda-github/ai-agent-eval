@@ -1029,13 +1029,19 @@
           '<div id="h-trend"><div class="empty">加载中…</div></div>' +
         "</div>" +
         '<div class="card">' +
-          '<div class="filter-bar">' +
-            '<div class="filter-item"><label>任务</label><select id="h-task">' + taskOpts + "</select></div>" +
-            '<div class="filter-item"><label>后端</label><select id="h-agent">' + agentOpts + "</select></div>" +
-            '<div class="filter-item"><label>状态</label><select id="h-status"><option value="">全部</option><option>completed</option><option>max_steps</option><option>timeout</option><option>error</option><option>running</option></select></div>' +
-            '<div class="filter-item"><label>时间范围</label><select id="h-time"><option value="">全部</option><option value="1d">今天</option><option value="7d">近7天</option><option value="30d">近30天</option></select></div>' +
-            '<div class="filter-item" style="flex:0 0 auto;align-self:flex-end;"><button class="btn secondary" id="h-filter">筛选</button></div>' +
-            '<div class="filter-item" style="flex:0 0 auto;align-self:flex-end;"><button class="btn secondary small" id="h-reset">重置</button></div>' +
+          '<div class="filter-bar" style="flex-wrap:wrap;gap:12px 20px;">' +
+            '<div class="filter-item" style="min-width:140px;"><label>任务</label><select id="h-task">' + taskOpts + "</select></div>" +
+            '<div class="filter-item" style="min-width:120px;"><label>后端</label><select id="h-agent">' + agentOpts + "</select></div>" +
+            '<div class="filter-item" style="min-width:120px;"><label>状态</label><select id="h-status"><option value="">全部</option><option>completed</option><option>max_steps</option><option>timeout</option><option>error</option><option>running</option></select></div>' +
+            '<div class="filter-item" style="min-width:120px;"><label>时间范围</label><select id="h-time"><option value="">全部</option><option value="1d">今天</option><option value="7d">近7天</option><option value="30d">近30天</option></select></div>' +
+            '<div style="flex-basis:100%;display:flex;gap:8px;margin-top:4px;flex-wrap:wrap;align-items:center;">' +
+              '<button class="btn primary" id="h-filter">筛选</button>' +
+              '<button class="btn secondary" id="h-reset">重置</button>' +
+              '<span style="margin-left:16px;color:#6b7280;font-size:13px;">快捷：</span>' +
+              '<button class="btn secondary small" id="h-quick-fail">只看失败</button>' +
+              '<button class="btn secondary small" id="h-quick-today">只看今天</button>' +
+              '<button class="btn secondary small" id="h-quick-claude">只看 claude-code</button>' +
+            '</div>' +
           "</div>" +
           '<div id="h-list"><div style="padding:40px;text-align:center;color:#6b7280;">' +
             '<div style="display:inline-block;width:24px;height:24px;border:3px solid #e5e7eb;border-top-color:#3b82f6;border-radius:50%;animation:spin 1s linear infinite;margin-right:8px;vertical-align:middle;"></div>' +
