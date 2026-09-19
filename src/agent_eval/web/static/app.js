@@ -3229,7 +3229,7 @@
     if (!box) return;
     // 获取历史批次
     api("/api/batches?limit=10").then(function (batches) {
-      var list = (batches.items || batches || []).filter(function(b) { return b.status === "done"; });
+      var list = (batches.batches || batches.items || batches || []).filter(function(b) { return b.status === "done"; });
       if (list.length < 2) {
         box.innerHTML = '<div class="empty">需要至少 2 个已完成批次才能展示趋势</div>';
         return;
