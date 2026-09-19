@@ -168,7 +168,7 @@ def tool_list_tasks(tag: str | None = None, level: str | None = None) -> dict:
 
     result = []
     for t in tasks[:20]:  # 最多返回 20 个，避免太长
-        result.append({
+        info = {}; result.append({
             "id": t.id,
             "title": t.title,
             "level": t.level,
@@ -185,12 +185,12 @@ def tool_list_tasks(tag: str | None = None, level: str | None = None) -> dict:
 
 def tool_list_backends() -> dict:
     """实现 list_backends 工具。"""
-    from agent_eval.backends import get_available_backends
+    from agent_eval.backends import list_backends
 
-    backends = get_available_backends()
+    backend_names = list_backends()
     result = []
-    for bid, info in backends.items():
-        result.append({
+    for bid in backend_names:
+        info = {}; result.append({
             "id": bid,
             "name": info.get("name", bid),
             "model": info.get("model", "unknown"),
