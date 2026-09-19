@@ -1025,7 +1025,9 @@
             '<div class="filter-item" style="flex:0 0 auto;align-self:flex-end;"><button class="btn secondary" id="h-filter">筛选</button></div>' +
             '<div class="filter-item" style="flex:0 0 auto;align-self:flex-end;"><button class="btn secondary small" id="h-reset">重置</button></div>' +
           "</div>" +
-          '<div id="h-list"><div class="empty">加载中…</div></div>' +
+          '<div id="h-list"><div style="padding:40px;text-align:center;color:#6b7280;">' +
+            '<div style="display:inline-block;width:24px;height:24px;border:3px solid #e5e7eb;border-top-color:#3b82f6;border-radius:50%;animation:spin 1s linear infinite;margin-right:8px;vertical-align:middle;"></div>' +
+            '加载中…</div></div>' +
         "</div>"
       );
       el("h-filter").onclick = function () { histPage = 0; loadHistory(); };
@@ -1051,7 +1053,15 @@
     q[0] = "limit=" + fetchLimit;
     api("/api/runs?" + q.join("&")).then(function (d) {
       var list = el("h-list");
-      if (!d.runs || !d.runs.length) { list.innerHTML = '<div class="empty">暂无运行记录</div>'; return; }
+      if (!d.runs || !d.runs.length) {
+        list.innerHTML = '<div style="text-align:center;padding:60px 20px;">' +
+          '<div style="font-size:48px;margin-bottom:16px;">📊</div>' +
+          '<div style="font-size:18px;color:#374151;margin-bottom:8px;">暂无运行记录</div>' +
+          '<div style="font-size:14px;color:#6b7280;margin-bottom:24px;">去工作台发起一次评测，开始你的 Agent 能力测试</div>' +
+          '<button class="btn primary" onclick="location.hash='#/dashboard'">去工作台 →</button>' +
+        '</div>';
+        return;
+      }
       var runs = d.runs;
       // V4.3 P1-3：渲染通过率趋势图 + 慢漂移检测
       renderTrendChart(runs.slice(0, 20));
@@ -1086,10 +1096,10 @@
         var durTxt = '<span style="color:' + durColor + ';font-weight:600;">' + fmtDur(dur) + "</span>";
         return '<tr class="clickable" data-rid="' + esc(r.run_id) + '">' +
           '<td class="col-time" title="' + esc(fmtTime(r.created_at)) + '">' + esc(fmtRelative(r.created_at)) + "</td>" +
-          '<td class="col-runid"><b class="run-id-copy" data-id="' + esc(r.run_id) + '" title="点击复制">' + esc(r.run_id) + "</b></td>" +
+          '<td class="col-runid"><b class="run-id-copy" data-id="' + esc(r.run_id) + '" title="' + esc(r.run_id) + ' 点击复制">' + esc(r.run_id.slice(0, 8)) + "</b></td>" +
           '<td class="col-task">' + esc(r.task_id) + '</td><td class="col-agent">' + esc(r.agent_id) + "</td>" +
           "<td>" + statusBadge(r.status) + "</td>" +
-          '<td class="col-score">' + esc(r.score) + '</td><td class="col-duration">' + durTxt + "</td><td>" + esc(r.steps) + "</td>" +
+          '<td class="col-score">' + (function() { var s = r.score || 0; var c = s >= 0.8 ? "#16a34a" : s >= 0.5 ? "#d97706" : "#dc2626"; return '<span style="color:' + c + ';font-weight:600;">' + s.toFixed(2) + '</span>'; })() + '</td><td class="col-duration">' + durTxt + "</td><td>" + esc(r.steps) + "</td>" +
           '<td class="col-cost">' + costTxt + "</td>" +
           '<td class="col-conf">' + confTxt + "</td>" +
           "<td>" + reviewTxt + "</td>" +
@@ -1098,20 +1108,20 @@
       var total = timeRange ? runs.length : Number(d.total || 0);
       var pages = Math.max(1, Math.ceil(total / histLimit));
       var cur = Math.min(histPage + 1, pages);
-      var pager = '<div class="pager">' +
-        '<button class="btn secondary small" id="h-first"' + (histPage <= 0 ? " disabled" : "") + '>⟲ 首页</button>' +
-        '<button class="btn secondary small" id="h-prev"' + (histPage <= 0 ? " disabled" : "") + '>‹ 上一页</button>' +
-        '<span class="pager-info">第 ' + cur + " / " + pages + " 页 · 共 " + total + " 条</span>" +
-        '<button class="btn secondary small" id="h-next"' + (histPage >= pages - 1 ? " disabled" : "") + '>下一页 ›</button>' +
-        '<button class="btn secondary small" id="h-last"' + (histPage >= pages - 1 ? " disabled" : "") + '>尾页 ⟳</button>' +
+      var pager = '<div class="pager" style="margin-top:16px;justify-content:center;gap:8px;">' +
+        '<button class="btn secondary" id="h-first"' + (histPage <= 0 ? " disabled" : "") + '>⟲ 首页</button>' +
+        '<button class="btn secondary" id="h-prev"' + (histPage <= 0 ? " disabled" : "") + '>‹ 上一页</button>' +
+        '<span class="pager-info" style="padding:0 16px;">第 ' + cur + " / " + pages + " 页 · 共 " + total + " 条</span>" +
+        '<button class="btn secondary" id="h-next"' + (histPage >= pages - 1 ? " disabled" : "") + '>下一页 ›</button>' +
+        '<button class="btn secondary" id="h-last"' + (histPage >= pages - 1 ? " disabled" : "") + '>尾页 ⟳</button>' +
         "</div>";
-      list.innerHTML = '<table><tr><th>时间</th><th>run_id</th><th>任务</th><th>后端</th><th>状态</th><th>score</th><th>时长</th><th>步数</th><th>实际成本' +
+      list.innerHTML = '<div style="overflow-x:auto;"><table style="min-width:1000px;"><tr><th>时间</th><th>run_id</th><th>任务</th><th>后端</th><th>状态</th><th>score</th><th>时长</th><th>步数</th><th>实际成本' +
         costTip("实际成本 = 本次评测实际消耗的 token（run.json 的 metrics.usage）按模型单价折算。<br>默认模型 deepseek-chat：输入 ¥2/百万 token、输出 ¥3/百万 token。<br><br>token 埋点（metrics.usage）之前的历史 run 无记录，显示「—」。<br><br>单价可用环境变量 LLM_INPUT_CNY_PER_M / LLM_OUTPUT_CNY_PER_M 覆盖。") +
         '</th><th>置信度' +
         costTip("评测置信度 = 运行次数(25%) + 校验点类型(25%) + 任务覆盖度(20%) + 历史稳定性(15%) + 任务级别(15%) 加权计算。<br><br>高置信(≥80)：结果可信，可用于决策<br>中置信(60-79)：有一定参考价值，建议补充验证<br>低置信(<60)：结果不可靠，需增加 runs 或扩大任务集") +
         '</th><th>复核' +
         costTip("人工复核状态：待复核/人工通过/人工不通过。<br><br>在运行详情页可对任意 run 进行人工打分和标注，用于抽检 LLM Judge 结果的准确性。<br><br>实践文章核心观点：'两人打分、持续抽检'，防止自动判分偏差累积。") +
-        "</th></tr>" + rows + "</table>" + pager;
+        "</th></tr>" + rows + "</table></div>" + pager;
       list.querySelectorAll("tr.clickable").forEach(function (tr) {
         tr.onclick = function () { location.hash = "#/run/" + tr.getAttribute("data-rid"); };
       });
