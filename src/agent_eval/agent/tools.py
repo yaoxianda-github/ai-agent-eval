@@ -104,6 +104,53 @@ TOOLS_SCHEMA = [
             "required": ["run_id"],
         },
     },
+    {
+        "name": "list_badcases",
+        "description": "列出平台上的 badcase 库，可按状态筛选（open/closed/fixed）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "description": "按状态筛选：open/closed/fixed"},
+            },
+        },
+    },
+    {
+        "name": "get_summary",
+        "description": "获取平台总体统计：总任务数、总运行数、平均通过率、成本统计。",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
+        "name": "get_matrix",
+        "description": "获取多 Agent 对比矩阵数据：各 Agent 在各任务上的得分、通过率、成本。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "batch_id": {"type": "string", "description": "可选，指定批次 ID，不传用最新"},
+            },
+        },
+    },
+    {
+        "name": "cancel_batch",
+        "description": "取消正在运行的批次。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "batch_id": {"type": "string", "description": "批次 ID"},
+            },
+            "required": ["batch_id"],
+        },
+    },
+    {
+        "name": "get_costs",
+        "description": "获取成本统计：各模型、各 Agent 的 token 消耗和成本汇总。",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
 ]
 
 
@@ -236,6 +283,63 @@ def tool_get_run_detail(run_id: str) -> dict:
     }
 
 
+def tool_list_badcases(status: str | None = None) -> dict:
+    """实现 list_badcases 工具。"""
+    import httpx
+    try:
+        r = httpx.get("http://127.0.0.1:8000/api/badcases", timeout=5)
+        data = r.json()
+        items = data.get("items", data) if isinstance(data, dict) else data
+        if status and isinstance(items, list):
+            items = [b for b in items if b.get("status") == status]
+        return {"count": len(items) if isinstance(items, list) else 0, "items": items[:20]}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def tool_get_summary() -> dict:
+    """实现 get_summary 工具。"""
+    import httpx
+    try:
+        r = httpx.get("http://127.0.0.1:8000/api/summary", timeout=5)
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def tool_get_matrix(batch_id: str | None = None) -> dict:
+    """实现 get_matrix 工具。"""
+    import httpx
+    try:
+        url = "http://127.0.0.1:8000/api/matrix"
+        if batch_id:
+            url += f"?batch_id={batch_id}"
+        r = httpx.get(url, timeout=5)
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def tool_cancel_batch(batch_id: str) -> dict:
+    """实现 cancel_batch 工具。"""
+    import httpx
+    try:
+        r = httpx.post(f"http://127.0.0.1:8000/api/batches/{batch_id}/cancel", timeout=5)
+        return {"batch_id": batch_id, "status": "cancelled"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def tool_get_costs() -> dict:
+    """实现 get_costs 工具。"""
+    import httpx
+    try:
+        r = httpx.get("http://127.0.0.1:8000/api/costs", timeout=5)
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ========== 工具分发 ==========
 
 TOOL_MAP = {
@@ -245,6 +349,11 @@ TOOL_MAP = {
     "run_batch": tool_run_batch,
     "get_batch_status": tool_get_batch_status,
     "get_run_detail": tool_get_run_detail,
+    "list_badcases": tool_list_badcases,
+    "get_summary": tool_get_summary,
+    "get_matrix": tool_get_matrix,
+    "cancel_batch": tool_cancel_batch,
+    "get_costs": tool_get_costs,
 }
 
 
