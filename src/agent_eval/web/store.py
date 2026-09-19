@@ -124,6 +124,19 @@ class RunStore:
 
     def insert_run(self, rec: dict, batch_id: str = "") -> None:
         m = rec.get("metrics", {})
+        # 优先使用实际运行时间（从 steps[0].ts 时间戳转换），否则用当前时间
+        created_at = _now()
+        steps = rec.get("steps", [])
+        if steps and len(steps) > 0 and "ts" in steps[0]:
+            try:
+                from datetime import datetime
+                created_at = datetime.fromtimestamp(steps[0]["ts"]).strftime("%Y-%m-%d %H:%M:%S")
+            except:
+                pass
+        # 如果 rec 里直接有 created_at 字段，也优先用
+        if rec.get("created_at"):
+            created_at = rec["created_at"]
+        
         with self._lock:
             self._conn.execute(
                 """INSERT OR REPLACE INTO runs
@@ -141,9 +154,9 @@ class RunStore:
                     float(m.get("weight", 0.0)),
                     float(m.get("pass_rate", 0.0)),
                     float(rec.get("duration_s", 0.0)),
-                    len(rec.get("steps", [])),
+                    len(steps),
                     batch_id or "",
-                    _now(),
+                    created_at,
                 ),
             )
             self._conn.commit()
