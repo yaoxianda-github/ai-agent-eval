@@ -599,12 +599,17 @@ def create_app(
         cancelled = False
         logger.info("对比批次开始 | batch=%s agents=%s tasks=%d runs=%d 共%d次",
                     batch_id, agents, len(task_ids), runs, total)
-        for agent_id, task_id, _i in plan:
+        # 异步并发执行（默认并发数 3，可通过环境变量配置）
+        import concurrent.futures
+        
+        max_workers = int(os.environ.get("EVAL_CONCURRENCY", "3"))
+        
+        def run_single(agent_id, task_id):
+            nonlocal done
             # 检查取消标志
             if _batch_cancel_flags.get(batch_id):
-                cancelled = True
-                logger.info("对比批次被取消 | batch=%s 已完成%d/%d次", batch_id, done, total)
-                break
+                return None
+            
             rid = uuid.uuid4().hex[:12]
             try:
                 task = _task_map()[task_id]
@@ -619,7 +624,7 @@ def create_app(
             except Exception as e:  # noqa: BLE001 - 单次失败不中断批次
                 logger.error("批次内运行失败 | batch=%s %s/%s: %s",
                              batch_id, agent_id, task_id, e, exc_info=True)
-                # 插入 error 状态的 run 记录，确保失败任务在矩阵中可追踪（不再显示 "—"）
+                # 插入 error 状态的 run 记录
                 try:
                     _t = _task_map().get(task_id)
                     store.insert_run({
@@ -636,8 +641,27 @@ def create_app(
                     }, batch_id=batch_id)
                 except Exception:  # noqa: BLE001 - 记录失败不影响主流程
                     pass
-            done += 1
-            store.update_batch(batch_id, done_runs=done)
+            finally:
+                done += 1
+                store.update_batch(batch_id, done_runs=done)
+        
+        # 使用线程池并发执行
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = []
+            for agent_id, task_id, _i in plan:
+                futures.append(executor.submit(run_single, agent_id, task_id))
+            
+            # 等待所有任务完成
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    logger.error("并发任务异常: %s", e)
+            
+            # 检查是否被取消
+            if _batch_cancel_flags.get(batch_id):
+                cancelled = True
+                logger.info("对比批次被取消 | batch=%s 已完成%d/%d次", batch_id, done, total)
         batch = store.get_batch(batch_id)
         matrix = _build_matrix(batch) if batch else {}
         final_status = "cancelled" if cancelled else "done"
@@ -1342,6 +1366,100 @@ def create_app(
             headers={"Content-Disposition": f'attachment; filename="{fname}"'},
         )
 
+    @app.get("/api/matrix/export_html")
+    def export_matrix_html(batch_id: str = Query(...)) -> Response:
+        """导出 HTML 格式的对比报告。"""
+        b = store.get_batch(batch_id)
+        if not b:
+            raise HTTPException(status_code=404, detail="批次不存在")
+        m = b["summary"] if b["status"] == "done" and b.get("summary") else _build_matrix(b)
+        
+        # 生成 HTML 报告
+        html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Agent 评测对比报告 - {batch_id}</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 20px; background: #f5f5f5; }}
+  .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+  h1 {{ color: #1a1a1a; border-bottom: 2px solid #2563eb; padding-bottom: 10px; }}
+  .meta {{ color: #666; margin-bottom: 20px; }}
+  table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+  th, td {{ padding: 12px; text-align: center; border: 1px solid #e5e7eb; }}
+  th {{ background: #f8fafc; font-weight: 600; color: #374151; }}
+  .pass {{ color: #16a34a; font-weight: 600; }}
+  .fail {{ color: #dc2626; }}
+  .partial {{ color: #d97706; }}
+  .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0; }}
+  .stat-card {{ background: #f8fafc; padding: 15px; border-radius: 6px; border-left: 4px solid #2563eb; }}
+  .stat-card .label {{ color: #6b7280; font-size: 14px; }}
+  .stat-card .value {{ color: #111827; font-size: 24px; font-weight: 700; margin-top: 5px; }}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🤖 Agent 评测对比报告</h1>
+  <div class="meta">
+    <p>批次 ID: {batch_id}</p>
+    <p>生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+  </div>
+  
+  <h2>📊 整体统计</h2>
+  <div class="stats">
+    <div class="stat-card">
+      <div class="label">Agent 数量</div>
+      <div class="value">{len(m['agents'])}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">任务数量</div>
+      <div class="value">{len(m['tasks'])}</div>
+    </div>
+  </div>
+  
+  <h2>📈 得分矩阵</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Agent</th>
+        {''.join(f'<th>{t}</th>' for t in m['tasks'])}
+        <th>加权总分</th>
+      </tr>
+    </thead>
+    <tbody>
+"""
+        
+        for a in m['agents']:
+            html += f"      <tr><td><b>{a}</b></td>"
+            for t in m['tasks']:
+                c = m['cells'].get(f"{a}|{t}")
+                if c and c['n']:
+                    pr = c['pass_rate']
+                    cls = 'pass' if pr >= 0.999 else ('partial' if pr >= 0.5 else 'fail')
+                    html += f'<td class="{cls}">{c["best"]:.2f}<br><small>({pr*100:.0f}%)</small></td>'
+                else:
+                    html += '<td class="fail">-</td>'
+            tt = m['totals'].get(a, {})
+            html += f'<td><b>{tt.get("weighted_score", 0):.2f}</b></td></tr>
+'
+        
+        html += """    </tbody>
+  </table>
+  
+  <p style="color:#6b7280;font-size:12px;margin-top:30px;">
+    报告由 ai-agent-eval 自动生成 · 支持导出 CSV/HTML 格式
+  </p>
+</div>
+</body>
+</html>"""
+        
+        fname = f"report-{batch_id}.html"
+        return Response(
+            content=html,
+            media_type="text/html; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+
     # ---------- 汇总 / 报告 ----------
     @app.get("/api/summary")
     def api_summary() -> dict:
@@ -1704,6 +1822,47 @@ def create_app(
         return {"items": items, "total": len(items)}
 
     # ---------- 闭环追踪：回归对比报告 ----------
+    @app.post("/api/badcases/{bid}/analyze")
+    def api_analyze_badcase(bid: str) -> dict:
+        """智能分析 badcase，生成根因分析和修复建议。"""
+        from agent_eval.agent import EvalAgent
+        
+        b = store.get_badcase(bid)
+        if not b:
+            return {"error": "badcase 不存在"}
+        
+        # 构造分析 Prompt
+        prompt = f"""
+请分析这个评测 badcase，按照以下结构输出：
+
+【Badcase 信息】
+- 任务: {b.task_id}
+- Agent: {b.agent_id}
+- 分类: {b.category}
+- 严重度: {b.severity}
+- 问题描述: {b.description}
+
+请按照以下结构输出分析结果：
+
+1. **现象总结**：用一句话概括这个 badcase 的核心问题
+2. **影响面分析**：这个问题可能影响哪些场景和功能？
+3. **可能根因**：列出 2-3 个最可能的根本原因
+4. **修复建议**：针对每个根因给出具体的修复方向
+5. **回归测试清单**：列出 3-5 个需要回归验证的测试点
+6. **风险等级**：评估这个问题的上线风险等级（低/中/高/严重）
+7. **建议优先级**：建议的修复优先级（P0/P1/P2/P3）
+
+请用简洁、专业的语言输出，不要太冗长。
+"""
+        
+        agent = EvalAgent()
+        result = agent.run(prompt)
+        
+        return {
+            "analysis": result.get("final_answer", ""),
+            "trajectory": result.get("trajectory", [])
+        }
+
     @app.get("/api/badcases/{bid}/regression-compare")
     def api_badcase_regression_compare(bid: str) -> dict:
         """Badcase 回归对比：对比修复前后同一任务的运行分数。
@@ -1931,6 +2090,46 @@ def create_app(
         agent = EvalAgent()
         result = agent.run(query)
         return result
+
+    @app.post("/api/agent/run-stream")
+    async def eval_agent_run_stream(body: dict):
+        """评测 Agent 自然语言入口（流式输出）。"""
+        from fastapi.responses import StreamingResponse
+        import asyncio
+        import json
+
+        query = body.get("query", "").strip()
+        if not query:
+            return {"error": "query 不能为空"}
+
+        async def generate():
+            from agent_eval.agent import EvalAgent
+            agent = EvalAgent()
+            
+            # 这里我们用一个简单的方式：先运行，然后模拟流式输出
+            # 为了简化，我们直接调用原来的 run 方法，然后分步发送结果
+            # 后续可以改成真正的流式 ReAct
+            result = agent.run(query)
+            
+            # 发送每一步的轨迹
+            for step in result.get("trajectory", []):
+                yield f"data: {json.dumps({'type': 'step', 'data': step}, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.1)
+            
+            # 发送最终结论
+            yield f"data: {json.dumps({'type': 'final', 'data': {'final_answer': result.get('final_answer', '')}}, ensure_ascii=False)}\n\n"
+            
+            # 发送结束标记
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            }
+        )
 
     # ---------- 静态页 ----------
     @app.middleware("http")

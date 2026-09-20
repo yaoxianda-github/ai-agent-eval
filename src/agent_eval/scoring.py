@@ -138,6 +138,60 @@ def classify_failure(verdicts: list[dict], steps: list[dict] | None = None) -> d
             "detail": f"未匹配到明确工程错误，可能为模型语义理解问题: {', '.join(v.get('checkpoint_id') or v.get('id','?') for v in failed_verdicts)}"}
 
 
+def score_trajectory(steps: list[dict] | None, max_steps: int = None, max_errors: int = None) -> dict:
+    """计算轨迹指标评分。
+    
+    参考文章中的轨迹指标：
+    - step_count: 总步数
+    - error_count: 错误步数
+    - duplicate_calls: 重复调用次数
+    - efficiency_score: 效率得分（0-1）
+    
+    效率计算逻辑：
+    - 步数越少得分越高（最多 max_steps 步）
+    - 错误越少得分越高（最多 max_errors 个错误）
+    """
+    steps = steps or []
+    step_count = len(steps)
+    
+    # 计算错误步数
+    error_count = sum(1 for s in steps if s.get("error") or s.get("status") == "error")
+    
+    # 计算重复调用次数
+    seen_calls = set()
+    duplicate_calls = 0
+    for s in steps:
+        tool_name = s.get("tool", s.get("name", ""))
+        args = str(s.get("args", s.get("arguments", "")))
+        call_key = f"{tool_name}:{args}"
+        if call_key in seen_calls:
+            duplicate_calls += 1
+        else:
+            seen_calls.add(call_key)
+    
+    # 计算效率得分
+    max_steps = max_steps or 20  # 默认最多 20 步
+    max_errors = max_errors or 3  # 默认最多 3 个错误
+    
+    step_score = max(0.0, 1.0 - (step_count / max_steps))
+    error_score = max(0.0, 1.0 - (error_count / max_errors))
+    duplicate_score = max(0.0, 1.0 - (duplicate_calls / 5))  # 重复 5 次以上扣完
+    
+    efficiency_score = round((step_score * 0.4 + error_score * 0.4 + duplicate_score * 0.2), 3)
+    
+    return {
+        "step_count": step_count,
+        "error_count": error_count,
+        "duplicate_calls": duplicate_calls,
+        "efficiency_score": efficiency_score,
+        "violations": [
+            f"步数 {step_count} 超过上限 {max_steps}" if step_count > max_steps else None,
+            f"错误数 {error_count} 超过上限 {max_errors}" if error_count > max_errors else None,
+            f"重复调用 {duplicate_calls} 次" if duplicate_calls > 3 else None,
+        ]
+    }
+
+
 def score_task(task, verdicts: list[dict], steps: list[dict] | None = None) -> dict:
     total = len(verdicts)
     passed = sum(1 for v in verdicts if v.get("passed"))
@@ -157,10 +211,18 @@ def score_task(task, verdicts: list[dict], steps: list[dict] | None = None) -> d
     # 失败归因标准化（6类映射）
     failure_attribution = classify_failure(verdicts, steps) if passed < total else None
 
+    # 轨迹指标评分
+    trajectory_metrics = score_trajectory(steps)
+    
+    # 综合得分：规则评分 70% + 轨迹效率 30%
+    final_score = round(task.weight * (rate * 0.7 + trajectory_metrics["efficiency_score"] * 0.3), 3)
+    
     return {
         "task_id": task.id,
         "weight": task.weight,
-        "score": round(task.weight * rate, 3),
+        "score": final_score,
+        "rule_score": round(task.weight * rate, 3),
+        "trajectory_score": round(task.weight * trajectory_metrics["efficiency_score"], 3),
         "passed": passed,
         "total": total,
         "pass_rate": round(rate, 3),
@@ -168,4 +230,5 @@ def score_task(task, verdicts: list[dict], steps: list[dict] | None = None) -> d
         "hard_gate_blocked": hard_gate_blocked,
         "hard_gate_failed_checkpoints": hard_gate_failed,
         "failure_attribution": failure_attribution,
+        "trajectory_metrics": trajectory_metrics,
     }

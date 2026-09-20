@@ -261,6 +261,92 @@ def render_html(summary: dict, generated_at: str) -> str:
 </html>"""
 
 
+def compare_versions(
+    runs_v1: list[dict],
+    runs_v2: list[dict],
+    version1_name: str = "v1",
+    version2_name: str = "v2",
+) -> dict:
+    """对比两个版本的运行结果。
+    
+    返回：
+    - task_diffs: 每个任务的得分变化
+    - overall: 整体变化
+    - regressions: 回退的任务
+    - improvements: 进步的任务
+    """
+    # 计算每个版本的任务得分
+    def get_task_scores(runs: list[dict]) -> dict:
+        scores = {}
+        for r in runs:
+            task_id = r.get("task_id", "?")
+            agent = r.get("agent_id", "?")
+            key = f"{agent}|{task_id}"
+            score = float(r.get("metrics", {}).get("score", 0.0))
+            if key not in scores or score > scores[key]:
+                scores[key] = score
+        return scores
+    
+    scores_v1 = get_task_scores(runs_v1)
+    scores_v2 = get_task_scores(runs_v2)
+    
+    all_tasks = set(scores_v1.keys()) | set(scores_v2.keys())
+    
+    task_diffs = []
+    regressions = []
+    improvements = []
+    
+    for task in sorted(all_tasks):
+        s1 = scores_v1.get(task, 0.0)
+        s2 = scores_v2.get(task, 0.0)
+        diff = round(s2 - s1, 3)
+        
+        task_diffs.append({
+            "task": task,
+            "score_v1": s1,
+            "score_v2": s2,
+            "diff": diff,
+            "status": "improved" if diff > 0.05 else ("regressed" if diff < -0.05 else "stable")
+        })
+        
+        if diff < -0.05:
+            regressions.append({
+                "task": task,
+                "score_v1": s1,
+                "score_v2": s2,
+                "diff": diff,
+            })
+        elif diff > 0.05:
+            improvements.append({
+                "task": task,
+                "score_v1": s1,
+                "score_v2": s2,
+                "diff": diff,
+            })
+    
+    # 整体统计
+    avg_v1 = round(sum(scores_v1.values()) / len(scores_v1), 3) if scores_v1 else 0.0
+    avg_v2 = round(sum(scores_v2.values()) / len(scores_v2), 3) if scores_v2 else 0.0
+    overall_diff = round(avg_v2 - avg_v1, 3)
+    
+    return {
+        "version1": version1_name,
+        "version2": version2_name,
+        "task_diffs": task_diffs,
+        "overall": {
+            "avg_score_v1": avg_v1,
+            "avg_score_v2": avg_v2,
+            "overall_diff": overall_diff,
+            "total_tasks": len(all_tasks),
+            "improved_count": len(improvements),
+            "regressed_count": len(regressions),
+            "stable_count": len(task_diffs) - len(improvements) - len(regressions),
+        },
+        "regressions": regressions,
+        "improvements": improvements,
+    }
+
+
 def generate_report(out: str = "reports/report.html") -> str:
     runs = load_runs()
     summary = summarize(runs)

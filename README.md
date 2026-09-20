@@ -291,4 +291,5 @@ ai-agent-eval/
 * ✅ V2.6：统一日志体系（控制台 + 文件双输出、按 10MB 时间戳切割归档、每次运行独立 run.log）
 * ✅ V2.7：商业化功能 A——多 Agent 对比矩阵（批次模型 + 彩色矩阵 + 下钻 + 汇总 + 导出）· License 收费墙（Open Core）
 * ✅ V2.8：API Key 智能管理（Web 可视化配置 + .env 优先 + 系统 fallback + 发起前预检）· claude-code 代理支持 · 对比批次随时取消 · Badcase 管理模块 · 10+ 后端接入（claude-code / codex / hermes / kimi / qoder / trae / workbuddy）
+* ✅ V2.9：三层评分体系（规则 70% + 轨迹效率 30%）· 自动重试（timeout/error 自动重试 1 次）· 异步并发执行（ThreadPoolExecutor，默认 3 并发）· 版本对比报告 · HTML 报告导出 · Badcase 智能分析工作流 · 经验记忆沉淀 · 智能评测流式输出
 * 🔜 下一步：团队回归看板（功能 B）· 桌面端黑盒采集器 · 插件注册表 · Docker 沙箱隔离 · pip 发布 · 混合检索/向量检索增强

@@ -225,10 +225,50 @@ def run_one(
         # V2.9：经验记忆注入——根据任务特征召回相关记忆，注入到 system_prompt
         task_for_run, used_memory_ids = _recall_and_inject_memories(task, config)
 
-        try:
-            start = time.time()
-            result = backend.run(task_for_run, workspace)
-            duration = round(time.time() - start, 3)
+        # 自动重试机制（默认重试 1 次，可通过 config 配置）
+        max_retries = config.get("max_retries", 1)
+        retry_count = 0
+        start = time.time()
+        
+        while True:
+            try:
+                result = backend.run(task_for_run, workspace)
+                duration = round(time.time() - start, 3)
+                
+                # 如果执行成功或者不是可重试的错误，跳出循环
+                if result.status == "completed" or retry_count >= max_retries:
+                    break
+                
+                # 可重试的错误类型：timeout、error
+                if result.status in ("timeout", "error"):
+                    retry_count += 1
+                    logger.warning(
+                        "执行失败，准备重试 (%d/%d) | status=%s error=%s",
+                        retry_count, max_retries, result.status, result.error or ""
+                    )
+                    # 重试前清空 workspace 中的产物
+                    import shutil
+                    for item in workspace.iterdir():
+                        if item.name != "input":  # 保留 input 目录
+                            if item.is_dir():
+                                shutil.rmtree(item)
+                            else:
+                                item.unlink()
+                    time.sleep(1)  # 等待 1 秒后重试
+                    continue
+                else:
+                    break
+                    
+            except Exception as e:
+                duration = round(time.time() - start, 3)
+                if retry_count >= max_retries:
+                    # 最后一次重试也失败，抛出异常
+                    raise
+                retry_count += 1
+                logger.warning("执行异常，准备重试 (%d/%d): %s", retry_count, max_retries, e)
+                time.sleep(1)
+                continue
+        
         finally:
             # M2：MCP 环境清理——恢复环境变量，删除配置文件
             if _saved_env:

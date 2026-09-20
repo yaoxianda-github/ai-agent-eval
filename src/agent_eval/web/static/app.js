@@ -1267,6 +1267,7 @@
         "</div>" +
         '<div class="card">' +
           '<div class="form-row">' +
+            '<div class="field" style="flex:2;"><label>搜索</label><input id="bc-search" placeholder="搜索 badcase 标题或描述..."></div>' +
             '<div class="field"><label>任务</label><select id="bc-task">' + taskOpts + "</select></div>" +
             '<div class="field"><label>后端</label><select id="bc-agent">' + agentOpts + "</select></div>" +
             '<div class="field"><label>分类</label><select id="bc-category">' + catOpts + "</select></div>" +
@@ -1276,11 +1277,26 @@
             '<div class="field"><label>状态</label><select id="bc-status">' + stOpts + "</select></div>" +
             '<div class="field" style="flex:0 0 100px;"><label>&nbsp;</label><button class="btn secondary" id="bc-filter">筛选</button></div>' +
           "</div>" +
+          // 批量操作工具栏
+          '<div id="bc-bulk-bar" style="display:none;padding:12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;margin-bottom:16px;display:flex;align-items:center;gap:12px;">' +
+            '<span style="font-weight:600;color:#0c4a6e;">已选择 <span id="bc-selected-count">0</span> 条</span>' +
+            '<button class="btn secondary small" id="bc-bulk-delete" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;">批量删除</button>' +
+            '<button class="btn secondary small" id="bc-bulk-close">取消选择</button>' +
+          "</div>" +
           '<div id="bc-stats" class="bc-stats"></div>' +
           '<div id="bc-list"><div class="empty">加载中…</div></div>' +
         "</div>"
       );
       el("bc-filter").onclick = function () { bcPage = 0; loadBadcases(); };
+      var searchInput = el("bc-search");
+      if (searchInput) {
+        searchInput.onkeypress = function(e) {
+          if (e.key === 'Enter') {
+            bcPage = 0;
+            loadBadcases();
+          }
+        };
+      }
       el("bc-tab-all").onclick = function () { bcTab = "all"; bcPage = 0; viewBadcases(); };
       el("bc-tab-regression").onclick = function () { bcTab = "regression"; bcPage = 0; viewBadcases(); };
       loadBadcases();
@@ -1322,11 +1338,13 @@
     var cv = el("bc-category") && el("bc-category").value;
     var sv = el("bc-severity") && el("bc-severity").value;
     var stv = el("bc-status") && el("bc-status").value;
+    var searchVal = el("bc-search") && el("bc-search").value;
     if (tv) q.push("task_id=" + encodeURIComponent(tv));
     if (av) q.push("agent_id=" + encodeURIComponent(av));
     if (cv) q.push("category=" + encodeURIComponent(cv));
     if (sv) q.push("severity=" + encodeURIComponent(sv));
     if (stv) q.push("status=" + encodeURIComponent(stv));
+    if (searchVal) q.push("q=" + encodeURIComponent(searchVal));
     api("/api/badcases?" + q.join("&")).then(function (d) {
       var list = el("bc-list");
       var stats = el("bc-stats");
@@ -1364,7 +1382,37 @@
         '<span class="pager-info">第 ' + cur + " / " + pages + " 页 · 共 " + total + " 条</span>" +
         '<button class="btn secondary small" id="bc-next"' + (bcPage >= pages - 1 ? " disabled" : "") + '>下一页 ›</button>' +
         "</div>";
-      list.innerHTML = '<table><tr><th>创建时间</th><th>严重度</th><th>标题</th><th>任务</th><th>后端</th><th>分类</th><th>状态</th></tr>' + rows + "</table>" + pager;
+      list.innerHTML = '<table><tr><th><input type="checkbox" id="bc-select-all"></th><th>创建时间</th><th>严重度</th><th>标题</th><th>任务</th><th>后端</th><th>分类</th><th>状态</th></tr>' + rows + "</table>" + pager;
+      
+      // 绑定批量选择事件
+      setTimeout(function() {
+        var selectAll = document.getElementById('bc-select-all');
+        if (selectAll) {
+          selectAll.onchange = function() {
+            document.querySelectorAll('.bc-checkbox').forEach(function(cb) {
+              cb.checked = selectAll.checked;
+            });
+            updateBulkBar();
+          };
+        }
+        document.querySelectorAll('.bc-checkbox').forEach(function(cb) {
+          cb.onchange = updateBulkBar;
+        });
+        
+        var bulkDeleteBtn = document.getElementById('bc-bulk-delete');
+        if (bulkDeleteBtn) {
+          bulkDeleteBtn.onclick = bulkDeleteBadcases;
+        }
+        var bulkCloseBtn = document.getElementById('bc-bulk-close');
+        if (bulkCloseBtn) {
+          bulkCloseBtn.onclick = function() {
+            document.querySelectorAll('.bc-checkbox, #bc-select-all').forEach(function(cb) {
+              cb.checked = false;
+            });
+            updateBulkBar();
+          };
+        }
+      }, 100);
       list.querySelectorAll("tr.clickable").forEach(function (tr) {
         tr.onclick = function () { location.hash = "#/badcase/" + tr.getAttribute("data-bid"); };
       });
@@ -1474,6 +1522,8 @@
       }
       var convertBtn = b.regression_task_id ? "" : '<button class="btn secondary" id="bc-convert">转化为评测用例</button>';
       var memoryBtn = '<button class="btn secondary" id="bc-to-memory">转化为经验记忆</button>';
+      var analyzeBtn = '<button class="btn" id="bc-analyze" style="background:linear-gradient(135deg, #3b82f6, #8b5cf6);color:white;">🤖 智能分析</button>';
+      var exportBtn = '<button class="btn secondary" id="bc-export">📤 导出</button>';
       // 状态流转快捷按钮
       var currentIdx = BC_STATUS_FLOW.indexOf(b.status);
       var nextStatus = currentIdx >= 0 && currentIdx < BC_STATUS_FLOW.length - 1 ? BC_STATUS_FLOW[currentIdx + 1] : null;
@@ -1497,6 +1547,8 @@
           }).join("") +
         '</div>' +
         '<div class="card">' +
+          // 基本信息分组
+          '<h3 style="margin:0 0 16px 0;font-size:15px;color:#374151;border-bottom:1px solid var(--border-color);padding-bottom:8px;">📋 基本信息</h3>' +
           '<div class="form-row">' +
             '<div class="field" style="flex:2"><label>标题</label><input id="bc-title" value="' + esc(b.title) + '"></div>' +
             '<div class="field"><label>严重度</label><select id="bc-severity">' + sevOpts + "</select></div>" +
@@ -1507,6 +1559,8 @@
             '<div class="field"><label>后端</label><input id="bc-agent" value="' + esc(b.agent_id) + '"></div>' +
             '<div class="field"><label>分类</label><select id="bc-category">' + catOpts + "</select></div>" +
           "</div>" +
+          // 问题详情分组
+          '<h3 style="margin:24px 0 16px 0;font-size:15px;color:#374151;border-bottom:1px solid var(--border-color);padding-bottom:8px;">🐛 问题详情</h3>' +
           '<div class="field"><label>问题描述</label><textarea id="bc-desc" rows="4">' + esc(b.description) + "</textarea></div>" +
           '<div class="field"><label>根因分析</label><textarea id="bc-root" rows="3" placeholder="分析 badcase 的根本原因...">' + esc(b.root_cause || "") + "</textarea></div>" +
           '<div class="field"><label>修复方案</label><textarea id="bc-fix" rows="3" placeholder="记录修复方案或改进措施...">' + esc(b.fix_plan || "") + "</textarea></div>" +
@@ -1517,8 +1571,15 @@
             flowBtns +
             convertBtn +
             memoryBtn +
+            analyzeBtn +
+            exportBtn +
             runLink +
             '<button class="btn danger" id="bc-delete" style="margin-left:auto">删除</button>' +
+          "</div>" +
+          // 智能分析结果区域
+          '<div id="bc-analyze-section" style="margin-top:24px;border-top:2px solid var(--border-color);padding-top:20px;display:none;">' +
+            '<h3 style="margin-bottom:12px;">🤖 智能分析结果</h3>' +
+            '<div id="bc-analyze-content" style="white-space:pre-wrap;line-height:1.8;background:var(--card-bg);padding:20px;border-radius:8px;border:1px solid var(--border-color);"></div>' +
           "</div>" +
           '<div id="bc-msg"></div>' +
           // 回归对比报告区域
@@ -1543,6 +1604,22 @@
         "</div>"
       );
       el("bc-save").onclick = function () { saveBadcase(bid); };
+      
+      // 智能分析按钮
+      var analyzeBtnEl = el("bc-analyze");
+      if (analyzeBtnEl) {
+        analyzeBtnEl.onclick = function () {
+          analyzeBadcase(bid);
+        };
+      }
+      
+      // 导出按钮
+      var exportBtnEl = el("bc-export");
+      if (exportBtnEl) {
+        exportBtnEl.onclick = function () {
+          exportBadcase(bid, b);
+        };
+      }
       // 状态流转快捷按钮
       var flowNextBtn = el("bc-flow-next");
       if (flowNextBtn) {
@@ -1672,6 +1749,126 @@
   }
 
   // 加载 Badcase 回归对比报告
+  function renderMarkdown(text) {
+    if (!text) return '';
+    var html = esc(text);
+    // 加粗
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    // 标题
+    html = html.replace(/^(#{1,6}) (.*?)$/gm, '<h4 style="margin:16px 0 8px 0;color:#1e40af;">$2</h4>');
+    // 列表
+    html = html.replace(/^(\d+\. .*)$/gm, '<div style="padding-left:16px;">$1</div>');
+    // 换行
+    html = html.replace(/\n/g, '<br>');
+    return html;
+  }
+
+  function exportBadcase(bid, b) {
+    var content = `# Badcase 报告
+
+**ID:** ${b.id}
+**标题:** ${b.title}
+**任务:** ${b.task_id}
+**Agent:** ${b.agent_id}
+**严重度:** ${b.severity}
+**状态:** ${b.status}
+**分类:** ${BC_CATEGORY_LABELS[b.category] || b.category}
+**创建时间:** ${new Date(b.created_at).toLocaleString('zh-CN')}
+
+---
+
+## 问题描述
+
+${b.description}
+
+---
+
+## 根因分析
+
+${b.root_cause || '暂无'}
+
+---
+
+## 修复方案
+
+${b.fix_plan || '暂无'}
+`;
+    
+    var blob = new Blob([content], {type: 'text/markdown'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = `badcase_${b.id}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function analyzeBadcase(bid) {
+    var section = document.getElementById('bc-analyze-section');
+    var content = document.getElementById('bc-analyze-content');
+    var btn = document.getElementById('bc-analyze');
+    
+    section.style.display = 'block';
+    content.innerHTML = '<div style="text-align:center;padding:40px;"><div style="display:inline-block;width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;"></div><div style="margin-top:16px;color:var(--text-muted);">AI 正在分析 badcase...</div></div>';
+    btn.disabled = true;
+    btn.innerHTML = '⏳ 分析中...';
+    
+    fetch('/api/badcases/' + bid + '/analyze', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'}
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      btn.disabled = false;
+      btn.innerHTML = '🤖 智能分析';
+      
+      if (data.error) {
+        content.innerHTML = '<div style="color:#dc2626;">❌ 分析失败: ' + esc(data.error) + '</div>';
+        return;
+      }
+      
+      content.innerHTML = renderMarkdown(data.analysis || '暂无分析结果');
+    })
+    .catch(function(e) {
+      btn.disabled = false;
+      btn.innerHTML = '🤖 智能分析';
+      content.innerHTML = '<div style="color:#dc2626;">❌ 请求失败: ' + esc(e.message) + '</div>';
+    });
+  }
+
+  function updateBulkBar() {
+    var checked = document.querySelectorAll('.bc-checkbox:checked');
+    var bar = document.getElementById('bc-bulk-bar');
+    var count = document.getElementById('bc-selected-count');
+    if (bar && count) {
+      count.textContent = checked.length;
+      bar.style.display = checked.length > 0 ? 'flex' : 'none';
+    }
+  }
+
+  function bulkDeleteBadcases() {
+    var checked = document.querySelectorAll('.bc-checkbox:checked');
+    if (!checked.length) {
+      alert('请先选择要删除的 badcase');
+      return;
+    }
+    if (!confirm('确定要删除选中的 ' + checked.length + ' 条 badcase 吗？此操作不可恢复。')) {
+      return;
+    }
+    
+    var ids = Array.from(checked).map(function(cb) { return cb.value; });
+    var promises = ids.map(function(id) {
+      return fetch('/api/badcases/' + id, { method: 'DELETE' });
+    });
+    
+    Promise.all(promises).then(function() {
+      alert('已删除 ' + ids.length + ' 条 badcase');
+      loadBadcases();
+    }).catch(function(e) {
+      alert('删除失败: ' + e.message);
+    });
+  }
+
   function loadBadcaseRegression(bid) {
     var container = el("bc-regression-content");
     if (!container) return;
@@ -4033,61 +4230,311 @@
   function viewAgent() {
     renderHTML(`
       <div class="page-header">
-        <h2>智能评测</h2>
+        <h2>🤖 智能评测</h2>
         <p class="page-desc">用自然语言描述你的评测需求，AI 会自动帮你完成评测闭环</p>
       </div>
-      <div class="agent-box">
-        <textarea id="agent-input" placeholder="例如：帮我对比 minimal-react 和 claude-code 在 L1 任务上的表现，跑 1 次" rows="3" style="width:100%;padding:12px;border:1px solid var(--border);border-radius:8px;font-size:14px;resize:vertical;"></textarea>
-        <div style="margin-top:12px;display:flex;gap:8px;">
-          <button id="agent-run" class="btn btn-primary">开始评测</button>
-          <button id="agent-clear" class="btn btn-ghost">清空</button>
+
+      <!-- 欢迎卡片 -->
+      <div class="card" style="margin-bottom:20px;padding:20px;background:linear-gradient(135deg, var(--bg-soft), var(--card-bg));border:1px solid var(--border);border-radius:12px;">
+        <h3 style="margin:0 0 12px 0;font-size:16px;">✨ 我能帮你做什么？</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:12px;">
+          <div style="padding:12px;background:var(--card-bg);border-radius:8px;border:1px solid var(--border);">
+            <div style="font-size:20px;margin-bottom:8px;">🔍</div>
+            <div style="font-weight:600;margin-bottom:4px;">查任务/Agent</div>
+            <div style="font-size:13px;color:var(--text-muted);">列出评测任务和可评测的 Agent 后端</div>
+          </div>
+          <div style="padding:12px;background:var(--card-bg);border-radius:8px;border:1px solid var(--border);">
+            <div style="font-size:20px;margin-bottom:8px;">🚀</div>
+            <div style="font-weight:600;margin-bottom:4px;">跑评测</div>
+            <div style="font-size:13px;color:var(--text-muted);">对指定任务 × 指定 Agent 批量执行评测</div>
+          </div>
+          <div style="padding:12px;background:var(--card-bg);border-radius:8px;border:1px solid var(--border);">
+            <div style="font-size:20px;margin-bottom:8px;">📊</div>
+            <div style="font-weight:600;margin-bottom:4px;">出结论</div>
+            <div style="font-size:13px;color:var(--text-muted);">对比多个 Agent 的通过率、得分、耗时、成本</div>
+          </div>
         </div>
       </div>
+
+      <!-- 示例提示 -->
+      <div style="margin-bottom:16px;">
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">💡 试试这些示例：</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          <button class="example-btn" data-example="对比 claude-code 和 deepseek-harness 在 L1 任务上的表现" style="padding:6px 12px;font-size:13px;border:1px solid var(--border);border-radius:16px;background:var(--card-bg);cursor:pointer;color:var(--text);">📊 对比两个 Agent</button>
+          <button class="example-btn" data-example="跑一下所有 L3 难度任务的评测" style="padding:6px 12px;font-size:13px;border:1px solid var(--border);border-radius:16px;background:var(--card-bg);cursor:pointer;color:var(--text);">🎯 跑指定难度任务</button>
+          <button class="example-btn" data-example="看看平台整体统计和成本情况" style="padding:6px 12px;font-size:13px;border:1px solid var(--border);border-radius:16px;background:var(--card-bg);cursor:pointer;color:var(--text);">📈 查看平台统计</button>
+          <button class="example-btn" data-example="帮我分析一下最近的 badcase 有什么规律" style="padding:6px 12px;font-size:13px;border:1px solid var(--border);border-radius:16px;background:var(--card-bg);cursor:pointer;color:var(--text);">🐛 分析 Badcase</button>
+        </div>
+      </div>
+
+      <!-- 输入框 -->
+      <div class="agent-box" style="background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:16px;">
+        <textarea id="agent-input" placeholder="例如：帮我对比 minimal-react 和 claude-code 在 L1 任务上的表现，跑 1 次" rows="3" style="width:100%;padding:12px;border:1px solid var(--border);border-radius:8px;font-size:14px;resize:vertical;background:var(--bg-input);color:var(--text);"></textarea>
+        <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
+          <button id="agent-run" class="btn btn-primary">🚀 开始评测</button>
+          <button id="agent-clear" class="btn btn-ghost">🗑️ 清空</button>
+        </div>
+      </div>
+
+      <!-- 结果区域 -->
       <div id="agent-result" style="margin-top:24px;"></div>
+
+      <!-- 对话历史 -->
+      <div id="agent-history" style="margin-top:32px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <h3 style="margin:0;font-size:16px;">📜 对话历史</h3>
+          <button id="agent-clear-history" class="btn btn-ghost" style="font-size:13px;padding:4px 12px;">🗑️ 清空历史</button>
+        </div>
+        <div id="agent-history-list" style="display:flex;flex-direction:column;gap:8px;">
+          <div style="color:var(--text-muted);font-size:14px;padding:16px;text-align:center;">暂无历史记录</div>
+        </div>
+      </div>
     `);
+
+    // 示例按钮点击事件
+    document.querySelectorAll('.example-btn').forEach(function(btn) {
+      btn.onclick = function() {
+        document.getElementById('agent-input').value = this.getAttribute('data-example');
+        document.getElementById('agent-input').focus();
+      };
+    });
+
     document.getElementById('agent-run').onclick = runAgent;
     document.getElementById('agent-clear').onclick = function() {
       document.getElementById('agent-input').value = '';
       document.getElementById('agent-result').innerHTML = '';
     };
+
+    // 加载对话历史
+    loadAgentHistory();
+
+    // 清空历史按钮
+    document.getElementById('agent-clear-history').onclick = function() {
+      if (confirm('确定要清空所有对话历史吗？')) {
+        agentHistory = [];
+        localStorage.removeItem('agentHistory');
+        loadAgentHistory();
+      }
+    };
+  }
+
+  // 对话历史存储
+  var agentHistory = JSON.parse(localStorage.getItem('agentHistory') || '[]');
+
+  function saveAgentHistory(query, result) {
+    agentHistory.unshift({
+      id: Date.now(),
+      query: query,
+      result: result,
+      time: new Date().toLocaleString('zh-CN')
+    });
+    // 最多保存 20 条
+    if (agentHistory.length > 20) agentHistory.pop();
+    localStorage.setItem('agentHistory', JSON.stringify(agentHistory));
+  }
+
+  function loadAgentHistory() {
+    var listEl = document.getElementById('agent-history-list');
+    if (!listEl) return;
+    
+    if (agentHistory.length === 0) {
+      listEl.innerHTML = '<div style="color:var(--text-muted);font-size:14px;padding:16px;text-align:center;">暂无历史记录</div>';
+      return;
+    }
+    
+    listEl.innerHTML = agentHistory.map(function(item, i) {
+      return `
+        <div style="padding:12px;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;hover:background:var(--bg-soft);" onclick="showAgentHistory(${i})">
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:4px;">${item.time}</div>
+          <div style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(item.query)}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function showAgentHistory(index) {
+    var item = agentHistory[index];
+    if (!item) return;
+    
+    document.getElementById('agent-input').value = item.query;
+    document.getElementById('agent-result').innerHTML = item.result;
+  }
+
+  function exportAgentResult() {
+    if (!window.currentAgentResult) {
+      alert('没有可导出的结果');
+      return;
+    }
+    var r = window.currentAgentResult;
+    var content = `# 智能评测报告
+
+**时间：** ${r.time}
+**问题：** ${r.query}
+
+## 最终结论
+
+${r.final_answer}
+
+## 执行轨迹
+
+${(r.trajectory || []).map(function(step, i) {
+  return `### 第 ${i+1} 步
+- **思考：** ${step.thought || ''}
+- **调用工具：** ${step.action || ''}
+`;
+}).join('\n')}
+`;
+    
+    var blob = new Blob([content], {type: 'text/markdown'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = `评测报告_${Date.now()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function copyAgentResult() {
+    if (!window.currentAgentResult) {
+      alert('没有可复制的结果');
+      return;
+    }
+    navigator.clipboard.writeText(window.currentAgentResult.final_answer).then(function() {
+      alert('结论已复制到剪贴板');
+    });
   }
 
   function runAgent() {
     var query = document.getElementById('agent-input').value.trim();
-    if (!query) return;
+    if (!query) {
+      alert('请输入评测需求');
+      return;
+    }
     var resultEl = document.getElementById('agent-result');
-    resultEl.innerHTML = '<div class="loading">AI 正在思考并执行评测...</div>';
+    var runBtn = document.getElementById('agent-run');
+    
+    // 禁用按钮，显示加载状态
+    runBtn.disabled = true;
+    runBtn.innerHTML = '⏳ 评测中...';
+    
+    // 初始化结果容器
+    resultEl.innerHTML = `
+      <div class="agent-trajectory" style="background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px;">
+        <h3 style="margin:0 0 16px 0;font-size:16px;">📋 执行轨迹</h3>
+        <div id="agent-steps"></div>
+        <div style="padding:40px;text-align:center;" id="agent-loading">
+          <div style="display:inline-block;width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;"></div>
+          <div style="margin-top:16px;color:var(--text-muted);">AI 正在思考并执行评测...</div>
+        </div>
+      </div>
+      <style>
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      </style>
+    `;
+    
+    var stepsEl = document.getElementById('agent-steps');
+    var loadingEl = document.getElementById('agent-loading');
+    var stepCount = 0;
+    var trajectory = [];
+    var finalAnswer = '';
 
-    fetch('/api/agent/run', {
+    // 使用 fetch 读取流式响应
+    fetch('/api/agent/run-stream', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({query: query})
     })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.error) {
-        resultEl.innerHTML = '<div class="error">' + esc(data.error) + '</div>';
-        return;
+    .then(function(response) {
+      var reader = response.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+
+      function read() {
+        return reader.read().then(function({done, value}) {
+          if (done) {
+            // 流结束，保存历史
+            var html = resultEl.innerHTML;
+            window.currentAgentResult = {
+              query: query,
+              final_answer: finalAnswer,
+              trajectory: trajectory,
+              time: new Date().toLocaleString('zh-CN')
+            };
+            saveAgentHistory(query, html);
+            loadAgentHistory();
+            return;
+          }
+
+          buffer += decoder.decode(value, {stream: true});
+          var lines = buffer.split('\n\n');
+          buffer = lines.pop();
+
+          lines.forEach(function(line) {
+            if (line.startsWith('data: ')) {
+              try {
+                var data = JSON.parse(line.slice(6));
+                
+                if (data.type === 'step') {
+                  stepCount++;
+                  trajectory.push(data.data);
+                  loadingEl.style.display = 'none';
+                  
+                  var stepHtml = '<div style="margin:12px 0;padding:16px;border-left:3px solid var(--accent);background:var(--bg-soft);border-radius:0 8px 8px 0;">';
+                  stepHtml += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;font-weight:600;">第 ' + stepCount + ' 步</div>';
+                  if (data.data.thought) stepHtml += '<div style="margin-bottom:8px;"><span style="font-weight:600;">💭 思考：</span>' + esc(data.data.thought) + '</div>';
+                  if (data.data.action) stepHtml += '<div style="margin-bottom:8px;"><span style="font-weight:600;">🔧 调用工具：</span><code style="padding:2px 6px;background:var(--card-bg);border-radius:4px;font-size:13px;">' + esc(data.data.action) + '</code></div>';
+                  if (data.data.observation) stepHtml += '<pre style="margin-top:8px;padding:12px;background:var(--card-bg);border-radius:6px;font-size:12px;overflow-x:auto;max-height:300px;overflow-y:auto;">' + esc(JSON.stringify(data.data.observation, null, 2)) + '</pre>';
+                  stepHtml += '</div>';
+                  
+                  stepsEl.insertAdjacentHTML('beforeend', stepHtml);
+                } else if (data.type === 'final') {
+                  finalAnswer = data.data.final_answer;
+                  loadingEl.style.display = 'none';
+                  
+                  var finalHtml = '<div class="agent-final" style="padding:20px;background:linear-gradient(135deg, #ecfdf5, #f0fdf4);border:1px solid #bbf7d0;border-radius:12px;">';
+                  finalHtml += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">';
+                  finalHtml += '<h3 style="margin:0;font-size:16px;color:#166534;">✅ 最终结论</h3>';
+                  finalHtml += '<div style="display:flex;gap:8px;">';
+                  finalHtml += '<button class="btn btn-ghost" style="font-size:13px;padding:4px 12px;" onclick="exportAgentResult()">📤 导出结果</button>';
+                  finalHtml += '<button class="btn btn-ghost" style="font-size:13px;padding:4px 12px;" onclick="copyAgentResult()">📋 复制结论</button>';
+                  finalHtml += '</div></div>';
+                  finalHtml += '<div style="white-space:pre-wrap;line-height:1.6;color:#14532d;">' + esc(data.data.final_answer) + '</div>';
+                  finalHtml += '</div>';
+                  
+                  resultEl.insertAdjacentHTML('beforeend', finalHtml);
+                }
+              } catch (e) {
+                console.error('解析 SSE 数据失败:', e);
+              }
+            }
+          });
+
+          return read();
+        });
       }
-      var html = '<div class="agent-trajectory">';
-      html += '<h3>执行轨迹</h3>';
-      (data.trajectory || []).forEach(function(step, i) {
-        html += '<div class="step" style="margin:12px 0;padding:12px;border-left:3px solid var(--accent);background:var(--bg-soft);border-radius:0 8px 8px 0;">';
-        html += '<div class="step-num" style="font-size:12px;color:var(--text-muted);">第 ' + (i+1) + ' 步</div>';
-        html += '<div class="step-thought"><b>思考：</b>' + esc(step.thought || '') + '</div>';
-        if (step.action) html += '<div class="step-action" style="margin-top:4px;"><b>调用工具：</b>' + esc(step.action) + '</div>';
-        if (step.observation) html += '<pre style="margin-top:8px;font-size:12px;overflow-x:auto;">' + esc(JSON.stringify(step.observation, null, 2)) + '</pre>';
-        html += '</div>';
-      });
-      html += '</div>';
-      html += '<div class="agent-final" style="margin-top:24px;padding:16px;background:var(--bg-soft);border-radius:8px;">';
-      html += '<h3>最终结论</h3>';
-      html += '<div style="white-space:pre-wrap;">' + esc(data.final_answer || '') + '</div>';
-      html += '</div>';
-      resultEl.innerHTML = html;
+
+      return read();
+    })
+    .then(function() {
+      // 恢复按钮
+      runBtn.disabled = false;
+      runBtn.innerHTML = '🚀 开始评测';
     })
     .catch(function(e) {
-      resultEl.innerHTML = '<div class="error">请求失败：' + esc(e.message) + '</div>';
+      // 恢复按钮
+      runBtn.disabled = false;
+      runBtn.innerHTML = '🚀 开始评测';
+      
+      resultEl.innerHTML = `
+        <div style="padding:20px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;color:#991b1b;">
+          <div style="font-weight:600;margin-bottom:8px;">❌ 请求失败</div>
+          <div style="font-size:14px;">${esc(e.message)}</div>
+          <div style="margin-top:8px;font-size:13px;">请检查网络连接或稍后重试</div>
+        </div>
+      `;
     });
   }
 

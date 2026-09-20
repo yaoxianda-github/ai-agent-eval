@@ -2,7 +2,7 @@
 
 > 通用 AI Agent 评测框架（可分享、可复用）
 > 仓库：https://github.com/yaoxianda-github/ai-agent-eval
-> 最后更新：2026-09-04（**MVP 7/7 + V2.0 3/3 完成；V2.1 pytest 56 全绿；V2.2 已验证通过（67 全绿 + T502/T601 真实运行）**）
+> 最后更新：2026-09-20（**V2.9 轨迹评分 + 自动重试 + 异步并发 + 版本对比 + Badcase 智能分析 + 经验记忆**）
 
 ## 冲刺进度
 
@@ -70,8 +70,55 @@
 - **V2.0（已推送）**：71b67bf Day1 单测+Day2 沙箱 · ea36faf Windows 清理竞态 · ac66575 V2 计划+Day2 收尾
 - **待提交（工作树积压）**：V2.0-Day3 多 run 采样 / V2.1 全部（web/ + tests/test_web.py + pyproject + README + V2_PLAN + PROGRESS）/ V2.2（judge.py + observability.py + T601 + 一键启动 + 测试 + 文档）
 
+## V2.3 CI 质量门禁与成本核算（2026-09-05 ~ 09-08）
+
+- **`agent-eval ci` 无头命令**：`ci.py` 支持 `--gate core/full`、`--junit-xml`、`--allure-dir`、`--agent`，按 `ci/gate.yaml` 执行卡口，通过率不达标退出码非 0
+- **JUnit XML + Allure 报告**：标准测试报告格式，GitHub Actions 直接消费
+- **合并阻断验证**：演示仓库 `agent-eval-demo` 实跑 workflow，core 包通过率不达标自动阻断 PR 合并（`--gate core` 正式卡口）
+- **成本核算**：`costing.py` 预计成本（任务级 token 模型）+ `balance.py` 实际成本（DeepSeek 余额差分），工作台与 CI 报告均展示
+- **多 Agent 对比门禁**：gate 配置 `agents:` 列表，每 Agent 独立跑同一任务集，全部达标才 PASS
+
+## V2.4 轨迹回放与 RAG 真实检索（2026-09-08 ~ 09-10）
+
+- **轨迹回放面板**：运行详情以时间线展示全链路（输入意图 → 知识/检索 → 模型生成 → 工具执行），支持类型过滤与展开
+- **RAG 真实检索**：`search_kb` 工具（BM25 检索）替代文件读取式伪检索，T701/T702 带干扰项知识库
+- **dsh 黑盒模型层**：解析隔离 DSH_HOME 下 `session.jsonl.zstd`，还原模型 reasoning / 工具决策 / 最终输出
+- **Langfuse 可选分析层**：`AGENT_EVAL_TRACE=langfuse` 时 LLM 调用同步云端
+
+## V2.5 ~ V2.8 工程化与商业化（2026-09-10 ~ 09-15）
+
+- **V2.5**：search_kb 升级 BM25（k1=1.5, b=0.75），T701/T702 纳入 core 卡口（12 任务）
+- **V2.6 统一日志体系**：控制台 + 文件双输出，单文件超 10MB 按时间戳切割，每次运行独立 `run.log`
+- **V2.7 多 Agent 对比矩阵**：批次模型发起 N 个 Agent × 任务集 × runs 对比，彩色矩阵 + 下钻 + CSV 导出；License 社区/Pro 收费墙（Open Core）
+- **V2.8 API Key 智能管理**：Web 设置页可视化配置写入 `.env`，优先级高于系统环境变量；`.env` 无效时自动回退 `~/.zshrc`；发起对比前自动预检 Key 连通性；claude-code 代理支持；对比批次随时取消；Badcase 管理模块（标记、分类、转化回归用例）；10+ 后端接入（claude-code / codex / hermes / kimi / qoder / trae / workbuddy）
+
+## V2.9 评分升级与工程能力（2026-09-16 ~ 09-20）
+
+- **三层评分体系**：规则评分 70% + 轨迹效率 30%（步数 40% + 错误数 40% + 重复调用 20%），`scoring.py` 新增 `score_trajectory()`，`score_task()` 输出综合得分
+- **自动重试机制**：`runner.py` 默认重试 1 次，针对 timeout/error 自动重试，重试前清空 workspace 产物，等待 1 秒后重试
+- **异步并发执行**：`web/app.py` 使用 ThreadPoolExecutor，默认并发数 3（环境变量 `EVAL_CONCURRENCY` 配置），单个任务失败不影响其他任务
+- **版本对比报告**：`reporter.py` 新增 `compare_versions()` 函数，支持两个版本的任务得分对比
+- **HTML 报告导出**：新增 `/api/matrix/export_html` 接口，导出自包含 HTML 格式对比报告
+- **Badcase 智能分析**：Bug 分析工作流（现象→影响→根因→修复→回归→风险→确认），`/api/badcases/{id}/analyze`
+- **经验记忆沉淀**：Badcase 自动沉淀为经验记忆，支持召回、自动管理、质量统计
+- **智能评测流式输出**：`/api/eval-agent/stream` SSE 流式输出评测过程
+- **任务包管理**：任务包 CRUD、安装、删除接口
+- **UI/UX 持续优化**：运行历史快捷筛选（只看失败/今天/claude-code）、首页/尾页快捷按钮、时间格式标准化、对比矩阵页面布局调整、5 套配色主题切换
+
+## 当前能力总览
+
+- **任务**：42+ 评测任务，L1-L5 五级难度，含 file/data/rag/code/sec 等标签
+- **后端**：10+ Agent 后端（minimal-react / deepseek-harness / claude-code / aider / codex / hermes / kimi / qoder / trae / workbuddy）
+- **评分**：三层评分（规则 70% + 轨迹效率 30%）+ LLM Judge 语义判分
+- **报告**：自包含 HTML + CSV + JUnit XML + Allure
+- **CI/CD**：`agent-eval ci` 无头命令 + GitHub Actions 合并阻断
+- **商业化**：Open Core，社区版/Pro License 分档
+
 ## 下一步
 
-- **V2.2 验收**：`pytest` 预期 67 全绿 → T502 真实判分（需 DEEPSEEK_API_KEY）→ T601 真实运行 → 工作台端到端 → git 分三笔提交推送（Day3 / V2.1 / V2.2）
-- **V2.2 未做项**（黑盒采集、插件注册表、Docker 沙箱、pip 发布）：按需评估
-- **V2.3 候选**：更多后端横向基准、插件注册表、pip 发布
+- **团队回归看板（功能 B）**：Badcase 自动转化回归用例，定期自动跑，跟踪修复效果
+- **桌面端黑盒采集器**：豆包工作 / WorkBuddy 等桌面 Agent 的行为采集
+- **插件注册表**：后端插件化，第三方 Agent 无需改框架即可接入
+- **Docker 沙箱隔离**：评测任务在容器内执行，避免污染宿主环境
+- **pip 发布**：正式发布到 PyPI
+- **混合检索增强**：BM25 + 向量检索混合召回，提升 RAG 评测真实性
