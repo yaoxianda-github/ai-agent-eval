@@ -1722,6 +1722,36 @@ def create_app(
         return {"id": bid, "message": "已从运行记录导入 badcase", "category": category, "severity": severity,
                 "root_cause": root_cause, "fix_plan": fix_plan}
 
+
+    # V4.5 P1：批量 Badcase 归因分析（Jev 快速批量分析）
+    @app.post("/api/badcases/batch-analyze")
+    def api_batch_analyze_badcases(payload: dict = Body(...)) -> dict:
+        """批量分析 badcase，使用 Jev 一次调用分析多个 badcase。
+
+        请求体: {"badcase_ids": ["bid1", "bid2", ...], "max_batch": 20}
+        """
+        from agent_eval.jev_judge import batch_analyze_badcases
+
+        badcase_ids = payload.get("badcase_ids", [])
+        max_batch = int(payload.get("max_batch", 20))
+
+        if not badcase_ids:
+            raise HTTPException(status_code=400, detail="缺少 badcase_ids")
+
+        # 获取 badcase 详情
+        badcases = []
+        for bid in badcase_ids:
+            bc = store.get_badcase(bid)
+            if bc:
+                badcases.append(bc)
+
+        if not badcases:
+            raise HTTPException(status_code=404, detail="未找到任何有效的 badcase")
+
+        # 调用 Jev 批量分析
+        result = batch_analyze_badcases(badcases, max_batch=max_batch)
+
+        return result
     @app.post("/api/badcases/{bid}/convert-to-task")
     def api_convert_badcase_to_task(bid: str, payload: dict = Body(...)) -> dict:
         """将 badcase 转化为回归评测用例：生成 spec.yaml 并更新 badcase 关联。
