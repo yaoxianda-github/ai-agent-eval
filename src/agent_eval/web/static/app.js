@@ -1314,9 +1314,12 @@
           // 批量操作工具栏
           '<div id="bc-bulk-bar" style="display:none;padding:12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;margin-bottom:16px;display:flex;align-items:center;gap:12px;">' +
             '<span style="font-weight:600;color:#0c4a6e;">已选择 <span id="bc-selected-count">0</span> 条</span>' +
+            '<button class="btn secondary small" id="bc-bulk-analyze" style="background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;">批量智能分析</button>' +
             '<button class="btn secondary small" id="bc-bulk-delete" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;">批量删除</button>' +
             '<button class="btn secondary small" id="bc-bulk-close">取消选择</button>' +
           "</div>" +
+          // 批量分析报告区域
+          '<div id="bc-analysis-report" style="display:none;margin-bottom:16px;"></div>' +
           '<div id="bc-stats" class="bc-stats"></div>' +
           '<div id="bc-list"><div class="empty">加载中…</div></div>' +
         "</div>"
@@ -1333,6 +1336,11 @@
       }
       el("bc-tab-all").onclick = function () { bcTab = "all"; bcPage = 0; viewBadcases(); };
       el("bc-tab-regression").onclick = function () { bcTab = "regression"; bcPage = 0; viewBadcases(); };
+      // V4.5 P1：批量分析按钮
+      var bulkAnalyzeBtn = el("bc-bulk-analyze");
+      if (bulkAnalyzeBtn) {
+        bulkAnalyzeBtn.onclick = bulkAnalyzeBadcases;
+      }
       loadBadcases();
     }).catch(function (e) { renderErr(e.message); });
   }
