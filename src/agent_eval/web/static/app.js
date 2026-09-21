@@ -395,6 +395,31 @@
         "</div>" +
         '<div id="run-result"></div>' +
         '<div class="card" style="margin-top:20px;">' +
+          '<h3>评测置信度概览 <span class="tl-note">V4.5 P2 · 结果可信度评估</span></h3>' +
+          '<div id="confidence-overview" style="display:flex;gap:16px;">' +
+            '<div style="flex:1;padding:16px;border-radius:8px;background:#f0fdf4;border-left:4px solid #22c55e;">' +
+              '<div style="font-size:12px;color:#6b7280;">高置信度</div>' +
+              '<div style="font-size:28px;font-weight:700;color:#22c55e;" id="conf-high">—</div>' +
+              '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">score ≥ 0.8</div>' +
+            '</div>' +
+            '<div style="flex:1;padding:16px;border-radius:8px;background:#fffbeb;border-left:4px solid #f59e0b;">' +
+              '<div style="font-size:12px;color:#6b7280;">中置信度</div>' +
+              '<div style="font-size:28px;font-weight:700;color:#f59e0b;" id="conf-medium">—</div>' +
+              '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">score 0.5 - 0.8</div>' +
+            '</div>' +
+            '<div style="flex:1;padding:16px;border-radius:8px;background:#fef2f2;border-left:4px solid #ef4444;">' +
+              '<div style="font-size:12px;color:#6b7280;">低置信度</div>' +
+              '<div style="font-size:28px;font-weight:700;color:#ef4444;" id="conf-low">—</div>' +
+              '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">score < 0.5（需验证）</div>' +
+            '</div>' +
+            '<div style="flex:1;padding:16px;border-radius:8px;background:#eff6ff;border-left:4px solid #3b82f6;">' +
+              '<div style="font-size:12px;color:#6b7280;">平均置信度</div>' +
+              '<div style="font-size:28px;font-weight:700;color:#3b82f6;" id="conf-avg">—</div>' +
+              '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">所有运行平均</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="card" style="margin-top:20px;">' +
           '<h3>Agent 质量四维雷达图 <span class="tl-note">结果/过程/效率/风险 四层评测体系</span></h3>' +
           '<div id="four-dim-radar"><div class="empty">加载中…</div></div>' +
         '</div>' +
@@ -412,6 +437,7 @@
       loadRecentRuns();
       loadBadcaseOverview();
       loadFourDimRadar();
+      loadConfidenceOverview();
     }).catch(function (e) { renderErr(e.message); });
   }
 
@@ -431,10 +457,13 @@
           '<td class="col-agent">' + esc(r.agent_id) + "</td>" +
           '<td><span style="color:' + statusColor + ';font-weight:600;">' + esc(r.status) + "</span></td>" +
           '<td class="col-score">' + esc(r.score != null ? r.score : "—") + "</td>" +
+          (r.confidence_score !== null && r.confidence_score !== undefined
+            ? '<td><span style="color:' + (r.confidence_level === "high" ? "#22c55e" : r.confidence_level === "medium" ? "#f59e0b" : "#ef4444") + ';font-weight:600;">' + r.confidence_score.toFixed(2) + '</span></td>'
+            : '<td>—</td>') +
           '<td class="col-duration">' + fmtDur(r.duration_s) + "</td>" +
           "</tr>";
       }).join("");
-      box.innerHTML = '<table><tr><th>时间</th><th>run_id</th><th>任务</th><th>后端</th><th>状态</th><th>score</th><th>时长</th></tr>' + rows + "</table>";
+      box.innerHTML = '<table><tr><th>时间</th><th>run_id</th><th>任务</th><th>后端</th><th>状态</th><th>score</th><th>置信度</th><th>时长</th></tr>' + rows + "</table>";
       box.querySelectorAll("tr.clickable").forEach(function (tr) {
         tr.onclick = function () { location.hash = "#/run/" + tr.getAttribute("data-rid"); };
       });
