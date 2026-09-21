@@ -395,6 +395,10 @@
         "</div>" +
         '<div id="run-result"></div>' +
         '<div class="card" style="margin-top:20px;">' +
+          '<h3>Agent 质量四维雷达图 <span class="tl-note">结果/过程/效率/风险 四层评测体系</span></h3>' +
+          '<div id="four-dim-radar"><div class="empty">加载中…</div></div>' +
+        '</div>' +
+        '<div class="card" style="margin-top:20px;">' +
           '<h3 class="card-title-with-action">最近运行记录 <span class="muted">最新 10 条</span>' +
             '<span class="card-action"><a class="btn secondary small" href="#/history">查看全部 →</a></span></h3>' +
           '<div id="home-recent-runs"><div class="empty">加载中...</div></div>' +
@@ -407,6 +411,7 @@
       el("btn-run").onclick = startRun;
       loadRecentRuns();
       loadBadcaseOverview();
+      loadFourDimRadar();
     }).catch(function (e) { renderErr(e.message); });
   }
 
@@ -3953,6 +3958,8 @@ ${b.fix_plan || '暂无'}
       '<div id="radar-container"><div class="empty">加载中…</div></div></div>' +
       '<div class="card"><h3>性能-成本分析 <span class="tl-note">帕累托前沿：同等成本下得分最高的配置</span></h3>' +
       '<div id="scatter-container"><div class="empty">加载中…</div></div></div>' +
+      '<div class="card"><h3>指标解释链 <span class="tl-note">三层指标因果关系：模型能力 → 任务完成 → 业务影响</span></h3>' +
+      '<div id="explanation-chain-container"><div class="empty">加载中…</div></div></div>' +
       '<div class="card"><button class="btn" id="btn-gen-report">生成报告</button> ' +
       '<span class="muted">复用引擎 reporter 生成自包含 HTML（离线可看）</span></div>' +
       '<iframe id="report-frame" style="width:100%;height:70vh;border:1px solid #E4E3DD;border-radius:12px;background:#fff;"></iframe>'
@@ -3962,9 +3969,11 @@ ${b.fix_plan || '暂无'}
       var runs = data.runs || data || [];
       el("radar-container").innerHTML = capabilityRadar(runs);
       el("scatter-container").innerHTML = costPerformanceScatter(runs);
+      el("explanation-chain-container").innerHTML = explanationChain(runs);
     }).catch(function() {
       el("radar-container").innerHTML = '<div class="empty">加载运行数据失败</div>';
       el("scatter-container").innerHTML = '<div class="empty">加载运行数据失败</div>';
+      el("explanation-chain-container").innerHTML = '<div class="empty">加载运行数据失败</div>';
     });
     var frame = el("report-frame");
     frame.src = "/reports/report.html";
@@ -4696,3 +4705,193 @@ ${(r.trajectory || []).map(function(step, i) {
 
   router();
 })();
+
+  // V4.4 P1：指标解释链——三层指标因果关系可视化
+  function explanationChain(runs) {
+    if (!runs || runs.length === 0) return '<div class="empty">暂无数据</div>';
+    
+    // 按 agent 分组统计
+    var byAgent = {};
+    runs.forEach(function(r) {
+      var agent = r.agent || "unknown";
+      if (!byAgent[agent]) byAgent[agent] = [];
+      byAgent[agent].push(r);
+    });
+    
+    // 计算每个 agent 的三层指标
+    var agentMetrics = Object.keys(byAgent).map(function(agent) {
+      var rs = byAgent[agent];
+      var total = rs.length;
+      var passed = rs.filter(function(r) { return r.passed; }).length;
+      var passRate = total > 0 ? (passed / total * 100).toFixed(1) : 0;
+      
+      // 模型能力层（局部指标）：工具调用成功率、平均步数
+      var avgSteps = total > 0 ? (rs.reduce(function(s, r) { return s + (r.steps || 0); }, 0) / total).toFixed(1) : 0;
+      var toolSuccess = total > 0 ? (rs.reduce(function(s, r) { return s + ((r.tool_success !== undefined ? r.tool_success : 0.9)); }, 0) / total * 100).toFixed(1) : 0;
+      
+      // 任务完成层（中间指标）：通过率、风险违规率
+      var riskViolations = rs.filter(function(r) { return r.risk_violation; }).length;
+      var riskRate = total > 0 ? (riskViolations / total * 100).toFixed(1) : 0;
+      
+      // 业务影响层（整体指标）：端到端完成率 = 通过率 * (1 - 风险率)
+      var businessImpact = (passRate * (1 - riskRate / 100)).toFixed(1);
+      
+      return {
+        agent: agent,
+        modelLevel: { toolSuccess: toolSuccess, avgSteps: avgSteps },
+        taskLevel: { passRate: passRate, riskRate: riskRate },
+        businessLevel: { businessImpact: businessImpact }
+      };
+    });
+    
+    // 生成 HTML
+    var html = '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">';
+    html += '<tr style="background:#F5F4F0;"><th style="padding:8px;border:1px solid #E4E3DD;text-align:left;">Agent</th>';
+    html += '<th style="padding:8px;border:1px solid #E4E3DD;text-align:center;" colspan="2">模型能力层（局部指标）</th>';
+    html += '<th style="padding:8px;border:1px solid #E4E3DD;text-align:center;" colspan="2">任务完成层（中间指标）</th>';
+    html += '<th style="padding:8px;border:1px solid #E4E3DD;text-align:center;">业务影响层（整体指标）</th>';
+    html += '<th style="padding:8px;border:1px solid #E4E3DD;text-align:center;">局部 vs 整体 差距</th></tr>';
+    
+    html += '<tr style="background:#FAFAF8;"><td style="padding:6px;border:1px solid #E4E3DD;"></td>';
+    html += '<td style="padding:6px;border:1px solid #E4E3DD;text-align:center;">工具成功率</td>';
+    html += '<td style="padding:6px;border:1px solid #E4E3DD;text-align:center;">平均步数</td>';
+    html += '<td style="padding:6px;border:1px solid #E4E3DD;text-align:center;">任务通过率</td>';
+    html += '<td style="padding:6px;border:1px solid #E4E3DD;text-align:center;">风险违规率</td>';
+    html += '<td style="padding:6px;border:1px solid #E4E3DD;text-align:center;">端到端完成率</td>';
+    html += '<td style="padding:6px;border:1px solid #E4E3DD;text-align:center;"></td></tr>';
+    
+    agentMetrics.forEach(function(m) {
+      var gap = (m.modelLevel.toolSuccess - m.businessLevel.businessImpact).toFixed(1);
+      var gapColor = gap > 20 ? "#DC2626" : (gap > 10 ? "#D97706" : "#16A34A");
+      
+      html += '<tr><td style="padding:8px;border:1px solid #E4E3DD;font-weight:500;">' + esc(m.agent) + '</td>';
+      html += '<td style="padding:8px;border:1px solid #E4E3DD;text-align:center;">' + m.modelLevel.toolSuccess + '%</td>';
+      html += '<td style="padding:8px;border:1px solid #E4E3DD;text-align:center;">' + m.modelLevel.avgSteps + '</td>';
+      html += '<td style="padding:8px;border:1px solid #E4E3DD;text-align:center;">' + m.taskLevel.passRate + '%</td>';
+      html += '<td style="padding:8px;border:1px solid #E4E3DD;text-align:center;">' + m.taskLevel.riskRate + '%</td>';
+      html += '<td style="padding:8px;border:1px solid #E4E3DD;text-align:center;font-weight:600;">' + m.businessLevel.businessImpact + '%</td>';
+      html += '<td style="padding:8px;border:1px solid #E4E3DD;text-align:center;color:' + gapColor + ';font-weight:500;">' + gap + '%</td></tr>';
+    });
+    
+    html += '</table></div>';
+    
+    // 添加说明
+    html += '<div style="margin-top:16px;padding:12px;background:#F9F8F5;border-radius:8px;font-size:12px;color:var(--text-muted);line-height:1.6;">';
+    html += '<strong>指标解释链说明：</strong><br>';
+    html += '<strong>模型能力层（局部指标）</strong>：衡量 Agent 单个能力点的强弱，如工具调用成功率、推理步数等。<br>';
+    html += '<strong>任务完成层（中间指标）</strong>：衡量 Agent 在完整任务上的表现，如通过率、风险违规率。<br>';
+    html += '<strong>业务影响层（整体指标）</strong>：端到端完成率 = 任务通过率 × (1 - 风险违规率)，代表真实用户场景下的最终价值。<br>';
+    html += '<strong>局部 vs 整体差距</strong>：如果局部指标很高但整体指标低，说明问题出在"能力整合"而非"单点能力"——这是很多 Agent 团队容易踩的坑。';
+    html += '</div>';
+    
+    return html;
+  }
+
+  // V4.4 P2：Agent 质量四维雷达图加载
+  function loadFourDimRadar() {
+    api("/api/runs?limit=200").then(function(data) {
+      var runs = data.runs || data.items || [];
+      if (!runs.length) {
+        document.getElementById("four-dim-radar").innerHTML = '<div class="empty">暂无运行数据</div>';
+        return;
+      }
+      
+      // 按 agent 分组统计
+      var byAgent = {};
+      runs.forEach(function(r) {
+        var agent = r.agent || "unknown";
+        if (!byAgent[agent]) byAgent[agent] = [];
+        byAgent[agent].push(r);
+      });
+      
+      // 计算每个 agent 的四维分数
+      var agents = Object.keys(byAgent).map(function(agent) {
+        var rs = byAgent[agent];
+        var total = rs.length;
+        
+        // 结果层：通过率
+        var passed = rs.filter(function(r) { return r.passed; }).length;
+        var outcomeScore = (passed / total * 100) || 0;
+        
+        // 过程层：轨迹效率（简化为 1 - 平均步数/最大步数）
+        var avgSteps = rs.reduce(function(s, r) { return s + (r.steps || 5); }, 0) / total;
+        var processScore = Math.max(0, Math.min(100, 100 - (avgSteps - 5) * 5));
+        
+        // 效率层：速度评分（基于平均时长，30秒=100分，300秒=0分）
+        var avgDuration = rs.reduce(function(s, r) { return s + (r.duration_s || 60); }, 0) / total;
+        var efficiencyScore = Math.max(0, Math.min(100, 100 - (avgDuration - 30) * 0.33));
+        
+        // 风险层：安全评分
+        var riskViolations = rs.filter(function(r) { return r.risk_violation; }).length;
+        var riskScore = 100 - (riskViolations / total * 100);
+        
+        return {
+          agent: agent,
+          outcome: Math.round(outcomeScore),
+          process: Math.round(processScore),
+          efficiency: Math.round(efficiencyScore),
+          risk: Math.round(riskScore)
+        };
+      });
+      
+      // 生成简单的雷达图（用 CSS 实现，不依赖外部库）
+      var html = '<div style="display:flex;flex-wrap:wrap;gap:20px;justify-content:center;">';
+      
+      agents.forEach(function(a) {
+        // 计算雷达图的四个点（简化的正方形雷达图）
+        var size = 180;
+        var center = size / 2;
+        var radius = size / 2 - 20;
+        
+        // 四个维度的角度：上=结果，右=过程，下=效率，左=风险
+        var points = [
+          { x: center, y: center - (a.outcome / 100) * radius, label: "结果", value: a.outcome },      // 上
+          { x: center + (a.process / 100) * radius, y: center, label: "过程", value: a.process },          // 右
+          { x: center, y: center + (a.efficiency / 100) * radius, label: "效率", value: a.efficiency },    // 下
+          { x: center - (a.risk / 100) * radius, y: center, label: "风险", value: a.risk }              // 左
+        ];
+        
+        // 生成多边形 points 字符串
+        var polygonPoints = points.map(function(p) { return p.x + "," + p.y; }).join(" ");
+        
+        html += '<div style="text-align:center;">';
+        html += '<div style="font-weight:600;margin-bottom:8px;font-size:14px;">' + esc(a.agent) + '</div>';
+        html += '<svg width="' + size + '" height="' + size + '" style="background:#FAFAF8;border-radius:8px;">';
+        
+        // 绘制网格
+        for (var i = 1; i <= 4; i++) {
+          var r = radius * i / 4;
+          html += '<polygon points="' + center + ',' + (center - r) + ' ' + (center + r) + ',' + center + ' ' + center + ',' + (center + r) + ' ' + (center - r) + ',' + center + '" fill="none" stroke="#E4E3DD" stroke-width="1"/>';
+        }
+        
+        // 绘制轴线
+        html += '<line x1="' + center + '" y1="' + (center - radius) + '" x2="' + center + '" y2="' + (center + radius) + '" stroke="#E4E3DD" stroke-width="1"/>';
+        html += '<line x1="' + (center - radius) + '" y1="' + center + '" x2="' + (center + radius) + '" y2="' + center + '" stroke="#E4E3DD" stroke-width="1"/>';
+        
+        // 绘制数据多边形
+        html += '<polygon points="' + polygonPoints + '" fill="rgba(59,130,246,0.2)" stroke="#3B82F6" stroke-width="2"/>';
+        
+        // 绘制数据点和标签
+        points.forEach(function(p) {
+          html += '<circle cx="' + p.x + '" cy="' + p.y + '" r="4" fill="#3B82F6"/>';
+          var labelY = p.label === "结果" ? p.y - 12 : (p.label === "效率" ? p.y + 16 : p.y);
+          var labelX = p.x + (p.label === "过程" ? 30 : (p.label === "风险" ? -30 : 0));
+          html += '<text x="' + labelX + '" y="' + labelY + '" text-anchor="middle" font-size="11" fill="#374151">' + p.label + ' ' + p.value + '</text>';
+        });
+        
+        html += '</svg>';
+        html += '</div>';
+      });
+      
+      html += '</div>';
+      
+      // 添加说明
+      html += '<div style="margin-top:16px;padding:12px;background:#F9F8F5;border-radius:8px;font-size:12px;color:var(--text-muted);line-height:1.6;text-align:center;">';
+      html += '<strong>四维评测体系说明：</strong> 结果层（任务通过率） · 过程层（轨迹效率） · 效率层（响应速度） · 风险层（安全合规）';
+      html += '</div>';
+      
+      document.getElementById("four-dim-radar").innerHTML = html;
+    }).catch(function() {
+      document.getElementById("four-dim-radar").innerHTML = '<div class="empty">加载数据失败</div>';
+    });
+  }

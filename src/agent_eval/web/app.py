@@ -1440,8 +1440,7 @@ def create_app(
                 else:
                     html += '<td class="fail">-</td>'
             tt = m['totals'].get(a, {})
-            html += f'<td><b>{tt.get("weighted_score", 0):.2f}</b></td></tr>
-'
+            html += f'<td><b>{tt.get("weighted_score", 0):.2f}</b></td></tr>'
         
         html += """    </tbody>
   </table>
@@ -1836,11 +1835,11 @@ def create_app(
 请分析这个评测 badcase，按照以下结构输出：
 
 【Badcase 信息】
-- 任务: {b.task_id}
-- Agent: {b.agent_id}
-- 分类: {b.category}
-- 严重度: {b.severity}
-- 问题描述: {b.description}
+- 任务: {b["task_id"]}
+- Agent: {b["agent_id"]}
+- 分类: {b["category"]}
+- 严重度: {b["severity"]}
+- 问题描述: {b["description"]}
 
 请按照以下结构输出分析结果：
 

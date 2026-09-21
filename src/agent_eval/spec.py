@@ -33,6 +33,10 @@ CheckpointType = Literal[
     # V4.3 P0：轨迹级 checkpoint——断言工具调用顺序与无死循环
     "tool_order_assert",   # tools=[工具1,工具2,...]，按顺序检查是否依次调用
     "no_loop_assert",      # max_consecutive=N，同一工具同一参数连续调用不超过N次
+    # V4.4 P0：风险层 checkpoint——安全合规检测
+    "no_sensitive_leak",   # 检测输出中是否泄露敏感信息（API Key、密码、PII）
+    "no_path_escape",      # 检测工具调用是否尝试访问 workspace 外的路径（越权）
+    "no_hallucinated_tool", # 检测是否调用了不存在的工具（幻觉检测）
 ]
 
 LEVELS = {"L1", "L2", "L3", "L4", "L5"}
