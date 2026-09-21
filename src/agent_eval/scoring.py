@@ -251,6 +251,15 @@ def score_task(task, verdicts: list[dict], steps: list[dict] | None = None) -> d
         3
     )
     
+    # V4.5 P2：置信度评估体系
+    confidence = calculate_confidence(
+        verdicts=verdicts,
+        steps=steps,
+        jev_confidence=None,  # 后续从 Jev Judge 结果中获取
+        llm_confidence=None,
+        sample_count=1,  # 后续支持多次采样
+    )
+
     return {
         "task_id": task.id,
         "weight": task.weight,
@@ -270,4 +279,138 @@ def score_task(task, verdicts: list[dict], steps: list[dict] | None = None) -> d
         "trajectory_metrics": trajectory_metrics,
         "risk_violation": risk_violation,
         "risk_violations": risk_violations,
+        "confidence": confidence,  # V4.5 P2：置信度评估
+    }
+
+
+# V4.5 P2：置信度评估体系
+
+def calculate_confidence(
+    verdicts: list[dict],
+    steps: list[dict] | None = None,
+    jev_confidence: float | None = None,
+    llm_confidence: float | None = None,
+    sample_count: int = 1,
+) -> dict:
+    """计算评测结果的置信度。
+
+    置信度来源（按优先级）：
+    1. Jev Judge 置信度（如果使用 Jev）：结构化输出，置信度高
+    2. LLM Judge 置信度（如果使用 LLM）：自然语言输出，置信度中
+    3. 校验点一致性：多个校验点是否给出一致的判断
+    4. 多次采样稳定性：多次运行结果是否一致
+
+    置信度等级：
+    - high: >= 0.8
+    - medium: 0.5 - 0.8
+    - low: < 0.5
+
+    Args:
+        verdicts: 校验点结果列表
+        steps: 执行轨迹步骤
+        jev_confidence: Jev Judge 置信度（0-1）
+        llm_confidence: LLM Judge 置信度（0-1）
+        sample_count: 采样次数（1 表示单次运行）
+
+    Returns:
+        包含 score/level/sources/recommendations 的置信度评估结果
+    """
+    steps = steps or []
+
+    # 1. 基础置信度（基于校验点一致性）
+    total_verdicts = len(verdicts)
+    if total_verdicts == 0:
+        base_confidence = 0.3
+        consistency_note = "无校验点，无法判断"
+    else:
+        # 计算校验点一致性：通过/失败是否有明确倾向
+        passed_count = sum(1 for v in verdicts if v.get("passed"))
+        failed_count = total_verdicts - passed_count
+
+        # 如果通过和失败数量接近，置信度低（边界情况）
+        min_count = min(passed_count, failed_count)
+        max_count = max(passed_count, failed_count)
+        if max_count == 0:
+            consistency = 1.0
+        else:
+            consistency = 1.0 - (min_count / max_count)
+
+        base_confidence = round(0.6 + consistency * 0.3, 3)  # 基础 0.6，一致性贡献 0-0.3
+        consistency_note = f"校验点一致性: {consistency:.2f}（通过 {passed_count} / 失败 {failed_count}）"
+
+    # 2. Judge 置信度（如果有）
+    judge_confidence = None
+    judge_source = None
+    if jev_confidence is not None:
+        judge_confidence = jev_confidence
+        judge_source = "Jev Judge"
+    elif llm_confidence is not None:
+        judge_confidence = llm_confidence
+        judge_source = "LLM Judge"
+
+    # 3. 轨迹稳定性（基于错误率）
+    step_count = len(steps)
+    error_count = sum(1 for s in steps if s.get("error") or s.get("status") == "error")
+    if step_count == 0:
+        trajectory_stability = 0.5
+    else:
+        error_rate = error_count / step_count
+        trajectory_stability = round(1.0 - error_rate * 0.3, 3)  # 错误率越高，置信度越低
+
+    # 4. 多次采样稳定性（如果有）
+    sample_stability = 1.0
+    if sample_count > 1:
+        # 多次采样应该更稳定，这里简化处理
+        sample_stability = round(min(1.0, 0.8 + (sample_count - 1) * 0.05), 3)
+
+    # 综合计算置信度
+    sources = []
+    sources.append({"source": "校验点一致性", "value": base_confidence, "weight": 0.4})
+    sources.append({"source": "轨迹稳定性", "value": trajectory_stability, "weight": 0.3})
+
+    if judge_confidence is not None:
+        sources.append({"source": judge_source, "value": judge_confidence, "weight": 0.3})
+    else:
+        # 如果没有 Judge 置信度，把权重分给其他来源
+        sources[0]["weight"] = 0.5
+        sources[1]["weight"] = 0.5
+
+    if sample_count > 1:
+        sources.append({"source": "多次采样稳定性", "value": sample_stability, "weight": 0.1})
+
+    # 加权平均
+    total_weight = sum(s["weight"] for s in sources)
+    final_confidence = round(
+        sum(s["value"] * s["weight"] for s in sources) / total_weight,
+        3
+    )
+
+    # 置信度等级
+    if final_confidence >= 0.8:
+        level = "high"
+        level_label = "高置信度"
+    elif final_confidence >= 0.5:
+        level = "medium"
+        level_label = "中置信度"
+    else:
+        level = "low"
+        level_label = "低置信度"
+
+    # 改进建议
+    recommendations = []
+    if level == "low":
+        recommendations.append("建议增加校验点数量，提高判断准确性")
+        if judge_confidence is None:
+            recommendations.append("建议启用 Jev/LLM Judge，提供更细粒度的判断")
+        recommendations.append("建议多次运行采样，验证结果稳定性")
+    elif level == "medium":
+        recommendations.append("可考虑增加校验点，进一步提高置信度")
+
+    return {
+        "score": final_confidence,
+        "level": level,
+        "level_label": level_label,
+        "sources": sources,
+        "consistency_note": consistency_note,
+        "recommendations": recommendations,
     }
