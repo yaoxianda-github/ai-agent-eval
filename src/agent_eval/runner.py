@@ -24,6 +24,7 @@ from agent_eval.circuit_breaker import CircuitBreaker, CircuitConfig, DailySampl
 from agent_eval.confidence import calculate_run_confidence
 from agent_eval.data_flywheel import analyze_run_failure, should_auto_create_badcase
 from agent_eval.judge import judge_llm
+from agent_eval.jev_judge import judge_jev, smart_judge
 from agent_eval.log import get_logger, run_logger
 from agent_eval.mcp_env import MCPEnvironment
 from agent_eval.scoring import score_task
@@ -269,15 +270,15 @@ def run_one(
                 time.sleep(1)
                 continue
         
-        finally:
-            # M2：MCP 环境清理——恢复环境变量，删除配置文件
-            if _saved_env:
-                for k, v in _saved_env.items():
-                    if v is None:
-                        os.environ.pop(k, None)
-                    else:
-                        os.environ[k] = v
-            mcp_env.cleanup()
+            finally:
+                # M2：MCP 环境清理——恢复环境变量，删除配置文件
+                if _saved_env:
+                    for k, v in _saved_env.items():
+                        if v is None:
+                            os.environ.pop(k, None)
+                        else:
+                            os.environ[k] = v
+                mcp_env.cleanup()
 
         logger.info(
             "后端执行完成 | status=%s steps=%d duration=%.1fs traces=%d",
@@ -342,7 +343,14 @@ def run_one(
             passed = sum(1 for v in verdicts if v.get("passed"))
             logger.info("确定性校验点完成: %d/%d 通过", passed, len(verdicts))
             if task.verifier == "llm_judge":
-                verdicts.append(judge_llm(task, workspace))
+                # V4.5 P0：支持多种 Judge 模式（llm / jev / smart）
+                judge_mode = config.get("judge_mode", "llm")
+                if judge_mode == "jev":
+                    verdicts.append(judge_jev(task, workspace))
+                elif judge_mode == "smart":
+                    verdicts.append(smart_judge(task, workspace))
+                else:  # 默认 llm
+                    verdicts.append(judge_llm(task, workspace))
             metrics = score_task(task, verdicts, steps=result.steps)
             logger.info("评分完成: score=%.3f (权重=%.1f)", metrics.get("score", 0), task.weight)
 

@@ -62,6 +62,12 @@ ENV_WHITELIST: dict[str, dict] = {
         "used_by": ["minimal-react"],
         "category": "api_key",
     },
+    "TYPESAFE_API_KEY": {
+        "label": "TypeSafe (Jev) API Key",
+        "desc": "Jev 快速判分器使用（低成本、高速度、结构化输出）",
+        "used_by": ["jev_judge", "smart_judge"],
+        "category": "api_key",
+    },
 }
 
 
