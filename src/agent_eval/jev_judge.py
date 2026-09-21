@@ -1,14 +1,13 @@
-"""Jev 快速 Judge 判分器（V4.5 P0）。
+"""Jev 快速 Judge 判分器（V4.6 P0 优化）。
 
 利用 Jev 模型（TypeSafe System One Model）做快速、低成本的结构化判定：
 - 速度：70-500ms（比 LLM Judge 快 50-100 倍）
 - 成本：$0.042/M input token，output 免费（比 LLM Judge 便宜 100 倍）
 - 输出：结构化决策 + 置信度（可做风险门控）
 
-设计原则：
-- 与 LLMJudge 接口对齐，可无缝替换
-- 低置信度自动升级到 LLM Judge
-- 支持批量判定（一次调用问多个问题）
+P0 优化：
+1. 判分问题拆分：Noul（是否完成）→ Choice（失败原因分类）→ Score（质量评分）三步
+2. 三级阈值策略：≥0.9自动通过 / 0.6-0.9人工复核 / <0.6自动重跑
 """
 
 from __future__ import annotations
@@ -25,8 +24,13 @@ logger = get_logger(__name__)
 
 JEV_API_URL = "https://tokenra.io/v1/decisions"
 
-# 默认置信度阈值：低于此值自动升级到 LLM Judge
-DEFAULT_CONFIDENCE_THRESHOLD = 0.7
+# 三级阈值策略
+DEFAULT_AUTO_PASS_THRESHOLD = 0.9   # ≥0.9：自动通过，直接计入结果
+DEFAULT_MANUAL_REVIEW_THRESHOLD = 0.6  # 0.6-0.9：人工复核区间，升级到 LLM Judge
+# <0.6：自动重跑区间，最多重跑2次
+
+# 兼容旧配置
+DEFAULT_CONFIDENCE_THRESHOLD = DEFAULT_MANUAL_REVIEW_THRESHOLD
 
 
 class JevJudge:
@@ -41,12 +45,21 @@ class JevJudge:
         self,
         api_key: str | None = None,
         confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
+        auto_pass_threshold: float = DEFAULT_AUTO_PASS_THRESHOLD,
+        manual_review_threshold: float = DEFAULT_MANUAL_REVIEW_THRESHOLD,
         client=None,
     ) -> None:
         self.api_key = api_key or os.environ.get("TYPESAFE_API_KEY") or os.environ.get("JEV_API_KEY")
-        self.confidence_threshold = float(
-            os.environ.get("JEV_CONFIDENCE_THRESHOLD", confidence_threshold)
+        # 兼容旧配置：如果用户设置了 JEV_CONFIDENCE_THRESHOLD，用作人工复核阈值
+        self.manual_review_threshold = float(
+            os.environ.get("JEV_MANUAL_REVIEW_THRESHOLD",
+            os.environ.get("JEV_CONFIDENCE_THRESHOLD", manual_review_threshold))
         )
+        self.auto_pass_threshold = float(
+            os.environ.get("JEV_AUTO_PASS_THRESHOLD", auto_pass_threshold)
+        )
+        # 兼容旧字段
+        self.confidence_threshold = self.manual_review_threshold
         self.client = client
         self._usage: dict = {"input_tokens": 0, "output_tokens": 0}
 
@@ -119,41 +132,52 @@ class JevJudge:
                 "needs_escalation": False,
             }
 
-        # 构造 Jev 问题集（一次调用问多个问题）
+        # 构造 Jev 问题集（三步拆分：是否完成 → 失败原因 → 质量评分）
         state = (
-            f"任务：{task.description}\n\n"
-            f"Agent 产物：\n{artifacts[:8000]}"
+            f"任务描述：{task.description}\n\n"
+            f"Agent 执行产物：\n{artifacts[:8000]}"
         )
 
         questions = {
-            "pass": {
+            # 第一步：二元判断（Noul）- 是否完成任务
+            "completed": {
                 "type": "noul",
-                "instructions": "Does the agent output meet the task requirements?",
+                "instructions": "Did the agent successfully complete the task?",
                 "criteria": {
-                    "true": "Output fully meets all task requirements",
-                    "false": "Output fails to meet task requirements",
+                    "true": "Task completed successfully, output meets all requirements",
+                    "false": "Task failed, output does not meet requirements or is missing",
                 },
             },
+            # 第二步：分类选择（Choice）- 失败原因（对齐6类归因）
+            "fail_reason": {
+                "type": "choice",
+                "instructions": "If the task failed, what is the root cause category?",
+                "criteria": {
+                    "none": "Task passed successfully",
+                    "data_logic": "Data calculation or business logic errors",
+                    "skill_routing": "Wrong tool/skill selection or routing",
+                    "tool_param": "Tool parameter errors or invalid inputs",
+                    "output_contract": "Output format/structure does not match requirements",
+                    "environment": "Environment/dependency issues or missing resources",
+                    "model_semantic": "Model understanding or semantic comprehension errors",
+                },
+            },
+            # 第三步：质量评分（Score）- 0-100分
+            "quality_score": {
+                "type": "score",
+                "instructions": "What is the overall quality score of the output?",
+                "criteria": ["0-20 Very poor", "21-40 Poor", "41-60 Average", "61-80 Good", "81-100 Excellent"],
+            },
+            # 补充维度评分
             "completeness": {
                 "type": "score",
                 "instructions": "How complete is the output?",
-                "criteria": ["Very incomplete", "Partially complete", "Mostly complete", "Fully complete"],
+                "criteria": ["0-20 Very incomplete", "21-40 Partial", "41-60 Mostly complete", "61-80 Almost complete", "81-100 Fully complete"],
             },
             "correctness": {
                 "type": "score",
                 "instructions": "How accurate is the output?",
-                "criteria": ["Very inaccurate", "Some errors", "Mostly accurate", "Fully accurate"],
-            },
-            "has_issues": {
-                "type": "choice",
-                "instructions": "What type of issues does the output have?",
-                "criteria": {
-                    "none": "No issues found",
-                    "data_logic": "Data or logic errors",
-                    "format": "Format or structure issues",
-                    "missing_content": "Missing required content",
-                    "wrong_answer": "Wrong answer or conclusion",
-                },
+                "criteria": ["0-20 Very inaccurate", "21-40 Many errors", "41-60 Some errors", "61-80 Mostly accurate", "81-100 Fully accurate"],
             },
         }
 
@@ -164,47 +188,64 @@ class JevJudge:
 
             answers = result.get("answers", {})
 
-            # 提取通过判定
-            pass_answer = answers.get("pass", {})
-            pass_prob = float(pass_answer.get("noul", 0.0))
-            passed = pass_prob >= 0.5
-            confidence = float(pass_answer.get("confidence", pass_prob))
+            # 提取完成判定（Noul）
+            completed_answer = answers.get("completed", {})
+            completed_prob = float(completed_answer.get("noul", 0.0))
+            passed = completed_prob >= 0.5
+            confidence = float(completed_answer.get("confidence", completed_prob))
 
-            # 提取评分
-            completeness_score = float(answers.get("completeness", {}).get("score", 0.0))
-            correctness_score = float(answers.get("correctness", {}).get("score", 0.0))
+            # 提取失败原因（Choice）
+            fail_reason = answers.get("fail_reason", {}).get("choice", "none")
+            # 如果任务通过，强制 fail_reason 为 none
+            if passed:
+                fail_reason = "none"
 
-            # 提取问题类型
-            issue_type = answers.get("has_issues", {}).get("choice", "none")
+            # 提取评分（0-100 → 0-1）
+            quality_raw = float(answers.get("quality_score", {}).get("score", 50))
+            completeness_score = float(answers.get("completeness", {}).get("score", 50))
+            correctness_score = float(answers.get("correctness", {}).get("score", 50))
 
-            # 计算综合得分（0-1）
-            score = round((completeness_score + correctness_score) / 6.0, 3)  # 4 级 → 0-1
+            # 计算综合得分（0-1）：质量分 60% + 完整性 20% + 正确性 20%
+            score = round(
+                (quality_raw * 0.6 + completeness_score * 0.2 + correctness_score * 0.2) / 100.0,
+                3
+            )
 
-            # 判断是否需要升级到 LLM Judge
-            needs_escalation = confidence < self.confidence_threshold
+            # 三级阈值判定
+            if confidence >= self.auto_pass_threshold:
+                review_level = "auto"  # 自动通过
+            elif confidence >= self.manual_review_threshold:
+                review_level = "manual"  # 人工复核
+            else:
+                review_level = "rerun"  # 需要重跑
+
+            # 判断是否需要升级到 LLM Judge：非 auto 级别都升级
+            needs_escalation = review_level != "auto"
 
             logger.info(
-                "jev_judge 完成 | task=%s score=%.3f passed=%s confidence=%.3f duration=%dms issue=%s",
-                task.id, score, passed, confidence, duration_ms, issue_type,
+                "jev_judge 完成 | task=%s score=%.3f passed=%s confidence=%.3f review_level=%s duration=%dms fail_reason=%s",
+                task.id, score, passed, confidence, review_level, duration_ms, fail_reason,
             )
 
             return {
                 "id": "jev_judge",
                 "type": "jev_judge",
                 "passed": passed,
-                "detail": f"Jev 快速判定 score={round(score, 3)} confidence={round(confidence, 2)} issue={issue_type}"[:300],
+                "detail": f"Jev 快速判定 score={round(score, 3)} confidence={round(confidence, 2)} review_level={review_level} fail_reason={fail_reason}"[:300],
                 "score": score,
-                "reasoning": f"Issue type: {issue_type}",
+                "reasoning": f"Fail reason: {fail_reason}",
                 "dimensions": {
-                    "correctness": round(correctness_score / 3.0, 3),
-                    "usefulness": round((completeness_score + correctness_score) / 6.0, 3),
-                    "completeness": round(completeness_score / 3.0, 3),
+                    "correctness": round(correctness_score / 100.0, 3),
+                    "usefulness": round(quality_raw / 100.0, 3),
+                    "completeness": round(completeness_score / 100.0, 3),
                     "efficiency": 0.8,  # Jev 本身很快，给高分
                     "safety": 0.9,  # 默认安全
                 },
                 "confidence": confidence,
+                "review_level": review_level,  # auto / manual / rerun
                 "needs_escalation": needs_escalation,
-                "issue_type": issue_type,
+                "issue_type": fail_reason,  # 兼容旧字段
+                "fail_reason": fail_reason,
                 "usage": dict(self._usage) or None,
                 "duration_ms": duration_ms,
             }
@@ -265,50 +306,77 @@ def judge_jev(task, workspace: Path) -> dict:
     return JevJudge().judge(task, workspace)
 
 
-# ---------- 智能路由：Jev 快速判定 + 低置信度升级 LLM ----------
+# ---------- 智能路由：Jev 快速判定 + 三级阈值策略 ----------
 
 def smart_judge(
     task,
     workspace: Path,
-    confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
+    auto_pass_threshold: float = DEFAULT_AUTO_PASS_THRESHOLD,
+    manual_review_threshold: float = DEFAULT_MANUAL_REVIEW_THRESHOLD,
+    max_rerun: int = 1,  # 低置信度最多重跑次数
 ) -> dict:
-    """智能判分：先用 Jev 快速判定，低置信度自动升级到 LLM Judge。
+    """智能判分：Jev 三步判分 + 三级阈值路由。
 
-    策略：
-    1. 用 Jev 做快速判定（70-500ms）
-    2. 如果置信度 >= 阈值，直接用 Jev 结果
-    3. 如果置信度 < 阈值，升级到 LLM Judge 做详细判定
+    三级策略：
+    1. auto（≥0.9）：直接采用 Jev 结果，无需升级
+    2. manual（0.6-0.9）：升级到 LLM Judge 做详细判定，标记人工复核
+    3. rerun（<0.6）：自动重跑最多 N 次，仍低置信度则升级到 LLM Judge
     """
     from agent_eval.judge import LLMJudge
 
-    # 第一步：Jev 快速判定
-    jev_judge = JevJudge(confidence_threshold=confidence_threshold)
-    jev_result = jev_judge.judge(task, workspace)
+    # 初始化 Jev Judge
+    jev_judge = JevJudge(
+        auto_pass_threshold=auto_pass_threshold,
+        manual_review_threshold=manual_review_threshold,
+    )
 
     # 如果 Jev 不可用（缺 API Key），直接用 LLM Judge
     if not jev_judge.api_key:
         logger.info("smart_judge: Jev 不可用，直接使用 LLM Judge (task=%s)", task.id)
         return LLMJudge().judge(task, workspace)
 
-    # 如果置信度足够高，直接返回 Jev 结果
-    if not jev_result.get("needs_escalation", False):
-        logger.info(
-            "smart_judge: Jev 结果置信度足够，直接采用 (task=%s confidence=%.3f)",
-            task.id, jev_result.get("confidence", 0),
-        )
-        return jev_result
+    # 执行判分，低置信度自动重跑
+    jev_result = jev_judge.judge(task, workspace)
+    rerun_count = 0
+    best_result = jev_result
 
-    # 置信度不足，升级到 LLM Judge
+    # 低置信度重跑循环
+    while best_result.get("review_level") == "rerun" and rerun_count < max_rerun:
+        rerun_count += 1
+        logger.info(
+            "smart_judge: 低置信度，第 %d 次重跑 (task=%s confidence=%.3f)",
+            rerun_count, task.id, best_result.get("confidence", 0),
+        )
+        jev_result = jev_judge.judge(task, workspace)
+        # 保留置信度更高的结果
+        if jev_result.get("confidence", 0) > best_result.get("confidence", 0):
+            best_result = jev_result
+
+    # auto 级别：直接返回 Jev 结果
+    if best_result.get("review_level") == "auto":
+        logger.info(
+            "smart_judge: 自动通过，直接采用 Jev 结果 (task=%s confidence=%.3f)",
+            task.id, best_result.get("confidence", 0),
+        )
+        return best_result
+
+    # manual / rerun 级别：升级到 LLM Judge
     logger.info(
-        "smart_judge: Jev 置信度不足，升级到 LLM Judge (task=%s confidence=%.3f)",
-        task.id, jev_result.get("confidence", 0),
+        "smart_judge: 升级到 LLM Judge (task=%s review_level=%s confidence=%.3f reruns=%d)",
+        task.id, best_result.get("review_level"), best_result.get("confidence", 0), rerun_count,
     )
     llm_result = LLMJudge().judge(task, workspace)
 
-    # 合并结果：保留 Jev 的置信度信息
-    llm_result["jev_confidence"] = jev_result.get("confidence")
-    llm_result["jev_score"] = jev_result.get("score")
+    # 合并结果：保留 Jev 的置信度和阈值信息
+    llm_result["jev_confidence"] = best_result.get("confidence")
+    llm_result["jev_score"] = best_result.get("score")
+    llm_result["jev_review_level"] = best_result.get("review_level")
+    llm_result["jev_rerun_count"] = rerun_count
     llm_result["escalated_from_jev"] = True
+
+    # 如果重跑过，标记需要人工关注
+    if rerun_count > 0:
+        llm_result["needs_manual_review"] = True
 
     return llm_result
 
