@@ -100,6 +100,72 @@ class JevJudge:
                 "latency_ms": None,
             }
 
+    def judge_task_complexity(self, task) -> dict:
+        """判断任务复杂度（L1-L5），用于 Model Router 决策。
+
+        Returns:
+            {
+                "complexity": "L1" / "L2" / "L3" / "L4" / "L5",
+                "use_jev_only": bool,  # 是否可以直接用 Jev 判分
+                "confidence": float
+            }
+        """
+        if not self.api_key:
+            # 无 API Key 时默认走 LLM Judge
+            return {"complexity": "L3", "use_jev_only": False, "confidence": 0.0}
+
+        state = f"任务描述：{task.description}\n任务标签：{getattr(task, 'tags', [])}"
+
+        questions = {
+            "complexity": {
+                "type": "choice",
+                "instructions": "What is the complexity level of this task?",
+                "criteria": {
+                    "L1": "Very simple: single step, no tool use, trivial output",
+                    "L2": "Simple: 1-2 steps, simple tool call, straightforward check",
+                    "L3": "Medium: multi-step workflow, multiple tools, moderate reasoning",
+                    "L4": "Complex: long context, multi-hop reasoning, edge cases",
+                    "L5": "Very complex: open-ended, ambiguous requirements, high risk of hallucination",
+                },
+            },
+            "jev_can_judge": {
+                "type": "noul",
+                "instructions": "Can Jev reliably judge this task without LLM assistance?",
+                "criteria": {
+                    "true": "Task has clear objective, verifiable output, no subjective evaluation needed",
+                    "false": "Task requires deep reasoning, subjective judgment, or complex open-ended evaluation",
+                },
+            },
+        }
+
+        try:
+            start = time.time()
+            result = self._call_jev(state=state, questions=questions)
+            duration_ms = int(round((time.time() - start) * 1000))
+
+            answers = result.get("answers", {})
+            complexity = answers.get("complexity", {}).get("choice", "L3")
+            jev_can_judge = float(answers.get("jev_can_judge", {}).get("noul", 0.5))
+            confidence = float(answers.get("complexity", {}).get("confidence", 0.8))
+
+            # L1-L2 且 Jev 可判：直接走 Jev 判分
+            use_jev_only = complexity in ("L1", "L2") and jev_can_judge >= 0.6
+
+            logger.info(
+                "任务复杂度判断 | task=%s complexity=%s use_jev_only=%s confidence=%.2f duration=%dms",
+                task.id, complexity, use_jev_only, confidence, duration_ms,
+            )
+
+            return {
+                "complexity": complexity,
+                "use_jev_only": use_jev_only,
+                "confidence": confidence,
+            }
+
+        except Exception as e:  # noqa: BLE001
+            logger.warning("任务复杂度判断失败，默认走 LLM Judge: %s", e)
+            return {"complexity": "L3", "use_jev_only": False, "confidence": 0.0}
+
     def judge(self, task, workspace: Path) -> dict:
         """对任务产物执行快速判定，返回 verdict（与 LLMJudge 同构）。"""
         if not self.api_key:
@@ -335,8 +401,30 @@ def smart_judge(
         logger.info("smart_judge: Jev 不可用，直接使用 LLM Judge (task=%s)", task.id)
         return LLMJudge().judge(task, workspace)
 
+    # P1 新增：Model Router 先判断任务复杂度
+    complexity_info = jev_judge.judge_task_complexity(task)
+    complexity = complexity_info.get("complexity", "L3")
+    use_jev_only = complexity_info.get("use_jev_only", False)
+
+    # 简单任务（L1-L2）：直接走 Jev 判分，不升级 LLM，成本最低
+    if use_jev_only:
+        logger.info(
+            "smart_judge: 简单任务(%s)，直接使用 Jev 判分 (task=%s)",
+            complexity, task.id,
+        )
+        jev_result = jev_judge.judge(task, workspace)
+        jev_result["task_complexity"] = complexity
+        jev_result["router_path"] = "jev_only"
+        return jev_result
+
+    # 复杂任务：走三级阈值策略
+    logger.info(
+        "smart_judge: 复杂任务(%s)，走三级阈值策略 (task=%s)",
+        complexity, task.id,
+    )
     # 执行判分，低置信度自动重跑
     jev_result = jev_judge.judge(task, workspace)
+    jev_result["task_complexity"] = complexity
     rerun_count = 0
     best_result = jev_result
 
