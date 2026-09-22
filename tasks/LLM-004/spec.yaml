@@ -1,0 +1,36 @@
+id: LLM-004
+title: 技术问题深度解答
+level: L4
+description: |
+  读取 input/question.md 中的技术问题，给出详细、准确、有深度的解答，输出到 output/answer.md。
+  解答需包含：问题分析、核心原理、解决方案（多种方案对比）、代码示例、最佳实践、常见坑点。
+tags: [qa, technical, deep]
+fixtures:
+  source: fixtures/
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/answer.md
+      desc: 已生成解答文档
+      stage: final_answer
+    - id: c2
+      type: content_contains
+      path: output/answer.md
+      pattern: "代码|示例|code|example"
+      desc: 包含代码示例
+      stage: final_answer
+verifier: llm_judge
+weight: 2.0
+cost_budget_usd: 0.3
+timeout_s: 600
+rubric: |
+  请对技术解答质量判分（满分 100）：
+
+  1. 准确性（30 分）：技术原理和概念准确无误，解决方案真实可行，没有错误信息或误导性内容；
+  2. 深度（25 分）：不仅给出表面答案，还深入分析底层原理、权衡取舍、适用场景，体现技术深度；
+  3. 完整性（20 分）：覆盖问题的各个方面，提供多种解决方案并对比优缺点，包含代码示例和最佳实践；
+  4. 清晰度（15 分）：结构清晰、逻辑连贯、由浅入深，易于理解，适合不同技术水平的读者；
+  5. 实用性（10 分）：提供可直接复用的代码和配置，指出常见坑点和注意事项，有实际参考价值。
+
+  评分参考：>=85 优秀，70-84 良好，60-69 及格，<60 不达标。

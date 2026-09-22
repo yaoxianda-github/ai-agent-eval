@@ -1,0 +1,36 @@
+id: LLM-007
+title: 技术文档中英翻译
+level: L3
+description: |
+  读取 input/tech_doc_zh.md 中的中文技术文档，将其翻译成英文，输出到 output/tech_doc_en.md。
+  要求：专业术语准确、符合技术文档表达习惯、代码和命令保持原样、格式结构保持一致。
+tags: [translation, i18n, doc]
+fixtures:
+  source: fixtures/
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/tech_doc_en.md
+      desc: 已生成英文文档
+      stage: final_answer
+    - id: c2
+      type: content_contains
+      path: output/tech_doc_en.md
+      pattern: "#|##"
+      desc: 保留了标题结构
+      stage: final_answer
+verifier: llm_judge
+weight: 1.5
+cost_budget_usd: 0.2
+timeout_s: 300
+rubric: |
+  请对技术文档翻译质量判分（满分 100）：
+
+  1. 准确性（35 分）：技术术语翻译准确，符合行业惯例，没有错译、漏译、误译，专业概念表达准确；
+  2. 流畅性（25 分）：译文符合英文技术文档的表达习惯，语句通顺自然，没有中式英语，读起来像母语者撰写；
+  3. 完整性（20 分）：所有内容都已翻译，没有遗漏段落或重要信息，代码、命令、配置项保持原样；
+  4. 格式一致性（10 分）：标题层级、列表、代码块、表格等格式与原文保持一致，Markdown 语法正确；
+  5. 专业性（10 分）：语气正式专业，符合技术文档风格，没有口语化表达，大小写和标点规范。
+
+  评分参考：>=85 优秀，70-84 良好，60-69 及格，<60 不达标。

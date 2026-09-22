@@ -1,0 +1,37 @@
+id: LLM-009
+title: 代码审查意见撰写
+level: L4
+description: |
+  读取 input/pr_code.py 中的 PR 代码，站在资深工程师的角度撰写代码审查意见，输出到 output/code_review.md。
+  审查维度：代码质量、潜在 bug、安全问题、性能问题、可维护性、最佳实践、测试覆盖。
+  要求：指出具体问题、给出改进建议、按严重程度分类（阻断/严重/建议/表扬）。
+tags: [codereview, qa, code]
+fixtures:
+  source: fixtures/
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/code_review.md
+      desc: 已生成代码审查意见
+      stage: final_answer
+    - id: c2
+      type: content_contains
+      path: output/code_review.md
+      pattern: "问题|建议|bug|issue|建议"
+      desc: 包含审查意见
+      stage: final_answer
+verifier: llm_judge
+weight: 2.0
+cost_budget_usd: 0.3
+timeout_s: 400
+rubric: |
+  请对代码审查意见质量判分（满分 100）：
+
+  1. 问题发现能力（30 分）：能够发现代码中的真实问题，包括潜在 bug、安全漏洞、性能问题、逻辑错误、边界条件遗漏等，问题定位准确，不是无中生有；
+  2. 建议质量（25 分）：给出的改进建议具体、可操作、有代码示例或明确的修改方向，不是空泛的"这里可以优化一下"；
+  3. 全面性（20 分）：覆盖代码质量、安全性、性能、可维护性、最佳实践、测试等多个维度，没有遗漏重要问题；
+  4. 分类和优先级（15 分）：问题按严重程度合理分类（阻断/严重/建议/表扬），优先级判断准确，能够区分必须修改和可以后续优化的问题；
+  5. 表达专业性（10 分）：审查意见语气专业、客观、建设性，没有攻击性语言，引用具体代码行号，结构清晰易于阅读。
+
+  评分参考：>=85 优秀，70-84 良好，60-69 及格，<60 不达标。

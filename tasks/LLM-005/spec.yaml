@@ -1,0 +1,37 @@
+id: LLM-005
+title: 遗留代码重构
+level: L4
+description: |
+  读取 input/legacy_code.py 中的遗留代码，进行重构优化后输出到 output/refactored.py。
+  重构方向：设计模式应用、SOLID 原则、依赖注入、单元测试友好、可扩展性。
+  保持原有功能完全不变。
+tags: [code, refactor, design]
+fixtures:
+  source: fixtures/
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/refactored.py
+      desc: 已生成重构后的代码
+      stage: final_answer
+    - id: c2
+      type: content_contains
+      path: output/refactored.py
+      pattern: "class "
+      desc: 包含类定义
+      stage: final_answer
+verifier: llm_judge
+weight: 2.0
+cost_budget_usd: 0.3
+timeout_s: 600
+rubric: |
+  请对代码重构质量判分（满分 100）：
+
+  1. 功能保持（25 分）：重构后的代码与原代码功能完全一致，没有改变任何外部行为，输入输出完全相同；
+  2. 设计质量（25 分）：合理应用设计模式，遵循 SOLID 原则，单一职责、开闭原则、依赖倒置，类之间耦合度低；
+  3. 可扩展性（20 分）：新增功能时不需要修改现有代码，易于扩展和维护，符合对扩展开放、对修改关闭；
+  4. 可测试性（15 分）：依赖注入清晰，易于 Mock 和单元测试，没有硬编码依赖，职责分离合理；
+  5. 代码质量（15 分）：命名规范、注释适当、代码整洁、没有重复代码、异常处理合理。
+
+  评分参考：>=85 优秀，70-84 良好，60-69 及格，<60 不达标。

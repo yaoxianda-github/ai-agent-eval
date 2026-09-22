@@ -1,0 +1,36 @@
+id: LLM-006
+title: 数据分析报告撰写
+level: L3
+description: |
+  读取 input/sales_data.csv 中的销售数据，进行分析并输出一份完整的数据分析报告到 output/analysis_report.md。
+  报告需包含：数据概览、关键指标、趋势分析、维度拆解、问题发现、 actionable 建议。
+tags: [data, analysis, report]
+fixtures:
+  source: fixtures/
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/analysis_report.md
+      desc: 已生成分析报告
+      stage: final_answer
+    - id: c2
+      type: content_contains
+      path: output/analysis_report.md
+      pattern: "建议|结论|发现"
+      desc: 包含分析结论或建议
+      stage: final_answer
+verifier: llm_judge
+weight: 1.5
+cost_budget_usd: 0.25
+timeout_s: 400
+rubric: |
+  请对数据分析报告质量判分（满分 100）：
+
+  1. 数据准确性（25 分）：所有数据计算准确，指标定义清晰，没有计算错误或数据误导；
+  2. 分析深度（25 分）：不仅描述数据表面现象，还深入分析背后原因，多维度拆解，发现有价值的洞察；
+  3. 完整性（20 分）：覆盖数据概览、关键指标、趋势分析、维度对比、问题发现、改进建议等完整结构；
+  4. 可操作性（15 分）：提出的建议具体、可落地、有优先级，能够直接指导业务决策，不是空泛的套话；
+  5. 表达清晰度（15 分）：结构清晰、图表使用恰当、结论先行、语言专业易懂，适合业务人员阅读。
+
+  评分参考：>=85 优秀，70-84 良好，60-69 及格，<60 不达标。

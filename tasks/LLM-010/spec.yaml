@@ -1,0 +1,36 @@
+id: LLM-010
+title: 产品需求文档（PRD）撰写
+level: L4
+description: |
+  读取 input/product_idea.md 中的产品想法，撰写一份完整的产品需求文档（PRD），输出到 output/prd.md。
+  PRD 需包含：产品背景、目标用户、核心功能、用户故事、功能需求、非功能需求、交互原型描述、优先级排序、上线指标。
+tags: [product, prd, writing]
+fixtures:
+  source: fixtures/
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/prd.md
+      desc: 已生成 PRD 文档
+      stage: final_answer
+    - id: c2
+      type: content_contains
+      path: output/prd.md
+      pattern: "需求|功能|用户"
+      desc: 包含需求和功能描述
+      stage: final_answer
+verifier: llm_judge
+weight: 2.0
+cost_budget_usd: 0.3
+timeout_s: 600
+rubric: |
+  请对产品需求文档（PRD）质量判分（满分 100）：
+
+  1. 完整性（25 分）：包含产品背景、目标用户、核心功能、用户故事、功能需求、非功能需求、优先级、上线指标等完整结构，没有遗漏重要部分；
+  2. 需求清晰度（25 分）：每个功能需求描述清晰、无歧义、可验证，包含输入输出、业务规则、异常流程，开发和测试能够直接理解和执行；
+  3. 用户价值（20 分）：需求围绕用户痛点和业务目标，有明确的用户价值，不是为了做功能而做功能，优先级排序合理；
+  4. 逻辑性（15 分）：文档结构清晰、逻辑连贯，功能之间的关系和依赖明确，用户故事和功能需求对应，没有自相矛盾的地方；
+  5. 专业性（15 分）：符合 PRD 文档规范，语言专业简洁，使用恰当的图表和列表，验收标准明确可衡量，适合产品、开发、测试、设计多方协作。
+
+  评分参考：>=85 优秀，70-84 良好，60-69 及格，<60 不达标。

@@ -1,0 +1,37 @@
+id: LLM-001
+title: Python 代码质量优化
+level: L3
+description: |
+  读取 input/bad_code.py 中的 Python 代码，进行质量优化后输出到 output/optimized.py。
+  优化方向：命名规范、去除重复、错误处理、类型注解、代码可读性。
+  保持原有功能逻辑不变。
+tags: [code, quality, refactor]
+fixtures:
+  source: fixtures/
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/optimized.py
+      desc: 已生成优化后的代码文件
+      stage: final_answer
+    - id: c2
+      type: content_contains
+      path: output/optimized.py
+      pattern: "def "
+      desc: 包含函数定义
+      stage: final_answer
+verifier: llm_judge
+weight: 1.5
+cost_budget_usd: 0.2
+timeout_s: 300
+rubric: |
+  请对代码优化质量判分（满分 100）：
+
+  1. 功能正确性（30 分）：优化后的代码保持原有功能逻辑，没有引入 bug；
+  2. 命名规范（20 分）：变量名、函数名清晰有意义，符合 PEP8 规范，无单字母无意义命名；
+  3. 代码结构（20 分）：去除重复代码，函数职责单一，合理拆分，无超长函数；
+  4. 健壮性（15 分）：合理的错误处理、边界条件处理、类型注解；
+  5. 可读性（15 分）：适当注释、代码格式整洁、逻辑清晰易读。
+
+  评分参考：>=85 优秀，70-84 良好，60-69 及格，<60 不达标。

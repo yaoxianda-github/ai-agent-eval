@@ -138,3 +138,25 @@ tasks:
     tier: random
   - id: RAG-004
     tier: random
+
+  # ===== LLM 主观判分任务集（验证 Jev 判分效果）=====
+  - id: LLM-001
+    tier: boundary
+  - id: LLM-002
+    tier: boundary
+  - id: LLM-003
+    tier: random
+  - id: LLM-004
+    tier: golden
+  - id: LLM-005
+    tier: golden
+  - id: LLM-006
+    tier: boundary
+  - id: LLM-007
+    tier: boundary
+  - id: LLM-008
+    tier: regression
+  - id: LLM-009
+    tier: golden
+  - id: LLM-010
+    tier: golden

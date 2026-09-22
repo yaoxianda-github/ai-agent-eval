@@ -1,0 +1,42 @@
+id: LLM-008
+title: 单元测试用例设计
+level: L3
+description: |
+  读取 input/target_code.py 中的 Python 函数，为其编写全面的单元测试用例，输出到 output/test_cases.py。
+  要求：使用 pytest 框架，覆盖正常流程、边界条件、异常情况、参数校验等场景，测试用例命名清晰。
+tags: [test, qa, code]
+fixtures:
+  source: fixtures/
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/test_cases.py
+      desc: 已生成测试用例文件
+      stage: final_answer
+    - id: c2
+      type: content_contains
+      path: output/test_cases.py
+      pattern: "def test_"
+      desc: 包含测试函数
+      stage: final_answer
+    - id: c3
+      type: content_contains
+      path: output/test_cases.py
+      pattern: "import pytest|from pytest"
+      desc: 使用 pytest 框架
+      stage: final_answer
+verifier: llm_judge
+weight: 1.5
+cost_budget_usd: 0.2
+timeout_s: 300
+rubric: |
+  请对单元测试用例质量判分（满分 100）：
+
+  1. 覆盖率（30 分）：覆盖正常流程、边界条件（空值、最大值、最小值、零值）、异常情况、参数校验、各种分支路径，没有遗漏重要场景；
+  2. 正确性（25 分）：测试断言准确，预期结果正确，测试逻辑没有错误，能够真正验证函数行为；
+  3. 独立性（15 分）：每个测试用例独立运行，不依赖其他测试的执行顺序和结果，测试数据隔离；
+  4. 可读性（15 分）：测试函数命名清晰表达测试意图，测试代码结构清晰，Arrange-Act-Assert 模式分明，易于理解和维护；
+  5. 专业性（15 分）：合理使用 pytest 的 fixture、parametrize、raises 等特性，Mock 使用恰当，没有冗余测试，测试代码整洁。
+
+  评分参考：>=85 优秀，70-84 良好，60-69 及格，<60 不达标。

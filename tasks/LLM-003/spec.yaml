@@ -1,0 +1,37 @@
+id: LLM-003
+title: 产品营销文案写作
+level: L2
+description: |
+  读取 input/product_info.md 中的产品信息，为其撰写一篇营销推广文案，输出到 output/marketing.md。
+  文案需包含：吸引人的标题、产品核心卖点、用户痛点解决、使用场景、行动号召。
+  风格：专业但有感染力，适合在微信公众号/知乎发布。
+tags: [writing, marketing, creative]
+fixtures:
+  source: fixtures/
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/marketing.md
+      desc: 已生成营销文案
+      stage: final_answer
+    - id: c2
+      type: content_contains
+      path: output/marketing.md
+      pattern: "#|标题"
+      desc: 包含标题
+      stage: final_answer
+verifier: llm_judge
+weight: 1.0
+cost_budget_usd: 0.15
+timeout_s: 300
+rubric: |
+  请对营销文案质量判分（满分 100）：
+
+  1. 吸引力（25 分）：标题抓人眼球，开头有钩子，能激发读者继续阅读的兴趣；
+  2. 卖点传达（25 分）：核心卖点清晰突出，产品优势表达准确，与用户痛点紧密结合；
+  3. 说服力（20 分）：有具体场景和案例支撑，逻辑清晰，能有效说服读者产生购买意愿；
+  4. 可读性（15 分）：结构清晰、段落分明、语言流畅、易于阅读，适合新媒体平台传播；
+  5. 行动号召（15 分）：结尾有明确的行动号召（CTA），引导读者采取下一步行动。
+
+  评分参考：>=85 优秀，70-84 良好，60-69 及格，<60 不达标。

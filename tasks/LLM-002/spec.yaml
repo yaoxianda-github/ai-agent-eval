@@ -1,0 +1,42 @@
+id: LLM-002
+title: API 技术文档写作
+level: L3
+description: |
+  读取 input/api_code.py 中的 Python 函数，为其编写完整的 API 技术文档，输出到 output/api_doc.md。
+  文档需包含：功能描述、参数说明、返回值说明、异常说明、使用示例、注意事项。
+tags: [doc, api, writing]
+fixtures:
+  source: fixtures/
+ground_truth:
+  checkpoints:
+    - id: c1
+      type: file_exists
+      path: output/api_doc.md
+      desc: 已生成 API 文档
+      stage: final_answer
+    - id: c2
+      type: content_contains
+      path: output/api_doc.md
+      pattern: "参数|param|Parameter"
+      desc: 包含参数说明
+      stage: final_answer
+    - id: c3
+      type: content_contains
+      path: output/api_doc.md
+      pattern: "返回|return|Return"
+      desc: 包含返回值说明
+      stage: final_answer
+verifier: llm_judge
+weight: 1.5
+cost_budget_usd: 0.2
+timeout_s: 300
+rubric: |
+  请对 API 文档质量判分（满分 100）：
+
+  1. 完整性（30 分）：包含功能描述、参数说明（每个参数的类型、含义、是否必填）、返回值说明（类型、含义）、异常说明、使用示例、注意事项；
+  2. 准确性（25 分）：文档描述与代码实际行为一致，参数名、类型、默认值准确无误；
+  3. 清晰度（20 分）：结构清晰、层次分明、易于阅读，使用合适的标题和列表；
+  4. 示例质量（15 分）：使用示例真实可运行，覆盖典型场景和边界情况；
+  5. 专业性（10 分）：术语准确、语言专业、无错别字和语法错误。
+
+  评分参考：>=85 优秀，70-84 良好，60-69 及格，<60 不达标。
