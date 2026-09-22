@@ -592,7 +592,7 @@ def create_app(
     _batch_cancel_flags: dict[str, bool] = {}
 
     def _execute_batch(batch_id: str, agents: list[str], task_ids: list[str],
-                       runs: int, model: str) -> None:
+                       runs: int, model: str, judge_mode: str = "llm") -> None:
         plan = [(a, t, i) for a in agents for t in task_ids for i in range(runs)]
         total = len(plan)
         done = 0
@@ -602,6 +602,7 @@ def create_app(
         # 异步并发执行（默认并发数 3，可通过环境变量配置）
         import concurrent.futures
         
+        import os
         max_workers = int(os.environ.get("EVAL_CONCURRENCY", "3"))
         
         def run_single(agent_id, task_id):
@@ -613,7 +614,7 @@ def create_app(
             rid = uuid.uuid4().hex[:12]
             try:
                 task = _task_map()[task_id]
-                config: dict = {"agent": {}}
+                config: dict = {"agent": {}, "judge_mode": judge_mode}
                 if model:
                     config["agent"]["model"] = model
                 rec = run_one(
@@ -698,6 +699,15 @@ def create_app(
         """获取所有白名单环境变量的配置状态（不返回实际值）。"""
         from agent_eval.config_manager import get_env_status
         return {"items": get_env_status()}
+
+    @app.get("/api/settings/env/{key}/value")
+    def api_get_env_value(key: str) -> dict:
+        """获取单个白名单环境变量的实际值（仅 api_key 类别开放）。"""
+        from agent_eval.config_manager import get_env_value
+        try:
+            return get_env_value(key)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     @app.post("/api/settings/env")
     def api_save_env_settings(payload: dict) -> dict:
@@ -1256,7 +1266,10 @@ def create_app(
             raise HTTPException(status_code=400, detail="任务集为空")
         runs = max(1, min(int(payload.get("runs", 1)), 10))
         model = str(payload.get("model", "deepseek-chat"))
-        label = str(payload.get("label", "")).strip() or f"{scope} × {len(agents)}agent × runs{runs}"
+        judge_mode = str(payload.get("judge_mode", "llm")).lower()
+        if judge_mode not in ("llm", "jev", "smart"):
+            raise HTTPException(status_code=400, detail="judge_mode 只能是 llm / jev / smart")
+        label = str(payload.get("label", "")).strip() or f"{scope} × {len(agents)}agent × runs{runs} [{judge_mode}判分]"
 
         batch_id = uuid.uuid4().hex[:12]
         total = len(agents) * len(task_ids) * runs
@@ -1276,7 +1289,7 @@ def create_app(
         )
         t = threading.Thread(
             target=_execute_batch,
-            args=(batch_id, agents, task_ids, runs, model),
+            args=(batch_id, agents, task_ids, runs, model, judge_mode),
             daemon=True,
         )
         t.start()
