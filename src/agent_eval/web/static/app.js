@@ -4117,12 +4117,21 @@ ${b.fix_plan || '暂无'}
           '<div style="font-size:12px;color:#6b7280;margin-bottom:8px;">' + esc(item.desc) +
             (item.used_by && item.used_by.length ? ' · 适用: ' + item.used_by.map(esc).join(", ") : "") +
           "</div>" +
-          '<input type="' + inputType + '" id="env-' + item.key + '" placeholder="' + placeholder +
-            '" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:var(--font-mono);">' +
+          '<div style="position:relative;">' +
+            '<input type="' + inputType + '" id="env-' + item.key + '" placeholder="' + placeholder +
+              '" style="width:100%;padding:8px 70px 8px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:var(--font-mono;">' +
+            (item.category === "api_key" && item.configured ?
+              '<div style="position:absolute;right:8px;top:50%;transform:translateY(-50%);display:flex;gap:2px;">' +
+                '<button type="button" class="env-eye-btn" data-key="' + item.key + '" title="显示/隐藏" style="background:none;border:none;cursor:pointer;padding:2px;font-size:14px;color:var(--text-muted);line-height:1;">👁</button>' +
+                '<button type="button" class="env-copy-btn" data-key="' + item.key + '" title="复制" style="background:none;border:none;cursor:pointer;padding:2px;font-size:14px;color:var(--text-muted);line-height:1;">📋</button>' +
+              '</div>' : "") +
+          '</div>' +
           (item.configured ? '<button class="btn secondary small" style="margin-top:8px;" onclick="clearEnvField(\'' + item.key + '\')">清除此配置</button>' : "") +
         "</div>";
       });
       document.getElementById("env-config-list").innerHTML = html;
+      // 绑定小眼睛和复制按钮
+      bindEnvKeyButtons();
 
       // 搜索过滤
       var searchInput = document.getElementById("env-search");
@@ -4151,6 +4160,94 @@ ${b.fix_plan || '暂无'}
     var el = document.getElementById("env-" + key);
     if (el) { el.value = ""; el.placeholder = "已标记为清除（保存后生效）"; el.style.borderColor = "#ef4444"; }
   };
+
+  // 绑定小眼睛和复制按钮事件（在 loadEnvConfig 渲染完成后调用）
+  function bindEnvKeyButtons() {
+    // 小眼睛：显示/隐藏 API Key
+    document.querySelectorAll(".env-eye-btn").forEach(function (btn) {
+      btn.onclick = function () {
+        var key = this.dataset.key;
+        var input = document.getElementById("env-" + key);
+        if (!input) return;
+        // 如果当前是 password 类型，需要先获取值
+        if (input.type === "password") {
+          // 如果输入框里没有用户输入的新值，就从后端获取已配置的值
+          if (!input.value) {
+            var btnEl = this;
+            btnEl.textContent = "⏳";
+            api("/api/settings/env/" + key + "/value").then(function (data) {
+              input.value = data.value || "";
+              input.type = "text";
+              btnEl.textContent = "🙈";
+            }).catch(function () {
+              btnEl.textContent = "👁";
+              alert("获取 API Key 失败");
+            });
+            return;
+          }
+          input.type = "text";
+          this.textContent = "🙈";
+        } else {
+          input.type = "password";
+          this.textContent = "👁";
+        }
+      };
+    });
+
+    // 复制按钮
+    document.querySelectorAll(".env-copy-btn").forEach(function (btn) {
+      btn.onclick = function () {
+        var key = this.dataset.key;
+        var input = document.getElementById("env-" + key);
+        var btnEl = this;
+        var copyValue = function (val) {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(val).then(function () {
+              btnEl.textContent = "✅";
+              setTimeout(function () { btnEl.textContent = "📋"; }, 1500);
+            }).catch(function () {
+              // fallback
+              var ta = document.createElement("textarea");
+              ta.value = val;
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand("copy");
+              document.body.removeChild(ta);
+              btnEl.textContent = "✅";
+              setTimeout(function () { btnEl.textContent = "📋"; }, 1500);
+            });
+          } else {
+            var ta = document.createElement("textarea");
+            ta.value = val;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand("copy");
+            document.body.removeChild(ta);
+            btnEl.textContent = "✅";
+            setTimeout(function () { btnEl.textContent = "📋"; }, 1500);
+          }
+        };
+
+        // 如果输入框里有值，直接复制；否则从后端获取
+        if (input && input.value) {
+          copyValue(input.value);
+        } else {
+          btnEl.textContent = "⏳";
+          api("/api/settings/env/" + key + "/value").then(function (data) {
+            if (data.value) {
+              copyValue(data.value);
+            } else {
+              btnEl.textContent = "📋";
+              alert("该 API Key 尚未配置");
+            }
+          }).catch(function () {
+            btnEl.textContent = "📋";
+            alert("获取 API Key 失败");
+          });
+        }
+      };
+    });
+  }
 
   // 保存环境变量配置
   function saveEnvConfig(items) {

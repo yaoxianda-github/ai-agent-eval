@@ -185,6 +185,29 @@ def get_env_status() -> list[dict]:
     return result
 
 
+def get_env_value(key: str) -> dict:
+    """获取单个白名单环境变量的实际值（仅 api_key 类别开放）。
+
+    Args:
+        key: 环境变量名
+
+    Returns:
+        {"key": key, "value": 实际值, "source": 配置来源}
+    """
+    if key not in ENV_WHITELIST:
+        raise ValueError(f"环境变量 {key} 不在白名单内")
+    if ENV_WHITELIST[key].get("category") != "api_key":
+        raise ValueError(f"仅支持查看 api_key 类别的环境变量值")
+
+    env_file = read_env_file()
+    if key in env_file and env_file[key] != "":
+        return {"key": key, "value": env_file[key], "source": ".env"}
+    elif os.environ.get(key):
+        return {"key": key, "value": os.environ[key], "source": "environment"}
+    else:
+        return {"key": key, "value": "", "source": "none"}
+
+
 def apply_env_to_process() -> int:
     """将 .env 文件中的变量加载到当前进程环境。
 
