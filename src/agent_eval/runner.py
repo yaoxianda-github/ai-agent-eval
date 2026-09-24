@@ -344,7 +344,7 @@ def run_one(
             logger.info("确定性校验点完成: %d/%d 通过", passed, len(verdicts))
             if task.verifier == "llm_judge":
                 # V4.5 P0：支持多种 Judge 模式（llm / jev / smart）
-                judge_mode = config.get("judge_mode", "llm")
+                judge_mode = config.get("judge_mode", "smart")
                 if judge_mode == "jev":
                     verdicts.append(judge_jev(task, workspace))
                 elif judge_mode == "smart":

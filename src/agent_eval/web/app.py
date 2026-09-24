@@ -592,7 +592,7 @@ def create_app(
     _batch_cancel_flags: dict[str, bool] = {}
 
     def _execute_batch(batch_id: str, agents: list[str], task_ids: list[str],
-                       runs: int, model: str, judge_mode: str = "llm") -> None:
+                       runs: int, model: str, judge_mode: str = "smart") -> None:
         plan = [(a, t, i) for a in agents for t in task_ids for i in range(runs)]
         total = len(plan)
         done = 0
@@ -1266,7 +1266,7 @@ def create_app(
             raise HTTPException(status_code=400, detail="任务集为空")
         runs = max(1, min(int(payload.get("runs", 1)), 10))
         model = str(payload.get("model", "deepseek-chat"))
-        judge_mode = str(payload.get("judge_mode", "llm")).lower()
+        judge_mode = str(payload.get("judge_mode", "smart")).lower()
         if judge_mode not in ("llm", "jev", "smart"):
             raise HTTPException(status_code=400, detail="judge_mode 只能是 llm / jev / smart")
         label = str(payload.get("label", "")).strip() or f"{scope} × {len(agents)}agent × runs{runs} [{judge_mode}判分]"
