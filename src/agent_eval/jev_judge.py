@@ -22,7 +22,7 @@ from agent_eval.observability import trace_llm_call
 
 logger = get_logger(__name__)
 
-JEV_API_URL = "https://tokenra.io/v1/decisions"
+JEV_API_URL = "https://api.typesafe.ai/v1/systemone"
 
 # 三级阈值策略
 DEFAULT_AUTO_PASS_THRESHOLD = 0.9   # ≥0.9：自动通过，直接计入结果
