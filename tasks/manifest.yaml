@@ -114,6 +114,14 @@ tasks:
     tier: boundary
   - id: SEC-005
     tier: boundary
+  - id: SEC-006
+    tier: boundary
+  - id: SEC-007
+    tier: boundary
+  - id: SEC-008
+    tier: boundary
+  - id: SEC-009
+    tier: boundary
 
   # ===== 回归集（历史bug复现）=====
   - id: T103
