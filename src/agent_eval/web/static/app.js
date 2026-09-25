@@ -1408,6 +1408,7 @@
         var catLabel = BC_CATEGORY_LABELS[b.category] || b.category;
         var stLabel = BC_STATUS_LABELS[b.status] || b.status;
         return '<tr class="clickable" data-bid="' + esc(b.id) + '">' +
+          '<td><input type="checkbox" class="bc-checkbox" data-bid="' + esc(b.id) + '"></td>' +
           "<td>" + esc(fmtTime(b.created_at)) + "</td>" +
           '<td><span class="badge" style="background:' + BC_SEVERITY_COLORS[b.severity] + ';color:#fff">' + esc(b.severity) + "</span></td>" +
           "<td><b>" + esc(b.title) + "</b></td>" +
@@ -1439,6 +1440,7 @@
         }
         document.querySelectorAll('.bc-checkbox').forEach(function(cb) {
           cb.onchange = updateBulkBar;
+          cb.onclick = function(e) { if (e.stopPropagation) e.stopPropagation(); };
         });
         
         var bulkDeleteBtn = document.getElementById('bc-bulk-delete');
@@ -1886,6 +1888,64 @@ ${b.fix_plan || '暂无'}
       count.textContent = checked.length;
       bar.style.display = checked.length > 0 ? 'flex' : 'none';
     }
+  }
+
+  function bulkAnalyzeBadcases() {
+    var checked = document.querySelectorAll('.bc-checkbox:checked');
+    if (!checked.length) {
+      alert('请先勾选要分析的 badcase（点击列表首列复选框选择）');
+      return;
+    }
+    if (!confirm('对选中的 ' + checked.length + ' 条 badcase 执行批量智能分析？')) {
+      return;
+    }
+    var ids = Array.prototype.map.call(checked, function (cb) {
+      return cb.getAttribute('data-bid');
+    });
+    var btn = document.getElementById('bc-bulk-analyze');
+    var report = document.getElementById('bc-analysis-report');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ 分析中...'; }
+    if (report) {
+      report.style.display = 'block';
+      report.innerHTML = '<div style="text-align:center;padding:32px;"><div style="display:inline-block;width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;"></div><div style="margin-top:12px;color:var(--text-muted);">批量分析中（' + ids.length + ' 条，一次 Jev 调用）...</div></div>';
+    }
+    api('/api/badcases/batch-analyze', { method: 'POST', body: { badcase_ids: ids } })
+      .then(function (d) {
+        if (btn) { btn.disabled = false; btn.textContent = '批量智能分析'; }
+        if (!report) return;
+        if (!d.ok) {
+          report.innerHTML = '<div class="err-banner">❌ 分析失败：' + esc(d.error || '未知错误') + '</div>';
+          return;
+        }
+        var html = '<div class="card"><h3 style="margin:0 0 12px;">批量分析结果 <span class="muted">' + (d.analyzed || 0) + ' / ' + (d.total || 0) + ' 条</span></h3>';
+        var s = d.summary || {};
+        html += '<div class="bc-stat-row"><span class="bc-stat"><b>' + (s.high_severity || 0) + '</b> P0/P1 高危</span><span class="bc-stat"><b>' + (s.common_pattern_count || 0) + '</b> 疑似共性模式</span></div>';
+        var rows = (d.results || []).map(function (r) {
+          return '<tr><td style="padding:8px;border:1px solid var(--border);">' + esc(r.id) + '</td>' +
+            '<td style="padding:8px;border:1px solid var(--border);">' + esc(r.title || '') + '</td>' +
+            '<td style="padding:8px;border:1px solid var(--border);">' + esc(r.jev_root_cause || '-') + '</td>' +
+            '<td style="padding:8px;border:1px solid var(--border);">' + esc(r.jev_severity || '-') + '</td>' +
+            '<td style="padding:8px;border:1px solid var(--border);">' + esc(r.jev_fix_difficulty || '-') + '</td>' +
+            '<td style="padding:8px;border:1px solid var(--border);">' + (r.confidence != null ? esc(r.confidence) : '-') + '</td></tr>';
+        }).join('');
+        html += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;"><tr><th style="padding:8px;border:1px solid var(--border);text-align:left;">ID</th><th style="padding:8px;border:1px solid var(--border);text-align:left;">标题</th><th style="padding:8px;border:1px solid var(--border);text-align:left;">根因</th><th style="padding:8px;border:1px solid var(--border);text-align:left;">严重度</th><th style="padding:8px;border:1px solid var(--border);text-align:left;">修复难度</th><th style="padding:8px;border:1px solid var(--border);text-align:left;">置信度</th></tr>' + rows + '</table></div>';
+        if (d.clusters && d.clusters.length) {
+          html += '<div style="margin-top:12px;"><b>共性聚类：</b>';
+          html += d.clusters.map(function (c) {
+            return '<span class="badge" style="background:#eff6ff;color:#2563eb;margin-right:8px;">' + esc(c.root_cause) + ' × ' + c.count + '</span>';
+          }).join('');
+          html += '</div>';
+        }
+        html += '</div>';
+        report.innerHTML = html;
+      })
+      .catch(function (e) {
+        if (btn) { btn.disabled = false; btn.textContent = '批量智能分析'; }
+        if (report) {
+          report.style.display = 'block';
+          report.innerHTML = '<div class="err-banner">❌ 请求失败：' + esc(e.message) + '</div>';
+        }
+      });
   }
 
   function bulkDeleteBadcases() {
@@ -3382,13 +3442,23 @@ ${b.fix_plan || '暂无'}
         if (!c || !c.n) return '<td class="mx-cell empty">—</td>';
         var sub = showCost ? ("<span class='r'>" + pctText(c.pass_rate) + " · σ" + c.std + "</span>")
                            : ("<span class='r'>" + pctText(c.pass_rate) + "</span>");
+        // 双指标徽章（V4.7 P0-1）：pass@k（至少一次成功） vs pass^k（连续k次每次都成功）
+        var pkBadge = "";
+        if (c.n > 1) {
+          var p1 = c.pass_at_k != null ? c.pass_at_k : c.pass_rate;
+          var pk = c.pass_all != null ? c.pass_all : 0;
+          pkBadge = '<span class="pk-badge" title="pass@k：k次运行至少一次成功=' + pctText(p1) +
+                    '；pass^k：连续k次每次都成功=' + pctText(pk) +
+                    '（敏感任务如退款/发布/改配置应以 pass^k 为准）">' +
+                    'pass@k ' + pctText(p1) + ' · pass^k ' + pctText(pk) + '</span>';
+        }
         // 评委稳定性标注：σ > 0.3 表示评分波动大
         var stabilityBadge = "";
         if (showCost && c.std != null && c.std > 0.3) {
           stabilityBadge = '<span class="badge" style="background:#f59e0b;color:#fff;font-size:10px;margin-left:4px;" title="评委评分波动大，建议人工复核">不稳定</span>';
         }
         return '<td class="mx-cell ' + pctClass(c.pass_rate) + '" data-agent="' + esc(a) +
-          '" data-task="' + esc(t) + '"><span class="v">' + c.best + "</span>" + sub + stabilityBadge + "</td>";
+          '" data-task="' + esc(t) + '"><span class="v">' + c.best + "</span>" + sub + pkBadge + stabilityBadge + "</td>";
       }).join("");
       return "<tr><td class='ag-head'>" + esc(a) + "</td>" + tds + "</tr>";
     }).join("");
@@ -3602,7 +3672,9 @@ ${b.fix_plan || '暂无'}
     var c = (m.cells || {})[agent + "|" + task];
     var box = el("mx-drill");
     if (!c || !c.n) { box.innerHTML = "<h3>单元格下钻</h3><div class='empty'>无运行记录</div>"; return; }
-    var st = { best: c.best, mean: c.mean, std: c.std, pass_rate: c.pass_rate };
+    var st = { best: c.best, mean: c.mean, std: c.std, pass_rate: c.pass_rate,
+               pass_at_k: c.pass_at_k != null ? c.pass_at_k : c.pass_rate,
+               pass_all: c.pass_all != null ? c.pass_all : 0 };
     var head = showCost
       ? "<tr><th>run</th><th>状态</th><th>得分</th><th>通过率</th><th>耗时</th><th>成本</th><th class='drill-action-col'></th></tr>"
       : "<tr><th>run</th><th>状态</th><th>得分</th><th>通过率</th><th>耗时</th><th class='drill-action-col'></th></tr>";
@@ -3616,7 +3688,8 @@ ${b.fix_plan || '暂无'}
     box.innerHTML =
       "<h3>单元格下钻 · " + esc(agent) + " × " + esc(task) +
       ' <span class="muted">N=' + c.n + " · best " + st.best + " · mean " + st.mean +
-      " · σ " + st.std + " · 通过率 " + pctText(st.pass_rate) + "</span></h3>" +
+      " · σ " + st.std + " · 通过率 " + pctText(st.pass_rate) +
+      (c.n > 1 ? " · pass@k " + pctText(st.pass_at_k) + " · pass^k " + pctText(st.pass_all) : "") + "</span></h3>" +
       "<table>" + head + rows + "</table>";
   }
 
@@ -4787,6 +4860,9 @@ ${(r.trajectory || []).map(function(step, i) {
   // 轨迹回放时间线：inline onclick 需要全局可达（IIFE 作用域内不可达）
   window.tlFilter = tlFilter;
   window.tlToggle = tlToggle;
+  window.showAgentHistory = showAgentHistory;
+  window.exportAgentResult = exportAgentResult;
+  window.copyAgentResult = copyAgentResult;
 
   // ---------- 自定义 tooltip（点击 info-icon/cap-hint 显示） ----------
   var activeTooltip = null;
@@ -4838,7 +4914,6 @@ ${(r.trajectory || []).map(function(step, i) {
   });
 
   router();
-})();
 
   // V4.4 P1：指标解释链——三层指标因果关系可视化
   function explanationChain(runs) {
@@ -5029,3 +5104,34 @@ ${(r.trajectory || []).map(function(step, i) {
       document.getElementById("four-dim-radar").innerHTML = '<div class="empty">加载数据失败</div>';
     });
   }
+// V4.5 P2：评测置信度概览（工作台），填充高/中/低/平均四个统计块
+  function loadConfidenceOverview() {
+    api("/api/runs?limit=200").then(function (data) {
+      var runs = data.runs || data.items || [];
+      var high = 0, medium = 0, low = 0;
+      var scores = [];
+      runs.forEach(function (r) {
+        if (r.confidence_score == null) return;
+        var s = Number(r.confidence_score);
+        scores.push(s);
+        if (r.confidence_level === "high" || s >= 0.8) high++;
+        else if (r.confidence_level === "medium" || s >= 0.5) medium++;
+        else low++;
+      });
+      var avg = scores.length ? scores.reduce(function (a, b) { return a + b; }, 0) / scores.length : null;
+      var set = function (id, val) {
+        var box = document.getElementById(id);
+        if (box) box.textContent = val;
+      };
+      set("conf-high", high);
+      set("conf-medium", medium);
+      set("conf-low", low);
+      set("conf-avg", avg != null ? avg.toFixed(2) : "—");
+    }).catch(function () {
+      ["conf-high", "conf-medium", "conf-low", "conf-avg"].forEach(function (id) {
+        var box = document.getElementById(id);
+        if (box) box.textContent = "—";
+      });
+    });
+  }
+})();

@@ -422,6 +422,8 @@ def create_app(
                 "mean": st["mean"],
                 "std": st["std"],
                 "pass_rate": st["pass_rate"],
+                "pass_at_k": st["pass_at_k"],   # pass@k：k次中至少一次成功
+                "pass_all": st["pass_all"],     # pass^k：连续k次每次都成功
                 "cost_cny": round(sum(x["cost_cny"] for x in lst), 4),
                 "duration_s": round(
                     sum(x["duration_s"] for x in lst) / len(lst), 2

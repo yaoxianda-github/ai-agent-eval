@@ -1003,6 +1003,14 @@ table.matrix th { position: sticky; top: 0; z-index: 1; }
 .mx-cell.sel { outline: 2px solid var(--text-primary); outline-offset: -2px; }
 .mx-cell .v { font-size: 13px; font-family: var(--font-mono); }
 .mx-cell .r { display: block; font-size: 10px; font-weight: 400; opacity: .7; }
+/* V4.7 P0-1：pass@k / pass^k 双指标徽章 */
+.mx-cell .pk-badge {
+  display: inline-block; margin-top: 3px; padding: 1px 5px;
+  font-size: 9px; font-weight: 600; border-radius: 8px;
+  background: rgba(59,130,246,.12); color: var(--text-primary); opacity: .9;
+  border: 1px solid rgba(59,130,246,.35); white-space: nowrap;
+}
+.mx-cell .pk-badge:hover { opacity: 1; }
 .mx-cell.empty {
   color: var(--border); font-weight: 400; cursor: default; background: var(--bg-secondary);
 }
