@@ -464,6 +464,7 @@ def commands(
                 {"name": "list-tasks", "desc": "任务包列表（含预计成本）", "usage": "agent-eval list-tasks", "options": "--json"},
                 {"name": "report", "desc": "生成评测报告", "usage": "agent-eval report --run <run_id>", "options": "--run, --output, --format"},
                 {"name": "dreaming", "desc": "系统性模式分析（失败归因）", "usage": "agent-eval dreaming --agent claude-code", "options": "--agent, --task, --min-pattern, --auto-badcase"},
+                {"name": "judge-calibrate", "desc": "LLM Judge 人工校准（一致率≥85%才可信）", "usage": "agent-eval judge-calibrate --labeled <labeled.json>", "options": "--labeled, --rubric, --json"},
             ],
         },
         {

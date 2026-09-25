@@ -142,9 +142,15 @@ class LLMJudge:
             }
 
         rubric = (task.rubric or DEFAULT_RUBRIC).strip()
+        # V4.7 P1：参考解法注入（若有），作为判分的标准答案参照
+        ref_block = ""
+        ref = getattr(task, "reference_solution", "") or ""
+        if ref.strip():
+            ref_block = f"\n参考解法（标准答案，用于对比 Agent 产物是否达标）：\n{ref.strip()}\n"
         user_msg = (
             f"任务：{task.description}\n\n"
             f"评分标准：\n{rubric}\n\n"
+            f"{ref_block}"
             f"Agent 产物：\n{artifacts}\n\n"
             '请仅输出一个 JSON 对象，包含以下字段：\n'
             '{"score": 0-100 总分, "passed": true/false, '

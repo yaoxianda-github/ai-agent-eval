@@ -40,3 +40,16 @@ rubric: |
   5. 专业性（15 分）：合理使用 pytest 的 fixture、parametrize、raises 等特性，Mock 使用恰当，没有冗余测试，测试代码整洁。
 
   评分参考：>=85 优秀，70-84 良好，60-69 及格，<60 不达标。
+reference_solution: |
+  参考解法（标准答案参照）：
+  1. 覆盖正常流程 + 边界（空值/最大值/最小值/零值）+ 异常场景 + 参数校验；
+  2. 断言使用 pytest 原生 assert 或 unittest 断言，预期值正确；
+  3. 每个用例独立，无跨用例状态依赖，测试数据隔离；
+  4. 命名 test_<行为>_<场景>，结构清晰；
+  5. 合理使用 parametrize/fixture/raises，无冗余测试。
+  示例形态：
+  def test_add_normal(): assert add(1,2)==3
+  def test_add_zero(): assert add(0,0)==0
+  def test_add_negative(): assert add(-1,1)==0
+  @pytest.mark.parametrize("a,b,exp", [(1,2,3),(0,0,0)])
+  def test_add_params(a,b,exp): assert add(a,b)==exp

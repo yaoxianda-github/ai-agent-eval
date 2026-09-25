@@ -114,6 +114,8 @@ class TaskSpec:
     max_steps: Optional[int] = None  # 可选：覆盖后端默认步数上限（如 L4 修复类任务提额）
     tags: list[str] = field(default_factory=list)
     rubric: str = ""  # V2.2：verifier=llm_judge 时的评分标准（任务作者自定义）
+    reference_solution: str = ""  # V4.7 P1：参考解法（任务作者提供的标准答案/预期产出）
+                        # 注入 LLM Judge 作为评分参照，显著提升判分一致性
     capabilities: list[str] = field(default_factory=list)  # V2.5：任务考察的 Harness 能力（六类）
     mcp_servers: list[dict] = field(default_factory=list)  # M2：任务声明的 MCP server 列表（stdio 模式）
     tier: str = ""  # V3.1：数据集分层（golden/boundary/regression/random）
@@ -165,6 +167,7 @@ class TaskSpec:
             max_steps=int(data["max_steps"]) if data.get("max_steps") else None,
             tags=list(data.get("tags", [])),
             rubric=str(data.get("rubric", "")),
+            reference_solution=str(data.get("reference_solution", "")),
             capabilities=list(data.get("capabilities", [])),
             mcp_servers=list(data.get("mcp_servers", [])),
             tier=str(data.get("tier", "")),
