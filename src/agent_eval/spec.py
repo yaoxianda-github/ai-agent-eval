@@ -81,6 +81,8 @@ class Checkpoint:
     max_consecutive: int = 3  # V4.3 P0：no_loop_assert 类型的最大连续重复次数
     gate_mode: str = "blocking"  # V4.0 P2：渐进式规则状态（shadow只记录/warning提醒/blocking阻断）
     category: str = "outcome"  # V4.1 P1：成功标准三层分类（outcome业务结果/gate硬门禁/quality软质量）
+    gate_kind: str = ""  # V4.7 P1：敏感动作硬门槛类别（fund资金/delete删除/publish发布/privilege越权）
+                       # category=gate 时生效；此类 checkpoint 失败即阻断，不能被综合分掩盖
 
 
 @dataclass
@@ -145,6 +147,7 @@ class TaskSpec:
                 max_consecutive=cp.get("max_consecutive", 3),
                 gate_mode=cp.get("gate_mode", "blocking"),
                 category=cp.get("category", "outcome"),
+                gate_kind=cp.get("gate_kind", ""),
             )
             for cp in data.get("ground_truth", {}).get("checkpoints", [])
         ]
@@ -245,7 +248,30 @@ def load_manifest(tasks_dir: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
-def load_task_pack(tasks_dir: Path) -> list[TaskSpec]:
+def resolve_pack_tiers(manifest: dict, pack_name: str) -> list[str] | None:
+    """V4.7 P0-2：解析 manifest 中的 pack 定义（capability_pack / regression_pack 等）。
+
+    返回该 pack 包含的 tier 列表；pack 不存在时返回 None。
+    """
+    pack = manifest.get(pack_name)
+    if pack is None:
+        return None
+    if isinstance(pack, list):
+        return [str(t) for t in pack]
+    return [str(pack)]
+
+
+def load_task_pack(tasks_dir: Path, pack: str | None = None) -> list[TaskSpec]:
+    """加载 tasks_dir 下 manifest 声明的任务，可按 pack（capability/regression）过滤。
+
+    支持 manifest includes 字段：引用已安装的任务包，自动合并包内任务。
+    本地任务与 includes 任务 ID 冲突时，本地任务优先。
+
+    V3.1：支持 tasks 列表的两种格式：
+    - 旧格式：["T001", "T002", ...]（字符串列表）
+    - 新格式：[{"id": "T001", "tier": "golden"}, ...]（字典列表，含 tier 分层）
+    V4.7 P0-2：pack 过滤——只返回 tier 属于指定 pack 的任务。
+    """
     """加载 tasks_dir 下 manifest 声明的全部任务。
 
     支持 manifest includes 字段：引用已安装的任务包，自动合并包内任务。
@@ -293,6 +319,17 @@ def load_task_pack(tasks_dir: Path) -> list[TaskSpec]:
                 continue
             tasks.append(TaskSpec.from_yaml(spec_path))
             seen_ids.add(task_id)
+
+    # V4.7 P0-2：pack 过滤（capability_pack / regression_pack）
+    if pack:
+        pack_tiers = resolve_pack_tiers(manifest, pack)
+        if pack_tiers is None:
+            raise ValueError(
+                f"未知任务包: {pack}（manifest.yaml 中未定义；可用：capability_pack / regression_pack / core_pack / dev_pack / eval_pack）"
+            )
+        pack_tier_set = set(pack_tiers)
+        tasks = [t for t in tasks if (getattr(t, "tier", "") or "") in pack_tier_set]
+        logger.info(f"任务包 {pack} 过滤: {len(tasks)} 个任务（tiers={pack_tiers}）")
 
     return tasks
 

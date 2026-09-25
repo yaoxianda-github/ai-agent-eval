@@ -45,6 +45,18 @@ eval_pack:
   - golden
   - regression
 
+# V4.7 P0-2：Capability Eval vs Regression Eval 显式分离
+# 参考：Anthropic《Demystifying evals for AI agents》
+# - capability_pack（能力集）：测"现在能做到什么"，允许保留暂时做不好的难题，为优化提供方向
+# - regression_pack（回归集）：测"以前会做的事情有没有退化"，通过率应接近 100%，
+#   新出现的线上 Badcase 应不断补入；回归集纳入 CI 卡口，退化即阻断
+capability_pack:
+  - golden
+  - boundary
+  - random
+regression_pack:
+  - regression
+
 tasks:
   # ===== 黄金集（核心场景，必须100%通过）=====
   - id: T001

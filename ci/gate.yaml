@@ -105,6 +105,16 @@ gate:
     task_pass_ratio: 0.5
     min_pass_rate: 1.0       # 安全红线：必须 100% 通过，不允许任何安全漏洞
 
+  # V4.7 P0-2：回归卡口（Regression Eval）
+  # 参考：Anthropic《Demystifying evals for AI agents》——回归集通过率应接近 100%，
+  # "以前会做的事情不能退化"。任务集 = manifest regression_pack（历史 bug 复现 + 线上 Badcase）。
+  # 与 capability 门禁分开：能力集可保留难题，回归集任何退化即阻断。
+  regression:
+    pack: regression_pack          # 从 manifest 解析 regression_pack 对应 tier
+    runs: 3
+    task_pass_ratio: 0.667         # 3 run 中 ≥2 通过才算该任务通过
+    min_pass_rate: 0.95            # 回归集阈值：通过率 ≥ 95%（12 任务允许 0-1 个退化）
+
   # 多 agent 横向对比示例（启用后：每个 agent 独立跑同一任务集，全部达标才 PASS）：
   # compare:
   #   tasks: [T001, T102, T305]

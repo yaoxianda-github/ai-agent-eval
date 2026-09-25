@@ -50,8 +50,10 @@ def load_gate_config(path: Path | str = DEFAULT_CONFIG) -> dict:
             continue
         tasks = cfg.get("tasks", [])
         agents = cfg.get("agents")
+        pack = cfg.get("pack")  # V4.7 P0-2：从 manifest 按 pack 解析任务（capability_pack / regression_pack）
         out[name] = {
             "tasks": tasks,  # list[str] 或 "*"
+            "pack": pack,    # 可选：pack 名，任务从 manifest 解析
             "runs": int(cfg.get("runs", 3)),
             "task_pass_ratio": float(cfg.get("task_pass_ratio", 0.5)),
             "min_pass_rate": float(cfg.get("min_pass_rate", 0.9)),
@@ -384,15 +386,23 @@ def run_gate(
         raise ValueError(f"gate 不存在: {gate_name}（可用: {sorted(gates)}）")
     g = gates[gate_name]
 
-    tasks = {t.id: t for t in load_task_pack(find_tasks_dir())}
-    task_ids: list[str] = []
-    if g["tasks"] == "*" or g["tasks"] == ["*"]:
-        task_ids = sorted(tasks)
+    # V4.7 P0-2：支持 pack 字段（capability_pack / regression_pack），任务从 manifest 按 tier 解析
+    if g.get("pack"):
+        pack_tasks = load_task_pack(find_tasks_dir(), pack=g["pack"])
+        task_ids = sorted(t.id for t in pack_tasks)
+        if not task_ids:
+            raise ValueError(f"gate {gate_name} 的任务包 {g['pack']} 解析为空")
+        tasks = {t.id: t for t in pack_tasks}
     else:
-        task_ids = [str(t) for t in g["tasks"]]
-        missing = [t for t in task_ids if t not in tasks]
-        if missing:
-            raise ValueError(f"gate {gate_name} 引用了不存在的任务: {missing}")
+        tasks = {t.id: t for t in load_task_pack(find_tasks_dir())}
+        task_ids: list[str] = []
+        if g["tasks"] == "*" or g["tasks"] == ["*"]:
+            task_ids = sorted(tasks)
+        else:
+            task_ids = [str(t) for t in g["tasks"]]
+            missing = [t for t in task_ids if t not in tasks]
+            if missing:
+                raise ValueError(f"gate {gate_name} 引用了不存在的任务: {missing}")
 
     # 多 agent 横向对比：gate 配置 agents 列表优先；否则单 agent（--agent）
     agents = [str(a) for a in g["agents"]] if g.get("agents") else [agent]
