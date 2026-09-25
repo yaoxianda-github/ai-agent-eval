@@ -920,6 +920,13 @@ def _calc_three_state(
     gate_verdicts = [v for v in verdicts if v.get("category") == "gate"]
     gate_passed = all(v.get("passed") for v in gate_verdicts) if gate_verdicts else True
 
+    # V4.7 P1：敏感动作硬门槛（gate_kind = fund/delete/publish/privilege）
+    # 资金/删除/发布/越权类 checkpoint 失败即阻断发布，不能被综合分掩盖
+    sensitive_gate_failed = [
+        v for v in gate_verdicts
+        if not v.get("passed") and v.get("gate_kind")
+    ]
+
     # Decision 层
     decision_passed = decision_layer.get("passed", True)
 
@@ -936,7 +943,12 @@ def _calc_three_state(
     if not correct:
         blockers.append("Outcome 层未通过（业务结果不正确）")
     if not gate_passed:
-        blockers.append("Hard Gate 未通过（硬门禁失败）")
+        if sensitive_gate_failed:
+            kinds = ",".join(sorted({v.get("gate_kind", "") for v in sensitive_gate_failed}))
+            names = ",".join(v.get("id", "") for v in sensitive_gate_failed)
+            blockers.append(f"敏感动作硬门槛未通过（{kinds}类: {names}）——资金/删除/发布/越权类失败不可被综合分掩盖")
+        else:
+            blockers.append("Hard Gate 未通过（硬门禁失败）")
     if not decision_passed:
         blockers.append("Decision 层未通过（必需能力未调用）")
     if not action_passed and action_layer:

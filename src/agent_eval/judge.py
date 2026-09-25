@@ -150,7 +150,10 @@ class LLMJudge:
             '{"score": 0-100 总分, "passed": true/false, '
             '"dimensions": {"correctness": 0-100 事实正确性, "usefulness": 0-100 有用性, '
             '"completeness": 0-100 完整性, "efficiency": 0-100 效率, "safety": 0-100 安全性}, '
-            '"reasoning": "判分理由"}'
+            '"reasoning": "判分理由"}\n'
+            '重要（V4.7 P1）：如果产物证据不足、信息不完整，无法做出可信判断，'
+            '必须返回 {"abstain": true, "reasoning": "无法判断的原因"}，'
+            '禁止强迫猜测一个分数。只有证据充分时才给分。'
         )
         try:
             start = time.time()
@@ -184,6 +187,8 @@ class LLMJudge:
             )
 
             data = _parse_score(raw)
+            # V4.7 P1：abstain（无法判断）——证据不足时不允许猜分，交由人工复核
+            abstain = bool(data.get("abstain", False))
             score = max(0.0, min(1.0, float(data.get("score", 0)) / 100.0))
             passed = bool(data.get("passed", score >= 0.6))
             reasoning = str(data.get("reasoning", ""))[:300]
@@ -200,6 +205,18 @@ class LLMJudge:
                 task.id, score, passed, duration_ms,
                 {k: round(v, 2) for k, v in dimensions.items()},
             )
+            if abstain:
+                return {
+                    "id": "judge",
+                    "type": "llm_judge",
+                    "passed": False,
+                    "abstain": True,   # V4.7 P1：无法判断，需人工复核
+                    "detail": f"无法判断（abstain）：{reasoning or '产物证据不足'}"[:300],
+                    "score": 0.0,
+                    "reasoning": reasoning,
+                    "dimensions": {"correctness": 0, "usefulness": 0, "completeness": 0, "efficiency": 0, "safety": 0},
+                    "usage": dict(self._usage) or None,
+                }
             return {
                 "id": "judge",
                 "type": "llm_judge",
