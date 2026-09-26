@@ -45,7 +45,14 @@ ground_truth:
 
 def test_from_yaml_defaults(tmp_path):
     spec = tmp_path / "spec.yaml"
-    spec.write_text("id: T902\ntitle: 默认值任务\n", encoding="utf-8")
+    # spec 校验要求至少一个校验点（V3.x 起 from_yaml 会 validate）
+    spec.write_text(
+        "id: T902\ntitle: 默认值任务\nground_truth:\n"
+        "  checkpoints:\n"
+        "    - id: c1\n      type: file_exists\n      path: output/ok.txt\n"
+        "      desc: 生成 ok.txt\n",
+        encoding="utf-8",
+    )
     task = TaskSpec.from_yaml(spec)
     assert task.level == "L1"
     assert task.weight == 1.0

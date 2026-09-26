@@ -84,6 +84,8 @@ def client(tmp_path, monkeypatch):
     # 切到临时目录，避免项目根真实 license.key 让社区版用例意外变成 Pro
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("agent_eval.runner.get_backend", lambda name, **kw: FakeBackend(**kw))
+    # V2.8.2 API Key 预检：app.py 的 get_backend 也注入 FakeBackend（无 check_api_key → 跳过预检）
+    monkeypatch.setattr("agent_eval.web.app.get_backend", lambda name, **kw: FakeBackend(**kw))
     from agent_eval.web.app import create_app
 
     app = create_app(
@@ -163,12 +165,14 @@ def test_three_agent_matrix_and_drilldown(client, monkeypatch):
     for a in THREE_AGENTS:
         cell = m["cells"][f"{a}|T600"]
         assert cell["n"] == 2
-        assert cell["best"] == 1.0
+        # V4.4 起综合得分含轨迹效率（60/25/15 加权），单步 FakeBackend → 0.995
+        assert cell["best"] >= 0.9
         assert cell["pass_rate"] == 1.0
         assert len(cell["runs"]) == 2  # 下钻数据
         tot = m["totals"][a]
         assert tot["tasks_passed"] == 1
-        assert tot["weighted_score"] == 1.0
+        # V4.4 起综合得分含轨迹效率（60/25/15 加权），单步 FakeBackend → 0.995
+        assert tot["weighted_score"] >= 0.9
     assert m["conclusion"]  # 自动结论非空
 
     # /api/matrix 独立接口一致

@@ -7,7 +7,8 @@ from agent_eval.stats import summarize_scores
 
 def test_empty():
     s = summarize_scores([])
-    assert s == {"n": 0, "best": 0.0, "mean": 0.0, "std": 0.0, "pass_rate": 0.0}
+    assert s == {"n": 0, "best": 0.0, "mean": 0.0, "std": 0.0, "pass_rate": 0.0,
+                    "pass_all": 0.0, "pass_at_k": 0.0}  # V4.7 新增 pass^k/pass@k
 
 
 def test_single():

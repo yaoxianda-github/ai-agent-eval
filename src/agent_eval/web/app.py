@@ -653,7 +653,8 @@ def create_app(
             earlier = [r for r in store.list_regressions(200)
                        if r["status"] in ("done", "cancelled")
                        and r["reg_id"] != reg["reg_id"]
-                       and r["created_at"] < (reg.get("created_at") or "")]
+                       # <= 而非 <：created_at 为秒级精度，同秒发起的两次回归也应互为基线
+                       and r["created_at"] <= (reg.get("created_at") or "")]
             earlier.sort(key=lambda r: r.get("created_at", ""), reverse=True)
             baseline = earlier[0] if earlier else None
             if baseline:
@@ -1365,6 +1366,10 @@ def create_app(
                     result = backend.check_api_key()
                     if not result.get("ok"):
                         status = result.get("status", "unknown")
+                        # unsupported：后端不支持连通性检查（如测试 fake）→ 跳过，不阻断
+                        if status == "unsupported":
+                            logger.info("批次预检跳过 | agent=%s 后端不支持 API Key 检查", agent_id)
+                            continue
                         msg = result.get("message", "未知错误")
                         preflight_failed.append(agent_id)
                         preflight_warnings.append(f"{agent_id}: API Key 不可用（{status}）— {msg}")

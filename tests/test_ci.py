@@ -15,6 +15,7 @@ from agent_eval.ci import (
     write_allure_results,
     write_junit_xml,
 )
+from agent_eval.gate import GateThreshold
 from agent_eval.runner import RunRecord
 from agent_eval.spec import Checkpoint, TaskSpec
 
@@ -66,6 +67,23 @@ def make_spec(task_id: str, cids: list[str], verifier: str = "deterministic") ->
         verifier=verifier,
         spec_path=Path(f"/tmp/{task_id}/spec.yaml"),
     )
+
+
+def p1_task_pack(*ids: str) -> list:
+    """构造 risk_level=P1 的任务 pack（V4.3 起 P2 任务失败会降级不阻断，
+    gate 判定测试必须用 P1 任务才能验证通过率语义）。
+
+    run_gate 以 for t in load_task_pack(...) 遍历，故返回 TaskSpec 列表。
+    """
+    return [
+        TaskSpec(
+            id=i, title=f"{i} 测试", level="L1", description="d", fixtures={},
+            checkpoints=[Checkpoint(id="c1", type="content_contains", pattern="x")],
+            weight=1.0, verifier="deterministic", risk_level="P1",
+            spec_path=Path(f"/tmp/{i}/spec.yaml"),
+        )
+        for i in ids
+    ]
 
 
 # ---------- 单 run 通过判定 ----------
@@ -242,12 +260,24 @@ def test_write_allure_results(tmp_path):
 
 # ---------- 门禁执行（注入假 run_one） ----------
 
-def test_run_gate_injected_runner(tmp_path):
+def test_run_gate_injected_runner(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "agent_eval.ci.load_task_pack",
+        lambda *a, **k: p1_task_pack("T001", "T002", "T003", "T102", "T106"),
+    )
+    # V3.2 6 指标门禁：阈值放宽到与测试通过率（0.8）匹配，避免默认 0.9 误拦
+    monkeypatch.setattr(
+        "agent_eval.gate.load_gate_threshold",
+        lambda cfg=None: GateThreshold(
+            golden_pass_rate=0.5, overall_accuracy=0.5,
+            security_pass_rate=0.0, min_confidence=0.0,
+        ),
+    )
     cfg = tmp_path / "gate.yaml"
     cfg.write_text(
         "gate:\n"
         "  core:\n"
-        "    tasks: [T001, T106]\n"
+        "    tasks: [T001, T002, T003, T102, T106]\n"  # ≥5 任务满足 MIN_SAMPLE_SIZE 样本保护
         "    runs: 2\n"
         "    task_pass_ratio: 0.5\n"
         "    min_pass_rate: 0.5\n",
@@ -258,7 +288,7 @@ def test_run_gate_injected_runner(tmp_path):
 
     def fake_run_one(task, agent, config=None, results_dir=None, **kw):
         calls.append(task.id)
-        passed = task.id == "T001"  # T001 全过，T106 全挂
+        passed = task.id != "T106"  # T106 全挂，其余 4 任务全过
         return make_record(
             task_id=task.id, passed_flags=(True,) if passed else (False,),
             usage={"prompt_tokens": 100, "completion_tokens": 20},
@@ -269,13 +299,13 @@ def test_run_gate_injected_runner(tmp_path):
         config_path=cfg, results_dir=tmp_path / "runs", run_one_impl=fake_run_one,
         track_balance=False,
     )
-    assert calls == ["T001", "T001", "T106", "T106"]  # 2 任务 × 2 runs
+    assert calls == ["T001", "T001", "T002", "T002", "T003", "T003", "T102", "T102", "T106", "T106"]
     by_id = {t["task_id"]: t for t in result["task_results"]}
     assert by_id["T001"]["task_passed"] is True
     assert by_id["T106"]["task_passed"] is False
-    assert result["passed"] is True  # 1/2 = 0.5 >= 0.5
-    assert result["pass_rate"] == 0.5
-    assert result["tokens"] == {"prompt_tokens": 400, "completion_tokens": 80}
+    assert result["passed"] is True  # 4/5 = 0.8 >= 0.5
+    assert result["pass_rate"] == 0.8
+    assert result["tokens"] == {"prompt_tokens": 1000, "completion_tokens": 200}
     assert result["cost_cny"] > 0
 
 
@@ -316,13 +346,25 @@ def test_run_gate_balance_diff(tmp_path, monkeypatch):
     assert result["balance_cost_cny"] > 0
 
 
-def test_run_gate_multi_agent_matrix(tmp_path):
+def test_run_gate_multi_agent_matrix(tmp_path, monkeypatch):
     """gate 配置 agents 列表 → 每 agent 独立跑任务集，全部达标 gate 才 PASS。"""
+    monkeypatch.setattr(
+        "agent_eval.ci.load_task_pack",
+        lambda *a, **k: p1_task_pack("T001", "T002", "T003", "T102", "T305"),
+    )
+    # V3.2 6 指标门禁：阈值放宽到与测试通过率（0.8）匹配，避免默认 0.9 误拦
+    monkeypatch.setattr(
+        "agent_eval.gate.load_gate_threshold",
+        lambda cfg=None: GateThreshold(
+            golden_pass_rate=0.5, overall_accuracy=0.5,
+            security_pass_rate=0.0, min_confidence=0.0,
+        ),
+    )
     cfg = tmp_path / "gate.yaml"
     cfg.write_text(
         "gate:\n"
         "  compare:\n"
-        "    tasks: [T001, T305]\n"
+        "    tasks: [T001, T002, T003, T102, T305]\n"  # ≥5 任务满足 MIN_SAMPLE_SIZE 样本保护
         "    runs: 2\n"
         "    task_pass_ratio: 0.5\n"
         "    min_pass_rate: 0.5\n"
@@ -347,22 +389,26 @@ def test_run_gate_multi_agent_matrix(tmp_path):
     assert result["agent"] == "multi-agent"
     assert len(result["agent_results"]) == 2
     by_agent = {ar["agent"]: ar for ar in result["agent_results"]}
-    assert by_agent["minimal-react"]["pass_rate"] == 0.5   # T001 过、T305 挂
+    assert by_agent["minimal-react"]["pass_rate"] == 0.8   # 4 过、T305 挂
     assert by_agent["deepseek-harness"]["pass_rate"] == 1.0
-    assert by_agent["minimal-react"]["passed"] is True     # 0.5 >= 0.5 各自达标
+    assert by_agent["minimal-react"]["passed"] is True     # 0.8 >= 0.5 各自达标
     assert result["passed"] is True                        # 全部达标
-    assert result["pass_rate"] == 0.5                      # 取最小值
+    assert result["pass_rate"] == 0.8                      # 取最小值
     # 任务矩阵：同一任务在两个 agent 下各自记录
     assert result["task_results"] == by_agent["minimal-react"]["task_results"]
 
 
-def test_run_gate_multi_agent_fail_if_any(tmp_path):
+def test_run_gate_multi_agent_fail_if_any(tmp_path, monkeypatch):
     """任一 agent 未达标 → gate FAIL（保守卡口语义）。"""
+    monkeypatch.setattr(
+        "agent_eval.ci.load_task_pack",
+        lambda *a, **k: p1_task_pack("T001", "T002", "T003", "T102", "T106"),
+    )
     cfg = tmp_path / "gate.yaml"
     cfg.write_text(
         "gate:\n"
         "  compare:\n"
-        "    tasks: [T001]\n"
+        "    tasks: [T001, T002, T003, T102, T106]\n"  # ≥5 任务满足 MIN_SAMPLE_SIZE 样本保护
         "    runs: 1\n"
         "    task_pass_ratio: 0.5\n"
         "    min_pass_rate: 0.9\n"
@@ -379,6 +425,6 @@ def test_run_gate_multi_agent_fail_if_any(tmp_path):
         config_path=cfg, results_dir=tmp_path / "runs", run_one_impl=fake_run_one,
         track_balance=False,
     )
-    assert result["agent_results"][0]["passed"] is False  # minimal-react 0/1
-    assert result["agent_results"][1]["passed"] is True   # deepseek-harness 1/1
+    assert result["agent_results"][0]["passed"] is False  # minimal-react 0/5
+    assert result["agent_results"][1]["passed"] is True   # deepseek-harness 5/5
     assert result["passed"] is False                      # 任一失败 → gate FAIL

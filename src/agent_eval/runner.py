@@ -247,8 +247,8 @@ def run_one(
                         "执行失败，准备重试 (%d/%d) | status=%s error=%s",
                         retry_count, max_retries, result.status, result.error or ""
                     )
-                    # 重试前清空 workspace 中的产物
-                    import shutil
+                    # 重试前清空 workspace 中的产物（shutil 已模块级导入，函数内勿重复 import，
+                    # 否则 Python 作用域规则会把它视为局部变量导致 UnboundLocalError）
                     for item in workspace.iterdir():
                         if item.name != "input":  # 保留 input 目录
                             if item.is_dir():

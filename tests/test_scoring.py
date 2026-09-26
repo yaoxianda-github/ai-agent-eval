@@ -25,7 +25,8 @@ def test_partial_passed_weighted(make_task):
     m = score_task(task, _verdicts([True, True, False]))
     # scoring 内部将通过率 round 到 3 位
     assert m["pass_rate"] == 0.667
-    assert m["score"] == 0.8  # 1.2 × 2/3 = 0.8
+    # V4.4 综合得分 = 结果 60% + 轨迹效率 25% + 风险 15%；2/3 通过 + 满分轨迹/风险 → 0.96
+    assert m["score"] == 0.96
 
 
 def test_all_failed(make_task):

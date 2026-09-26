@@ -47,7 +47,8 @@ def test_run_one_full_pipeline(tmp_path, make_task, monkeypatch):
     assert rec.status == "completed"
     assert rec.agent_ver == "9.9.9"
     assert len(rec.verdicts) == 1 and rec.verdicts[0]["passed"] is True
-    assert rec.metrics["score"] == task.weight
+    # V4.4 起综合得分含轨迹效率（60/25/15 加权），单步 FakeBackend → 0.995
+    assert rec.metrics["score"] >= 0.9
     assert rec.duration_s > 0
 
     # run.json 落盘且可回读

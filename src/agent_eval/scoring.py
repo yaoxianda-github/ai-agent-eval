@@ -244,12 +244,20 @@ def score_task(task, verdicts: list[dict], steps: list[dict] | None = None) -> d
 
     # 轨迹指标评分
     trajectory_metrics = score_trajectory(steps)
-    
-    # V4.4 P0：综合得分：结果 60% + 过程（轨迹效率）25% + 风险 15%
-    final_score = round(
-        task.weight * (outcome_rate * 0.6 + trajectory_metrics["efficiency_score"] * 0.25 + risk_rate * 0.15),
-        3
-    )
+
+    # V5.0.1 结果层硬约束：未评测或结果全失败不允许被轨迹/风险分兜底
+    # - 无任何校验点：任务未验证，得 0 分（不能默认满分）
+    # - 存在结果校验点且全部失败：任务失败，得 0 分（轨迹效率不洗白结果）
+    if total == 0:
+        final_score = 0.0
+    elif outcome_total > 0 and outcome_passed == 0:
+        final_score = 0.0
+    else:
+        # V4.4 P0：综合得分：结果 60% + 过程（轨迹效率）25% + 风险 15%
+        final_score = round(
+            task.weight * (outcome_rate * 0.6 + trajectory_metrics["efficiency_score"] * 0.25 + risk_rate * 0.15),
+            3
+        )
     
     # V4.5 P2：置信度评估体系
     confidence = calculate_confidence(
