@@ -136,6 +136,28 @@
   --info-bg: #F0FDFA;
 }
 
+/* 方案 F：科技浅蓝（浅蓝白科技仪表盘，参考图风格） */
+[data-theme="tech-blue"] {
+  --bg: #F5F8FF;
+  --bg-secondary: #EDF2FC;
+  --bg-tertiary: #E0E9F8;
+  --bg-code: #0F1E3D;
+  --border: #C9D6EC;
+  --border-light: #E2EAF7;
+  --text-primary: #14213D;
+  --text-secondary: #3B4A6B;
+  --text-muted: #7A8AA8;
+  --accent: #2563EB;
+  --success: #059669;
+  --success-bg: #ECFDF5;
+  --warning: #D97706;
+  --warning-bg: #FFFBEB;
+  --danger: #DC2626;
+  --danger-bg: #FEF2F2;
+  --info: #2563EB;
+  --info-bg: #EFF6FF;
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
 body {
@@ -1267,3 +1289,182 @@ table.matrix th { position: sticky; top: 0; z-index: 1; }
   .content { padding: 76px 16px 40px; }
   .kpi-row { flex-direction: column; }
 }
+
+/* ===== 方案 C：左侧 icon 导航 + 仪表盘布局 ===== */
+.shell {
+  flex-direction: row;
+}
+.sidebar {
+  width: 216px;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  z-index: 100;
+}
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 18px 16px;
+  border-bottom: 1px solid var(--border-light);
+}
+.sidebar-brand .brand-logo {
+  width: 32px;
+  height: 32px;
+  font-size: 13px;
+}
+.sidebar-brand .brand-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.sidebar .nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.sidebar .nav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 13.5px;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.sidebar .nav a svg {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+}
+.sidebar .nav a:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+.sidebar .nav a.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.sidebar-footer {
+  padding: 12px 18px;
+  border-top: 1px solid var(--border-light);
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.main-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.topbar {
+  height: 50px;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.page-title-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+/* 响应式：窄屏折叠 sidebar 为 icon-only */
+@media (max-width: 900px) {
+  .sidebar { width: 56px; }
+  .sidebar-brand .brand-name,
+  .sidebar .nav a span,
+  .sidebar-footer span { display: none; }
+  .sidebar-brand { justify-content: center; padding: 14px 0; }
+  .sidebar .nav a { justify-content: center; padding: 10px; }
+  .sidebar-footer { justify-content: center; padding: 12px 0; }
+  .topbar { padding: 0 16px; }
+  .content { padding: 20px 16px; }
+}
+
+/* ===== 仪表盘 KPI 指标卡 ===== */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.kpi-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+.kpi-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.kpi-blue .kpi-icon { background: #DBEAFE; color: #2563EB; }
+.kpi-green .kpi-icon { background: #D1FAE5; color: #059669; }
+.kpi-purple .kpi-icon { background: #EDE9FE; color: #7C3AED; }
+.kpi-orange .kpi-icon { background: #FEF3C7; color: #D97706; }
+.kpi-cyan .kpi-icon { background: #CFFAFE; color: #0891B2; }
+.kpi-body { min-width: 0; }
+.kpi-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+.kpi-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+@media (max-width: 1100px) {
+  .kpi-row { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 700px) {
+  .kpi-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ===== API Key 状态指示器 ===== */
+.key-status {
+  display: inline-block;
+  font-size: 14px;
+  margin-left: 4px;
+  cursor: help;
+  vertical-align: middle;
+}
+.key-status.key-checking { opacity: 0.6; }
+.key-status.key-ok { color: #059669; }
+.key-status.key-fail { color: #DC2626; }
+.key-status.key-unsupported { opacity: 0.4; }
