@@ -366,20 +366,37 @@
   }
 
   function viewDashboard() {
-    Promise.all([loadTasks(), loadBackends(), loadCosts()]).then(function () {
+    Promise.all([loadTasks(), loadBackends(), loadCosts(), api("/api/summary").catch(function(){return null;})]).then(function (results) {
+      var summary = results[3];
       var taskOpts = tasksCache.map(function (t) {
         return '<option value="' + esc(t.id) + '">' + esc(t.id + " · " + t.title) + "</option>";
       }).join("");
       var backendOpts = backendsCache.map(function (b) {
         return '<option value="' + esc(b.id) + '">' + esc(b.id + " (" + b.version + ")") + "</option>";
       }).join("");
+      // KPI 指标卡数据
+      var totalRuns = summary ? summary.total_runs : 0;
+      var agentCount = summary ? (summary.agents || []).length : backendsCache.length;
+      var taskCount = summary ? (summary.tasks || []).length : tasksCache.length;
+      var aggList = summary ? (summary.agent_agg || {}) : {};
+      var aggRuns = 0, aggPass = 0, aggOk = 0;
+      Object.keys(aggList).forEach(function(k){ aggRuns += aggList[k].runs||0; aggPass += aggList[k].pass_sum||0; aggOk += aggList[k].status_ok||0; });
+      var avgPass = aggRuns ? (aggPass / aggRuns * 100).toFixed(1) : "0.0";
+      var successRate = totalRuns ? (aggOk / totalRuns * 100).toFixed(1) : "0.0";
       renderHTML(
+        '<div class="kpi-row">' +
+          '<div class="kpi-card kpi-blue"><div class="kpi-icon">▶</div><div class="kpi-body"><div class="kpi-value">' + totalRuns + '</div><div class="kpi-label">累计运行次数</div></div></div>' +
+          '<div class="kpi-card kpi-green"><div class="kpi-icon">◆</div><div class="kpi-body"><div class="kpi-value">' + agentCount + '</div><div class="kpi-label">接入 Agent</div></div></div>' +
+          '<div class="kpi-card kpi-purple"><div class="kpi-icon">▤</div><div class="kpi-body"><div class="kpi-value">' + taskCount + '</div><div class="kpi-label">评测任务数</div></div></div>' +
+          '<div class="kpi-card kpi-orange"><div class="kpi-icon">✓</div><div class="kpi-body"><div class="kpi-value">' + avgPass + '%</div><div class="kpi-label">平均通过率</div></div></div>' +
+          '<div class="kpi-card kpi-cyan"><div class="kpi-icon">⚡</div><div class="kpi-body"><div class="kpi-value">' + successRate + '%</div><div class="kpi-label">运行成功率</div></div></div>' +
+        '</div>' +
         '<h2 class="page-title">工作台 · 运行控制台</h2>' +
         '<div class="card">' +
           '<h3>新建评测运行</h3>' +
           '<div class="form-row">' +
             '<div class="field"><label>任务</label><select id="f-task">' + taskOpts + "</select></div>" +
-            '<div class="field"><label>Agent 后端</label><select id="f-agent">' + backendOpts + "</select></div>" +
+            '<div class="field"><label>Agent 后端 <span id="agent-key-status" class="key-status" title="API Key 状态检查中…">⏳</span></label><select id="f-agent">' + backendOpts + "</select></div>" +
           "</div>" +
           '<div class="form-row">' +
             '<div class="field"><label>模型（按后端自动填充）</label><input id="f-model" value="" placeholder="选择后端后自动填充"></div>' +
@@ -501,6 +518,38 @@
     var b = backendsCache.find(function (x) { return x.id === el("f-agent").value; });
     if (b && b.default_model) el("f-model").value = b.default_model;
     updateCost();
+    // P0：选择 Agent 时自动预检 API Key 连通性
+    var agentId = el("f-agent").value;
+    var statusEl = el("agent-key-status");
+    var btn = el("btn-run");
+    if (!statusEl) return;
+    statusEl.textContent = "⏳";
+    statusEl.title = "正在检查 API Key…";
+    statusEl.className = "key-status key-checking";
+    if (btn) btn.disabled = true;
+    api("/api/backends/" + encodeURIComponent(agentId) + "/check-api-key").then(function (r) {
+      if (r.ok) {
+        statusEl.textContent = "✅";
+        statusEl.title = "API Key 可用" + (r.latency_ms ? "（延迟 " + r.latency_ms + "ms）" : "");
+        statusEl.className = "key-status key-ok";
+        if (btn) btn.disabled = false;
+      } else if (r.status === "unsupported") {
+        statusEl.textContent = "⚪";
+        statusEl.title = "该后端暂不支持 Key 连通性检查";
+        statusEl.className = "key-status key-unsupported";
+        if (btn) btn.disabled = false;
+      } else {
+        statusEl.textContent = "❌";
+        statusEl.title = "API Key 不可用：" + (r.message || r.status || "未知错误") + "。请在设置页检查配置。";
+        statusEl.className = "key-status key-fail";
+        if (btn) btn.disabled = true;
+      }
+    }).catch(function () {
+      statusEl.textContent = "⚪";
+      statusEl.title = "Key 检查请求失败，不阻断运行";
+      statusEl.className = "key-status key-unsupported";
+      if (btn) btn.disabled = false;
+    });
   }
 
   function startRun() {
@@ -4133,6 +4182,9 @@ ${b.fix_plan || '暂无'}
             '<div class="theme-option" data-theme="teal-fresh" style="--theme-main:#0F3D3E;--theme-bg:#F0F7F7;--theme-accent:#0D9488;">' +
               '<div class="theme-preview"><div class="tp-nav"></div><div class="tp-body"><div class="tp-card"></div><div class="tp-card"></div></div></div>' +
               '<div class="theme-name">E 深青浅青</div></div>' +
+            '<div class="theme-option" data-theme="tech-blue" style="--theme-main:#14213D;--theme-bg:#F5F8FF;--theme-accent:#2563EB;">' +
+              '<div class="theme-preview"><div class="tp-nav"></div><div class="tp-body"><div class="tp-card"></div><div class="tp-card"></div></div></div>' +
+              '<div class="theme-name">F 科技浅蓝</div></div>' +
           '</div>' +
           '<div id="theme-msg" style="margin-top:10px;font-size:13px;color:var(--text-muted);"></div>' +
         '</div>' +
@@ -4764,6 +4816,9 @@ ${(r.trajectory || []).map(function(step, i) {
     nav.forEach(function (a) {
       a.classList.toggle("active", a.getAttribute("data-view") === name);
     });
+    var titleMap = {overview:"概览",dashboard:"工作台",tasks:"任务管理",packages:"任务包",history:"运行历史",badcases:"Badcase 管理",judgeTrust:"判分置信度",memories:"经验库",compare:"多 Agent 对比",monitor:"监控",report:"评测报告",agent:"智能评测",settings:"设置",run:"运行详情",badcase:"Badcase 详情",memory:"经验详情"};
+    var pt = document.getElementById("page-title");
+    if (pt) pt.textContent = titleMap[name] || "工作台";
     if (name === "run") { viewRunDetail(parts[1]); return; }
     if (name === "badcase") { viewBadcaseDetail(parts[1]); return; }
     if (name === "memory") { viewMemoryDetail(parts[1]); return; }

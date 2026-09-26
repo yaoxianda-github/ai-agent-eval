@@ -406,7 +406,7 @@ class DeepseekHarnessBackend(Backend):
         # dsh headless：一条一次性任务，退出码 0=完成 / 1=中止或错误
         cmd = [self.cmd, "--profile", "headless", task.description]
         env = os.environ.copy()
-        env.setdefault("DEEPSEEK_API_KEY", self.api_key)
+        env["DEEPSEEK_API_KEY"] = self.api_key  # 直接赋值，确保 check_api_key 切换的 fallback key 生效
         env["DSH_HOME"] = str(self.dsh_home)
 
         logger.info("dsh 执行开始 | model=%s timeout=%ds dsh_home=%s", self.model, self.timeout_s, self.dsh_home)

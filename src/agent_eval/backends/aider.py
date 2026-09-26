@@ -48,10 +48,48 @@ class AiderBackend(Backend):
     ) -> None:
         # aider 用 LiteLLM 模型格式（provider/model）；无斜杠时自动补 deepseek/ 前缀
         self.model = model if "/" in model else f"deepseek/{model}"
-        self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get(
-            "LLM_API_KEY"
-        )
+        resolved_key, key_source = self.resolve_api_key(["DEEPSEEK_API_KEY", "LLM_API_KEY"])
+        self.api_key = api_key or resolved_key
+        self._api_key_source = key_source if not api_key else "explicit"
         self.timeout_s = timeout_s
+
+    def check_api_key(self) -> dict:
+        """检查 aider 命令安装状态和 API Key 连通性。"""
+        import time as _time
+        if shutil.which("aider") is None:
+            return {
+                "ok": False,
+                "status": "missing",
+                "message": "未找到 aider 命令，请先运行 pip install aider-chat",
+                "latency_ms": None,
+            }
+        if not self.api_key:
+            return {
+                "ok": False,
+                "status": "missing",
+                "message": "未配置 DEEPSEEK_API_KEY / LLM_API_KEY",
+                "latency_ms": None,
+            }
+        # 测试 API Key 连通性
+        try:
+            import openai as _openai
+            client = _openai.OpenAI(
+                api_key=self.api_key,
+                base_url=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
+            )
+            start = _time.time()
+            client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[{"role": "user", "content": "hi"}],
+                temperature=0, max_tokens=1,
+            )
+            latency_ms = round((_time.time() - start) * 1000, 1)
+            return {"ok": True, "status": "ok", "message": f"aider 已安装，API Key 有效（{latency_ms}ms）", "latency_ms": latency_ms}
+        except Exception as e:
+            err_msg = str(e)
+            if "401" in err_msg or "Authentication" in err_msg:
+                return {"ok": False, "status": "invalid", "message": f"API Key 无效：{err_msg[:150]}", "latency_ms": None}
+            return {"ok": False, "status": "error", "message": f"API 调用失败：{err_msg[:150]}", "latency_ms": None}
 
     def run(self, task, workspace) -> BackendResult:
         if shutil.which("aider") is None:
@@ -85,7 +123,7 @@ class AiderBackend(Backend):
 
         # 2) 调用 aider
         env = os.environ.copy()
-        env.setdefault("DEEPSEEK_API_KEY", self.api_key)
+        env["DEEPSEEK_API_KEY"] = self.api_key  # 直接赋值，确保 fallback key 生效
         env.setdefault("AIDER_ANALYTICS", "False")
 
         # 适配层：aider 只编辑显式加入对话的文件（--file）。

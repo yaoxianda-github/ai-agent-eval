@@ -885,6 +885,26 @@ def create_app(
         if agent_id not in list_backends():
             raise HTTPException(status_code=400, detail=f"未知后端: {agent_id}")
 
+        # P0：API Key 预检 — 无效 key 直接拦截，不产生无效运行
+        try:
+            _backend = get_backend(agent_id)
+            _key_check = _backend.check_api_key()
+            if not _key_check.get("ok") and _key_check.get("status") != "unsupported":
+                _ks = _key_check.get("status", "unknown")
+                _km = _key_check.get("message", "未知错误")
+                logger.warning("运行预检失败 | agent=%s status=%s msg=%s", agent_id, _ks, _km)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"API Key 不可用，已拦截运行：{agent_id}（{_ks}）— {_km}。请在设置页检查 API Key 配置。"
+                )
+            elif _key_check.get("ok"):
+                logger.info("运行预检通过 | agent=%s latency=%sms",
+                            agent_id, _key_check.get("latency_ms", "?"))
+        except HTTPException:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning("运行预检异常 | agent=%s: %s", agent_id, e, exc_info=True)
+
         config: dict = {"agent": {}}
         if payload.get("model"):
             config["agent"]["model"] = str(payload["model"])
