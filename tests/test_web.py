@@ -138,7 +138,8 @@ def test_create_run_and_poll(client):
     data = wait_done(client, run_id)
     assert data["running"] is False
     assert data["status"] == "completed"
-    assert data["metrics"]["score"] == pytest.approx(1.0)
+    # V4.4 起综合得分含轨迹效率（60/25/15 加权），FakeBackend 单步效率 0.98 → 总分 0.995
+    assert data["metrics"]["score"] >= 0.9
     assert data["metrics"]["weight"] == pytest.approx(1.0)
     assert all(v["passed"] for v in data["verdicts"])
 
@@ -355,3 +356,135 @@ def test_read_file_with_relative_results_dir(tmp_path, monkeypatch):
     r = c.get(f"/api/runs/{run_id}/file?path=output/ok.txt")
     assert r.status_code == 200, r.text
     assert "done" in r.json()["content"]
+
+
+# ---------- V5.0 团队回归看板 ----------
+def test_regression_board_empty(client):
+    """空数据回归看板返回完整结构。"""
+    r = client.get("/api/regression/board")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "regression_task_count" in data
+    assert "converted_badcase_count" in data
+    assert "schedule" in data
+    assert data["regression_run_count"] == 0
+    assert data["health"] == "unknown"
+
+
+def test_badcases_convert_to_tasks_batch(client, tmp_path):
+    """批量转化 badcase 为回归任务（自动编号 T-REG-NNN）。"""
+    r = client.post("/api/badcases", json={
+        "task_id": "T600", "agent_id": "minimal-react",
+        "title": "输出缺失", "description": "Agent 没有生成 ok.txt",
+        "category": "format", "severity": "P1",
+    })
+    assert r.status_code == 200, r.text
+    b1 = r.json()
+    r = client.post("/api/badcases", json={
+        "task_id": "T600", "agent_id": "minimal-react",
+        "title": "解析失败", "description": "输出格式错误",
+        "category": "reasoning", "severity": "P2",
+    })
+    assert r.status_code == 200, r.text
+    b2 = r.json()
+
+    r = client.post("/api/badcases/convert-to-tasks", json={
+        "badcase_ids": [b1["id"], b2["id"]],
+        "add_to_manifest": False,
+    })
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert len(data["converted"]) == 2, data
+    for item in data["converted"]:
+        tid = item["new_task_id"]
+        assert tid.startswith("T-REG-"), tid
+        spec = tmp_path / "tasks" / tid / "spec.yaml"
+        assert spec.exists(), spec
+        assert "regression" in spec.read_text(encoding="utf-8")
+    # 已转化 badcase 再次批量转化应跳过
+    r = client.post("/api/badcases/convert-to-tasks", json={
+        "badcase_ids": [b1["id"]], "add_to_manifest": False,
+    })
+    data = r.json()
+    assert len(data["skipped"]) == 1, data
+    # badcase 已关联回归任务
+    rb = client.get("/api/regression-badcases").json()["items"]
+    assert len(rb) >= 2
+
+
+def test_regression_run_and_finalize(client):
+    """发起回归 → 批次完成 → 回归记录回写（通过率/退化/基线）。"""
+    r = client.post("/api/regression/run", json={"agents": ["minimal-react"], "runs": 1})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    reg_id, batch_id = data["reg_id"], data["batch_id"]
+    assert data["total_runs"] == 1
+
+    deadline = time.time() + 20
+    done = False
+    while time.time() < deadline:
+        rb = client.get(f"/api/batches/{batch_id}")
+        assert rb.status_code == 200, rb.text
+        if rb.json().get("status") == "done":
+            done = True
+            break
+        time.sleep(0.2)
+    assert done, "回归批次未在预期时间内完成"
+    time.sleep(0.3)  # 等待回归记录回写
+    rr = client.get(f"/api/regression/runs/{reg_id}")
+    assert rr.status_code == 200, rr.text
+    detail = rr.json()
+    assert detail["status"] == "done", detail
+    assert detail["pass_rate"] > 0, detail
+    assert detail["degraded"] == []  # 首次回归无基线
+    assert "matrix" in detail
+
+    # 第二次回归：应与第一次对比（基线存在；FakeBackend 稳定无退化）
+    r = client.post("/api/regression/run", json={"agents": ["minimal-react"], "runs": 1})
+    data = r.json()
+    reg2_id, batch2_id = data["reg_id"], data["batch_id"]
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        rb = client.get(f"/api/batches/{batch2_id}")
+        if rb.json().get("status") == "done":
+            break
+        time.sleep(0.2)
+    time.sleep(0.3)
+    rr2 = client.get(f"/api/regression/runs/{reg2_id}").json()
+    assert rr2["baseline_reg_id"] == reg_id, rr2
+    assert rr2["degraded"] == []
+
+    # 看板健康状态与趋势
+    board = client.get("/api/regression/board").json()
+    assert board["regression_run_count"] >= 2
+    assert board["health"] == "healthy", board
+    trend = client.get("/api/regression/trend").json()
+    assert "minimal-react" in trend["agents"]
+    assert len(trend["series"]["minimal-react"]) >= 2
+
+
+def test_regression_schedule_roundtrip(client):
+    """定期回归配置读写与调度触发。"""
+    r = client.get("/api/regression/schedule")
+    assert r.status_code == 200, r.text
+    s = r.json()
+    assert s["enabled"] is False or s["enabled"] is True
+
+    r = client.post("/api/regression/schedule", json={
+        "enabled": True, "interval_hours": 2,
+        "agents": ["minimal-react"], "runs": 1,
+    })
+    assert r.status_code == 200, r.text
+    s = r.json()["schedule"]
+    assert s["enabled"] is True
+    assert s["interval_hours"] == 2
+    assert s["agents"] == ["minimal-react"]
+    assert s.get("next_run_at"), "启用后应设置首次执行时间"
+
+    r = client.post("/api/regression/schedule", json={"enabled": False})
+    s = r.json()["schedule"]
+    assert s["enabled"] is False
+
+    # 非法后端应被拒绝
+    r = client.post("/api/regression/schedule", json={"agents": ["不存在的后端"]})
+    assert r.status_code == 400

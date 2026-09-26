@@ -2,7 +2,7 @@
 
 > 通用 AI Agent 评测框架（可分享、可复用）
 > 仓库：https://github.com/yaoxianda-github/ai-agent-eval
-> 最后更新：2026-09-20（**V2.9 轨迹评分 + 自动重试 + 异步并发 + 版本对比 + Badcase 智能分析 + 经验记忆**）
+> 最后更新：2026-09-26（**V5.0 团队回归看板**——badcase 批量转回归用例 + 定期自动回归 + 退化检测 + 趋势图）
 
 ## 冲刺进度
 
@@ -113,6 +113,16 @@
 - **报告**：自包含 HTML + CSV + JUnit XML + Allure
 - **CI/CD**：`agent-eval ci` 无头命令 + GitHub Actions 合并阻断
 - **商业化**：Open Core，社区版/Pro License 分档
+
+## V5.0 团队回归看板（功能 B，2026-09-26）
+
+- **Badcase 批量转回归用例**：`POST /api/badcases/convert-to-tasks`，一键将待处理 badcase 全部转为 T-REG-NNN 回归任务（自动编号、生成 spec.yaml、更新 manifest、badcase 状态置 fixed）
+- **立即回归**：`POST /api/regression/run`，复用批次机制跑 regression_pack 任务集，创建回归运行记录
+- **定期回归**：`regression_schedule` 配置（间隔小时/Agent/启用），后台调度线程每 60s 检查到点自动触发
+- **退化检测**：与最近一次更早的已完成回归对比，得分下降 Δ<-0.15 判定退化并记录明细
+- **回归看板**：新前端视图（#/regression）——KPI（任务数/转化数/运行数/通过率/健康状态）+ 操作区 + 退化告警 + SVG 通过率趋势图 + 回归历史表
+- **API**：`/api/regression/board|runs|trend|schedule`、`/api/regression/run`、`/api/badcases/convert-to-tasks`
+- **验证**：真实回归 12 任务 × minimal-react 通过率 100%；test_web.py 新增 4 用例（空看板/批量转化/回归回写与退化/调度配置），全绿
 
 ## 下一步
 

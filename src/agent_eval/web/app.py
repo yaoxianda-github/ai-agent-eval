@@ -593,8 +593,106 @@ def create_app(
     # 批次取消标志：key=batch_id, value=True 表示请求取消
     _batch_cancel_flags: dict[str, bool] = {}
 
+    # ---------- V5.0 回归看板：辅助函数 ----------
+    def _regression_task_ids(extra_ids: list[str] | None = None) -> list[str]:
+        """解析回归任务集：regression_pack（manifest 声明）为默认，可叠加显式任务 id。"""
+        manifest = load_manifest(tasks_dir)
+        from agent_eval.spec import resolve_pack_tiers
+        tiers = resolve_pack_tiers(manifest, "regression_pack") or ["regression"]
+        tasks = _task_map()
+        ids = [t for t in tasks if getattr(tasks[t], "tier", "") in tiers]
+        if not ids:
+            # 回退：manifest 未显式声明回归集时，用全部任务（保证回归始终可执行）
+            ids = list(tasks)
+        if extra_ids:
+            for t in extra_ids:
+                if t not in ids:
+                    ids.append(t)
+        return sorted(ids)
+
+    def _score_map_for_batch(batch_id: str) -> dict[tuple[str, str], float]:
+        """该批次内 (agent, task) -> 综合得分（runs>1 取均值）。"""
+        scores: dict[tuple[str, str], list[float]] = {}
+        for rid in store.list_run_ids_by_batch(batch_id):
+            p = results_dir / rid / "run.json"
+            if not p.exists():
+                continue
+            try:
+                rec = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if rec.get("status") != "completed":
+                continue
+            key = (rec.get("agent_id", ""), rec.get("task_id", ""))
+            sc = float((rec.get("metrics") or {}).get("score", 0.0))
+            scores.setdefault(key, []).append(sc)
+        return {k: round(sum(v) / len(v), 4) for k, v in scores.items()}
+
+    def _finalize_regression_for_batch(batch_id: str, final_status: str,
+                                       reg_id: str | None = None) -> None:
+        """批次收尾时回写关联的回归运行记录：通过率 + 与基线回归的退化对比。"""
+        reg = store.get_regression(reg_id) if reg_id else None
+        if not reg:
+            for r in store.list_regressions(200):
+                if r.get("batch_id") == batch_id:
+                    reg = r
+                    break
+        if not reg:
+            return
+        try:
+            matrix = _build_matrix(store.get_batch(batch_id)) if final_status == "done" else {}
+            totals = matrix.get("totals", {}) if isinstance(matrix, dict) else {}
+            agents = reg.get("agents") or list(totals.keys())
+            # 整体通过率：按 agent 平均任务通过率（task_pass_rate）
+            pass_rates = [totals[a]["task_pass_rate"] for a in agents if a in totals]
+            pass_rate = round(sum(pass_rates) / len(pass_rates), 4) if pass_rates else 0.0
+
+            # 退化检测：与最近一次更早的已完成回归对比
+            degraded: list[dict] = []
+            baseline_reg_id = ""
+            earlier = [r for r in store.list_regressions(200)
+                       if r["status"] in ("done", "cancelled")
+                       and r["reg_id"] != reg["reg_id"]
+                       and r["created_at"] < (reg.get("created_at") or "")]
+            earlier.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+            baseline = earlier[0] if earlier else None
+            if baseline:
+                baseline_reg_id = baseline["reg_id"]
+                current_scores = _score_map_for_batch(batch_id)
+                base_scores = _score_map_for_batch(baseline.get("batch_id", ""))
+                for key, after in current_scores.items():
+                    before = base_scores.get(key)
+                    if before is None:
+                        continue
+                    delta = round(after - before, 4)
+                    if delta < -0.15:  # 得分下降超过 0.15 判定为退化
+                        degraded.append({
+                            "task_id": key[1],
+                            "agent_id": key[0],
+                            "before": before,
+                            "after": after,
+                            "delta": delta,
+                        })
+                degraded.sort(key=lambda d: d["delta"])
+
+            store.update_regression(
+                reg["reg_id"],
+                status=final_status,
+                done_runs=reg.get("total_runs", 0),
+                pass_rate=pass_rate,
+                degraded=degraded,
+                baseline_reg_id=baseline_reg_id,
+                finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            )
+            logger.info("回归记录回写 | reg=%s status=%s pass_rate=%s degraded=%d 基线=%s",
+                        reg["reg_id"], final_status, pass_rate, len(degraded),
+                        baseline_reg_id or "无")
+        except Exception as e:  # noqa: BLE001 - 回写失败不影响批次本身
+            logger.warning("回归记录回写失败 | batch=%s reg=%s: %s", batch_id, reg.get("reg_id"), e, exc_info=True)
+
     def _execute_batch(batch_id: str, agents: list[str], task_ids: list[str],
-                       runs: int, model: str, judge_mode: str = "smart") -> None:
+                       runs: int, model: str, judge_mode: str = "smart",
+                       reg_id: str | None = None) -> None:
         plan = [(a, t, i) for a in agents for t in task_ids for i in range(runs)]
         total = len(plan)
         done = 0
@@ -676,6 +774,8 @@ def create_app(
         # 清理取消标志
         _batch_cancel_flags.pop(batch_id, None)
         logger.info("对比批次%s | batch=%s", "被取消" if cancelled else "完成", batch_id)
+        # V5.0：若该批次是回归运行，回写回归记录（通过率 + 退化检测）
+        _finalize_regression_for_batch(batch_id, final_status, reg_id)
         # 社区版只保留最近 N 个批次（Pro retain=0 不限）
         ent = license_mod.get_entitlements()
         retain = int(ent.get("retain_batches", 1) or 0)
@@ -2229,6 +2329,359 @@ def create_app(
             .replace("/static/style.css", f"/static/style.css?v={css_v}")
         )
         return HTMLResponse(html)
+
+    # ---------- V5.0 团队回归看板 ----------
+    @app.post("/api/badcases/convert-to-tasks")
+    def api_badcases_convert_to_tasks(payload: dict = Body(...)) -> dict:
+        """批量将 badcase 转化为回归评测用例（自动编号 T-REG-NNN）。
+
+        请求体: {"badcase_ids": ["x1","x2"]} 或 {"all_open": true, "add_to_manifest": true}
+        """
+        import yaml
+        bids = [str(x) for x in (payload.get("badcase_ids") or []) if x]
+        auto_all = bool(payload.get("all_open", False))
+        add_to_manifest = bool(payload.get("add_to_manifest", True))
+        if auto_all:
+            all_b, _ = store.list_badcases(limit=500, status="pending")
+            bids = [b["id"] for b in all_b if not b.get("regression_task_id")]
+        if not bids:
+            raise HTTPException(status_code=400,
+                                detail="请选择要转化的 badcase（badcase_ids 或 all_open=true）")
+
+        existing = {t.id for t in _task_map().values()}
+        next_no = 1
+        while f"T-REG-{next_no:03d}" in existing:
+            next_no += 1
+
+        converted: list[dict] = []
+        skipped: list[dict] = []
+        failed: list[dict] = []
+        for bid in bids:
+            b = store.get_badcase(bid)
+            if not b:
+                failed.append({"badcase_id": bid, "reason": "badcase 不存在"})
+                continue
+            if b.get("regression_task_id"):
+                skipped.append({"badcase_id": bid, "reason": f"已转化: {b['regression_task_id']}"})
+                continue
+            new_task_id = f"T-REG-{next_no:03d}"
+            next_no += 1
+            try:
+                task_dir = tasks_dir / new_task_id
+                task_dir.mkdir(parents=True, exist_ok=True)
+                spec = {
+                    "id": new_task_id,
+                    "title": f"[回归] {b.get('title', '')}",
+                    "level": "L2",
+                    "description": _build_regression_description(b),
+                    "tags": ["regression", b.get("category", "other")],
+                    "scenario_type": "error_recovery",
+                    "risk_level": "P1",
+                    "fixtures": {"source": "fixtures/"},
+                    "ground_truth": {
+                        "checkpoints": [
+                            {
+                                "id": "c1",
+                                "type": "file_exists",
+                                "path": "output/result.md",
+                                "desc": "Agent 必须输出结果文件",
+                            }
+                        ]
+                    },
+                    "verifier": "deterministic",
+                    "weight": 1.0,
+                    "cost_budget_usd": 0.2,
+                    "timeout_s": 300,
+                    "capabilities": ["tool_use", "reasoning"],
+                }
+                spec_path = task_dir / "spec.yaml"
+                with open(spec_path, "w", encoding="utf-8") as f:
+                    yaml.dump(spec, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+                fixtures_dir = task_dir / "fixtures"
+                fixtures_dir.mkdir(exist_ok=True)
+                (fixtures_dir / ".gitkeep").touch()
+
+                manifest_updated = False
+                if add_to_manifest:
+                    manifest_path = tasks_dir / "manifest.yaml"
+                    if manifest_path.exists():
+                        try:
+                            with open(manifest_path, "r", encoding="utf-8") as f:
+                                manifest = yaml.safe_load(f)
+                            tasks_list = manifest.get("tasks", [])
+                            if new_task_id not in tasks_list:
+                                tasks_list.append(new_task_id)
+                                manifest["tasks"] = tasks_list
+                                with open(manifest_path, "w", encoding="utf-8") as f:
+                                    yaml.dump(manifest, f, allow_unicode=True,
+                                              default_flow_style=False, sort_keys=False)
+                                manifest_updated = True
+                        except Exception as e:  # noqa: BLE001
+                            logger.warning("更新 manifest.yaml 失败: %s", e)
+
+                update_fields = {"regression_task_id": new_task_id}
+                if b.get("status") == "pending":
+                    update_fields["status"] = "fixed"
+                store.update_badcase(bid, **update_fields)
+                converted.append({
+                    "badcase_id": bid,
+                    "new_task_id": new_task_id,
+                    "manifest_updated": manifest_updated,
+                })
+            except Exception as e:  # noqa: BLE001
+                failed.append({"badcase_id": bid, "reason": str(e)[:200]})
+
+        return {
+            "message": f"转化完成：{len(converted)} 成功，{len(skipped)} 跳过，{len(failed)} 失败",
+            "converted": converted,
+            "skipped": skipped,
+            "failed": failed,
+        }
+
+    @app.post("/api/regression/run")
+    def api_regression_run(payload: dict = Body(...)) -> dict:
+        """发起一次回归运行（复用批次机制，任务集 = regression_pack）。
+
+        请求体: {"agents": ["minimal-react"], "runs": 1, "task_ids": []（可选，默认回归任务集）,
+                 "label": "可选", "trigger": "manual"}
+        """
+        agents = [str(a) for a in payload.get("agents", []) if a]
+        if not agents:
+            raise HTTPException(status_code=400, detail="请至少选择一个 Agent")
+        valid = list_backends()
+        bad = [a for a in agents if a not in valid]
+        if bad:
+            raise HTTPException(status_code=400, detail=f"未知后端: {bad}（可用 {valid}）")
+        ok, reason = license_mod.can(len(agents))
+        if not ok:
+            raise HTTPException(status_code=403, detail=reason)
+
+        runs = max(1, min(int(payload.get("runs", 1)), 5))
+        task_ids = _regression_task_ids(payload.get("task_ids") or None)
+        if not task_ids:
+            raise HTTPException(status_code=400, detail="回归任务集为空（regression_pack 未声明任何任务）")
+        model = str(payload.get("model", "deepseek-chat"))
+        judge_mode = str(payload.get("judge_mode", "smart")).lower()
+        if judge_mode not in ("llm", "jev", "smart"):
+            raise HTTPException(status_code=400, detail="judge_mode 只能是 llm / jev / smart")
+        trigger = str(payload.get("trigger", "manual"))
+        if trigger not in ("manual", "schedule", "ci"):
+            trigger = "manual"
+
+        total = len(agents) * len(task_ids) * runs
+        reg_count = len(store.list_regressions(500)) + 1
+        label = str(payload.get("label", "")).strip() or f"回归 #{reg_count} × {len(agents)}agent × runs{runs}"
+        batch_id = uuid.uuid4().hex[:12]
+        reg_id = uuid.uuid4().hex[:12]
+
+        store.insert_batch({
+            "batch_id": batch_id,
+            "label": label,
+            "agents": agents,
+            "task_ids": task_ids,
+            "scope": "regression",
+            "runs": runs,
+            "status": "running",
+            "total_runs": total,
+            "done_runs": 0,
+            "summary": {},
+        })
+        store.insert_regression({
+            "reg_id": reg_id,
+            "batch_id": batch_id,
+            "label": label,
+            "agents": agents,
+            "task_ids": task_ids,
+            "runs": runs,
+            "status": "running",
+            "total_runs": total,
+            "done_runs": 0,
+            "trigger": trigger,
+        })
+        t = threading.Thread(
+            target=_execute_batch,
+            args=(batch_id, agents, task_ids, runs, model, judge_mode, reg_id),
+            daemon=True,
+        )
+        t.start()
+        logger.info("回归运行已发起 | reg=%s batch=%s label=%s total=%d", reg_id, batch_id, label, total)
+        return {"reg_id": reg_id, "batch_id": batch_id, "total_runs": total, "label": label}
+
+    @app.get("/api/regression/board")
+    def api_regression_board() -> dict:
+        """回归看板总览：任务集规模、badcase 转化情况、最近回归、退化告警。"""
+        regs = store.list_regressions(100)
+        schedule = store.get_regression_schedule()
+
+        reg_tasks = _regression_task_ids()
+        reg_badcases = store.list_regression_badcases()
+        pending_badcases, _ = store.list_badcases(limit=500, status="pending")
+
+        recent = regs[0] if regs else None
+        degraded_alerts = []
+        if recent and recent.get("status") == "done":
+            degraded_alerts = recent.get("degraded", [])
+        all_degraded = []
+        for r in regs:
+            for d in r.get("degraded", []):
+                all_degraded.append({"reg_id": r["reg_id"], "created_at": r.get("created_at", ""), **d})
+
+        health = "unknown"
+        health_label = "暂无数据"
+        if recent and recent.get("status") == "done":
+            if degraded_alerts:
+                health = "warning"
+                health_label = f"发现 {len(degraded_alerts)} 项退化"
+            elif recent.get("pass_rate", 0) >= 0.9:
+                health = "healthy"
+                health_label = "回归通过"
+            else:
+                health = "warning"
+                health_label = "通过率低于 90%"
+
+        return {
+            "regression_task_count": len(reg_tasks),
+            "regression_task_ids": reg_tasks,
+            "converted_badcase_count": len(reg_badcases),
+            "pending_badcase_count": len(pending_badcases),
+            "regression_run_count": len(regs),
+            "recent": recent,
+            "degraded_alerts": degraded_alerts,
+            "all_degraded_count": len(all_degraded),
+            "all_degraded": all_degraded[:50],
+            "health": health,
+            "health_label": health_label,
+            "schedule": schedule,
+        }
+
+    @app.get("/api/regression/runs")
+    def api_list_regression_runs(limit: int = 50) -> dict:
+        """回归运行历史列表。"""
+        items = store.list_regressions(max(1, min(int(limit), 200)))
+        return {"items": items, "total": len(items)}
+
+    @app.get("/api/regression/runs/{reg_id}")
+    def api_get_regression_run(reg_id: str) -> dict:
+        """单次回归运行详情：任务级得分 + 与基线对比。"""
+        reg = store.get_regression(reg_id)
+        if not reg:
+            raise HTTPException(status_code=404, detail=f"回归记录不存在: {reg_id}")
+        detail = dict(reg)
+        batch = store.get_batch(reg.get("batch_id", ""))
+        if batch:
+            detail["matrix"] = _build_matrix(batch)
+        baseline = store.get_regression(reg.get("baseline_reg_id", "")) if reg.get("baseline_reg_id") else None
+        detail["baseline"] = baseline
+        return detail
+
+    @app.get("/api/regression/trend")
+    def api_regression_trend(agent: str = "", limit: int = 20) -> dict:
+        """回归趋势：各 Agent 通过率随回归运行编号的变化（供前端 SVG 折线图）。"""
+        regs = [r for r in store.list_regressions(200)
+                if r["status"] == "done" and r.get("pass_rate", 0) > 0]
+        regs.sort(key=lambda r: r.get("created_at", ""))
+        if agent:
+            regs = [r for r in regs if agent in r.get("agents", [])]
+        regs = regs[-max(1, min(int(limit), 50)):]
+
+        series: dict[str, list[dict]] = {}
+        agents_set: list[str] = []
+        for r in regs:
+            matrix = {}
+            batch = store.get_batch(r.get("batch_id", ""))
+            if batch and batch.get("summary"):
+                matrix = batch["summary"]
+            elif batch:
+                try:
+                    matrix = _build_matrix(batch)
+                except Exception:  # noqa: BLE001
+                    matrix = {}
+            totals = matrix.get("totals", {}) if isinstance(matrix, dict) else {}
+            for a in r.get("agents", []):
+                if a not in series:
+                    series[a] = []
+                    agents_set.append(a)
+                t = totals.get(a, {})
+                series[a].append({
+                    "reg_id": r["reg_id"],
+                    "created_at": r.get("created_at", ""),
+                    "pass_rate": float(t.get("task_pass_rate", 0.0)),
+                    "weighted_score": float(t.get("weighted_score", 0.0)),
+                    "degraded_count": len(r.get("degraded", [])),
+                })
+
+        return {
+            "agents": agents_set,
+            "series": series,
+            "runs": [{"reg_id": r["reg_id"], "created_at": r.get("created_at", "")} for r in regs],
+        }
+
+    @app.get("/api/regression/schedule")
+    def api_get_regression_schedule() -> dict:
+        """读取定期回归配置。"""
+        return store.get_regression_schedule()
+
+    @app.post("/api/regression/schedule")
+    def api_save_regression_schedule(payload: dict = Body(...)) -> dict:
+        """保存定期回归配置。
+
+        请求体: {"enabled": true, "interval_hours": 24, "agents": ["minimal-react"], "runs": 1}
+        """
+        fields: dict = {}
+        if "enabled" in payload:
+            fields["enabled"] = bool(payload["enabled"])
+        if "interval_hours" in payload:
+            fields["interval_hours"] = max(1.0, float(payload["interval_hours"]))
+        if "agents" in payload:
+            agents = [str(a) for a in payload.get("agents", []) if a]
+            valid = list_backends()
+            bad = [a for a in agents if a not in valid]
+            if bad:
+                raise HTTPException(status_code=400, detail=f"未知后端: {bad}")
+            fields["agents"] = agents
+        if "runs" in payload:
+            fields["runs"] = max(1, min(int(payload["runs"]), 5))
+        schedule = store.save_regression_schedule(**fields)
+        # 若启用且从未跑过，设定首次执行时间
+        if schedule["enabled"] and not schedule.get("next_run_at"):
+            from datetime import timedelta
+            next_run = (datetime.now() + timedelta(hours=schedule["interval_hours"])).strftime("%Y-%m-%d %H:%M:%S")
+            store.save_regression_schedule(next_run_at=next_run)
+            schedule = store.get_regression_schedule()
+        return {"message": "定期回归配置已保存", "schedule": schedule}
+
+    def _regression_scheduler_loop() -> None:
+        """后台调度线程：到点自动触发定期回归（每 60s 检查一次）。"""
+        from datetime import timedelta
+        import time as _t
+        while True:
+            try:
+                schedule = store.get_regression_schedule()
+                if schedule["enabled"] and schedule.get("next_run_at"):
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    if now_str >= schedule["next_run_at"]:
+                        agents = schedule.get("agents") or []
+                        if agents:
+                            logger.info("定期回归触发 | 计划=%s agents=%s", schedule["next_run_at"], agents)
+                            try:
+                                api_regression_run({
+                                    "agents": agents,
+                                    "runs": int(schedule.get("runs", 1)),
+                                    "trigger": "schedule",
+                                })
+                            except Exception as e:  # noqa: BLE001
+                                logger.error("定期回归执行失败: %s", e)
+                        next_run = datetime.now() + timedelta(hours=float(schedule.get("interval_hours", 24)))
+                        store.save_regression_schedule(
+                            last_run_at=now_str,
+                            next_run_at=next_run.strftime("%Y-%m-%d %H:%M:%S"),
+                        )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("回归调度循环异常: %s", e)
+            _t.sleep(60)
+
+    threading.Thread(target=_regression_scheduler_loop, daemon=True, name="regression-scheduler").start()
+    logger.info("定期回归调度线程已启动（每 60s 检查）")
 
     return app
 

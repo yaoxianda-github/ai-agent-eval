@@ -4816,7 +4816,7 @@ ${(r.trajectory || []).map(function(step, i) {
     nav.forEach(function (a) {
       a.classList.toggle("active", a.getAttribute("data-view") === name);
     });
-    var titleMap = {overview:"概览",dashboard:"工作台",tasks:"任务管理",packages:"任务包",history:"运行历史",badcases:"Badcase 管理",judgeTrust:"判分置信度",memories:"经验库",compare:"多 Agent 对比",monitor:"监控",report:"评测报告",agent:"智能评测",settings:"设置",run:"运行详情",badcase:"Badcase 详情",memory:"经验详情"};
+    var titleMap = {overview:"概览",dashboard:"工作台",tasks:"任务管理",packages:"任务包",history:"运行历史",badcases:"Badcase 管理",judgeTrust:"判分置信度",memories:"经验库",compare:"多 Agent 对比",monitor:"监控",report:"评测报告",agent:"智能评测",settings:"设置",run:"运行详情",badcase:"Badcase 详情",memory:"经验详情",regression:"回归看板"};
     var pt = document.getElementById("page-title");
     if (pt) pt.textContent = titleMap[name] || "工作台";
     if (name === "run") { viewRunDetail(parts[1]); return; }
@@ -4834,6 +4834,7 @@ ${(r.trajectory || []).map(function(step, i) {
     else if (name === "monitor") viewMonitor();
     else if (name === "report") viewReport();
     else if (name === "agent") viewAgent();
+    else if (name === "regression") viewRegression();
     else if (name === "settings") viewSettings();
     else viewDashboard();
   }
@@ -5187,6 +5188,226 @@ ${(r.trajectory || []).map(function(step, i) {
         var box = document.getElementById(id);
         if (box) box.textContent = "—";
       });
+    });
+  }
+
+  // ---------- V5.0 团队回归看板 ----------
+  function viewRegression() {
+    renderHTML('<h2 class="page-title">团队回归看板</h2><div class="empty">加载中…</div>');
+    Promise.all([loadBackends(), api("/api/regression/board"), api("/api/regression/trend"), api("/api/regression/runs?limit=50")])
+      .then(function (res) {
+        renderRegressionBoard(res[1], res[2], res[3]);
+      })
+      .catch(function (e) {
+        renderHTML('<div class="card"><div class="empty">看板加载失败：' + esc(e.message) + '</div></div>');
+      });
+  }
+
+  function rgKpi(label, value, sub, color) {
+    return '<div class="card" style="padding:14px;border-top:3px solid ' + color + ';background:#fff;">' +
+      '<div style="font-size:13px;color:#6b7280;">' + esc(label) + '</div>' +
+      '<div style="font-size:22px;font-weight:700;margin-top:4px;">' + esc(String(value)) + '</div>' +
+      '<div style="font-size:12px;color:#9ca3af;margin-top:4px;">' + esc(sub) + '</div>' +
+    '</div>';
+  }
+
+  function renderRegressionBoard(board, trend, runsData) {
+    var recent = board.recent || {};
+    var healthColor = { healthy: "#16a34a", warning: "#f59e0b", unknown: "#9ca3af" }[board.health] || "#9ca3af";
+    var healthIcon = board.health === "healthy" ? "✓" : board.health === "warning" ? "⚠" : "·";
+    var kpis =
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:4px;">' +
+        rgKpi("回归任务数", board.regression_task_count, "regression_pack 任务", "#3b82f6") +
+        rgKpi("已转回归 Badcase", board.converted_badcase_count, "待转化 " + board.pending_badcase_count + " 个", "#8b5cf6") +
+        rgKpi("回归运行", board.regression_run_count, "累计执行次数", "#0ea5e9") +
+        rgKpi("最近通过率", recent.pass_rate != null ? (recent.pass_rate * 100).toFixed(1) + "%" : "—", fmtTime(recent.created_at) || "暂无数据", "#16a34a") +
+        '<div class="card" style="padding:14px;border-left:4px solid ' + healthColor + ';background:#fff;display:flex;flex-direction:column;justify-content:center;">' +
+          '<div style="font-size:13px;color:#6b7280;">健康状态</div>' +
+          '<div style="font-size:20px;font-weight:700;color:' + healthColor + ';">' + healthIcon + ' ' + esc(board.health_label) + '</div>' +
+        '</div>' +
+      '</div>';
+
+    // 操作区
+    var sched = board.schedule || { enabled: false, interval_hours: 24, agents: [], runs: 1 };
+    var agentBoxes = backendsCache.map(function (b) {
+      return '<label style="margin-right:12px;font-size:13px;"><input type="checkbox" class="rg-agent" value="' + esc(b.id) + '"> ' + esc(b.id) + '</label>';
+    }).join("");
+    var ops =
+      '<div class="card" style="margin-top:16px;">' +
+        '<h3>回归操作</h3>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">' +
+          '<div>' +
+            '<div style="font-weight:600;margin-bottom:8px;">立即回归 <span class="muted">跑 regression_pack 回归任务集</span></div>' +
+            '<div style="margin-bottom:8px;">' + agentBoxes + '</div>' +
+            '<div style="margin-bottom:8px;"><label style="font-size:13px;color:#6b7280;margin-right:8px;">采样 runs</label>' +
+              '<input type="number" id="rg-runs" value="1" min="1" max="5" style="width:70px;"></div>' +
+            '<button class="btn primary" id="rg-run-btn">🚀 发起回归</button> <span id="rg-run-status" class="muted" style="font-size:13px;"></span>' +
+          '</div>' +
+          '<div>' +
+            '<div style="font-weight:600;margin-bottom:8px;">定期回归 <span class="muted">到点自动执行回归任务集</span></div>' +
+            '<div style="margin-bottom:8px;"><label style="font-size:13px;color:#6b7280;margin-right:8px;">间隔（小时）</label>' +
+              '<input type="number" id="rg-interval" value="' + (sched.interval_hours || 24) + '" min="1" style="width:70px;">' +
+              ' <label style="font-size:13px;color:#6b7280;margin-left:8px;margin-right:4px;">启用</label>' +
+              '<input type="checkbox" id="rg-enabled" ' + (sched.enabled ? "checked" : "") + '></div>' +
+            '<div style="margin-bottom:8px;"><label style="font-size:13px;color:#6b7280;">执行 Agent（可多选）</label>' +
+              '<select id="rg-sched-agents" multiple size="3" style="width:100%;margin-top:4px;">' +
+                backendsCache.map(function (b) {
+                  var sel = (sched.agents || []).indexOf(b.id) >= 0 ? " selected" : "";
+                  return '<option value="' + esc(b.id) + '"' + sel + '>' + esc(b.id) + '</option>';
+                }).join("") +
+              '</select></div>' +
+            '<button class="btn secondary" id="rg-save-sched">保存配置</button> <span id="rg-sched-status" class="muted" style="font-size:13px;"></span>' +
+          '</div>' +
+        '</div>' +
+        '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-color,#e5e7eb);">' +
+          '<button class="btn secondary" id="rg-convert-all">♻ 将 ' + board.pending_badcase_count + ' 个待处理 Badcase 全部转为回归用例</button> ' +
+          '<span id="rg-convert-status" class="muted" style="font-size:13px;"></span>' +
+        '</div>' +
+      '</div>';
+
+    // 退化告警
+    var alerts = board.degraded_alerts || [];
+    var degradedCard;
+    if (!alerts.length) {
+      degradedCard = '<div class="card" style="margin-top:16px;border-left:4px solid #16a34a;"><h3>退化告警 <span class="muted">最近一次回归</span></h3><div class="empty">最近一次回归无退化 ✅</div></div>';
+    } else {
+      var dRows = alerts.map(function (d) {
+        return '<tr>' +
+          '<td>' + esc(d.task_id) + '</td>' +
+          '<td>' + esc(d.agent_id) + '</td>' +
+          '<td>' + d.before + ' → ' + d.after + '</td>' +
+          '<td style="color:#dc2626;font-weight:600;">' + d.delta + '</td>' +
+        '</tr>';
+      }).join("");
+      degradedCard = '<div class="card" style="margin-top:16px;border-left:4px solid #dc2626;"><h3>退化告警 <span class="muted">最近一次回归发现 ' + alerts.length + ' 项退化</span></h3>' +
+        '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="color:#6b7280;text-align:left;">' +
+          '<th style="padding:6px;">任务</th><th style="padding:6px;">Agent</th><th style="padding:6px;">分数变化</th><th style="padding:6px;">Δ</th></tr></thead>' +
+          '<tbody>' + dRows + '</tbody></table></div>';
+    }
+
+    // 趋势图
+    var trendCard = '<div class="card" style="margin-top:16px;"><h3>回归通过率趋势 <span class="muted">各 Agent 随回归运行变化 · 90% 参考线</span></h3><div id="rg-trend-chart"></div></div>';
+
+    // 回归历史
+    var items = (runsData && runsData.items) || [];
+    var histRows = items.map(function (r) {
+      var stColor = r.status === "done" ? "#16a34a" : r.status === "running" ? "#f59e0b" : "#dc2626";
+      var trigLabel = r.trigger === "schedule" ? "⏰ 定时" : r.trigger === "ci" ? "CI" : "手动";
+      return '<tr>' +
+        '<td>' + esc(r.label) + '<div style="font-size:12px;color:#9ca3af;">' + esc(fmtTime(r.created_at)) + '</div></td>' +
+        '<td>' + trigLabel + '</td>' +
+        '<td>' + (r.agents || []).join(', ') + '</td>' +
+        '<td>' + (r.task_ids || []).length + ' 任务 × runs ' + r.runs + '</td>' +
+        '<td style="font-weight:600;">' + (r.pass_rate != null ? (r.pass_rate * 100).toFixed(1) + "%" : "—") + '</td>' +
+        '<td>' + (r.degraded || []).length + '</td>' +
+        '<td><span style="color:' + stColor + ';">' + (r.status === "running" ? "运行中" : r.status === "done" ? "完成" : r.status) + '</span></td>' +
+      '</tr>';
+    }).join("");
+    var histCard =
+      '<div class="card" style="margin-top:16px;">' +
+        '<h3>回归运行历史 <span class="muted">最近 ' + items.length + ' 次</span></h3>' +
+        (items.length ? '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="color:#6b7280;text-align:left;">' +
+          '<th style="padding:6px;">回归</th><th style="padding:6px;">触发</th><th style="padding:6px;">Agent</th><th style="padding:6px;">范围</th>' +
+          '<th style="padding:6px;">通过率</th><th style="padding:6px;">退化</th><th style="padding:6px;">状态</th></tr></thead><tbody>' +
+          histRows + '</tbody></table>' : '<div class="empty">暂无回归运行，点击「发起回归」开始</div>') +
+      '</div>';
+
+    renderHTML(
+      '<h2 class="page-title">团队回归看板</h2>' +
+      kpis + ops + degradedCard + trendCard + histCard
+    );
+    rgRenderTrend(trend);
+    rgBindEvents(board);
+  }
+
+  function rgRenderTrend(trend) {
+    var container = el("rg-trend-chart");
+    if (!container) return;
+    var agents = (trend && trend.agents) || [];
+    var series = (trend && trend.series) || {};
+    var usable = agents.filter(function (a) { return (series[a] || []).length >= 2; });
+    if (!usable.length) {
+      container.innerHTML = '<div class="empty">数据不足（至少需要 2 次已完成回归）</div>';
+      return;
+    }
+    var colors = ["#3b82f6", "#f59e0b", "#16a34a", "#8b5cf6", "#ec4899", "#06b6d4"];
+    var maxN = 1;
+    agents.forEach(function (a) { maxN = Math.max(maxN, (series[a] || []).length); });
+    var W = 900, H = 240, padL = 50, padR = 20, padT = 20, padB = 34;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    function xPos(i) { return padL + (maxN > 1 ? i * plotW / (maxN - 1) : 0); }
+    function yPos(rate) { return padT + plotH - rate * plotH; }
+    var svg = '<svg width="100%" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" style="max-width:100%;">';
+    for (var g = 0; g <= 4; g++) {
+      var gy = padT + plotH / 4 * g;
+      svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '" stroke="var(--border-color,#e5e7eb)" stroke-dasharray="3,3"/>';
+      svg += '<text x="' + (padL - 8) + '" y="' + (gy + 4) + '" text-anchor="end" fill="#9ca3af" font-size="11">' + (100 - g * 25) + '%</text>';
+    }
+    svg += '<line x1="' + padL + '" y1="' + yPos(0.9) + '" x2="' + (W - padR) + '" y2="' + yPos(0.9) + '" stroke="#f59e0b" stroke-dasharray="6,3" stroke-width="1.5"/>';
+    svg += '<text x="' + (W - padR - 4) + '" y="' + (yPos(0.9) - 4) + '" text-anchor="end" fill="#f59e0b" font-size="10">90%</text>';
+    agents.forEach(function (a, ai) {
+      var pts = (series[a] || []).map(function (d, i) { return xPos(i).toFixed(1) + ',' + yPos(d.pass_rate).toFixed(1); }).join(' ');
+      svg += '<polyline points="' + pts + '" fill="none" stroke="' + colors[ai % colors.length] + '" stroke-width="2"/>';
+      (series[a] || []).forEach(function (d, i) {
+        svg += '<circle cx="' + xPos(i).toFixed(1) + '" cy="' + yPos(d.pass_rate).toFixed(1) + '" r="3.5" fill="' + colors[ai % colors.length] + '">' +
+          '<title>' + esc(a) + ' ' + esc(d.created_at) + ' 通过率 ' + (d.pass_rate * 100).toFixed(1) + '% 退化 ' + d.degraded_count + '</title></circle>';
+      });
+    });
+    agents.forEach(function (a, ai) {
+      svg += '<rect x="' + (padL + ai * 130) + '" y="' + (H - 24) + '" width="12" height="12" fill="' + colors[ai % colors.length] + '" rx="2"/>';
+      svg += '<text x="' + (padL + ai * 130 + 16) + '" y="' + (H - 14) + '" fill="#6b7280" font-size="11">' + esc(a) + '</text>';
+    });
+    svg += '</svg>';
+    container.innerHTML = svg;
+  }
+
+  function rgBindEvents(board) {
+    var runBtn = el("rg-run-btn");
+    if (runBtn) runBtn.addEventListener("click", function () {
+      var checked = document.querySelectorAll(".rg-agent:checked");
+      var agents = Array.prototype.map.call(checked, function (c) { return c.value; });
+      var statusEl = el("rg-run-status");
+      if (!agents.length) { statusEl.textContent = "请至少选择一个 Agent"; return; }
+      var runs = Math.max(1, parseInt(el("rg-runs").value || "1", 10));
+      runBtn.disabled = true;
+      statusEl.textContent = "发起中…";
+      api("/api/regression/run", { method: "POST", body: { agents: agents, runs: runs } })
+        .then(function (d) {
+          statusEl.textContent = "已发起：" + d.label;
+          setTimeout(function () { location.hash = "#/regression"; viewRegression(); }, 1200);
+        })
+        .catch(function (e) { statusEl.textContent = "发起失败：" + e.message; runBtn.disabled = false; });
+    });
+
+    var saveBtn = el("rg-save-sched");
+    if (saveBtn) saveBtn.addEventListener("click", function () {
+      var selected = Array.prototype.map.call(el("rg-sched-agents").selectedOptions, function (o) { return o.value; });
+      var payload = {
+        enabled: el("rg-enabled").checked,
+        interval_hours: Math.max(1, parseFloat(el("rg-interval").value || "24")),
+        agents: selected,
+      };
+      var statusEl = el("rg-sched-status");
+      if (payload.enabled && !selected.length) { statusEl.textContent = "启用定时回归需至少选择一个 Agent"; return; }
+      statusEl.textContent = "保存中…";
+      api("/api/regression/schedule", { method: "POST", body: payload })
+        .then(function (d) {
+          statusEl.textContent = "已保存" + (d.schedule.enabled ? "（定时回归已启用，下次执行 " + d.schedule.next_run_at + "）" : "（已停用）");
+        })
+        .catch(function (e) { statusEl.textContent = "保存失败：" + e.message; });
+    });
+
+    var convBtn = el("rg-convert-all");
+    if (convBtn) convBtn.addEventListener("click", function () {
+      var statusEl = el("rg-convert-status");
+      convBtn.disabled = true;
+      statusEl.textContent = "转化中…";
+      api("/api/badcases/convert-to-tasks", { method: "POST", body: { all_open: true } })
+        .then(function (d) {
+          statusEl.textContent = d.message;
+          setTimeout(function () { location.hash = "#/regression"; viewRegression(); }, 1200);
+        })
+        .catch(function (e) { statusEl.textContent = "转化失败：" + e.message; convBtn.disabled = false; });
     });
   }
 })();

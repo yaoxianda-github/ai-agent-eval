@@ -90,6 +90,39 @@ CREATE TABLE IF NOT EXISTS memories (
 );
 CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
 CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source_badcase_id);
+
+-- 回归运行记录表（V5.0 团队回归看板）：一次回归 = 对回归任务集的一次批量执行
+CREATE TABLE IF NOT EXISTS regressions (
+    reg_id     TEXT PRIMARY KEY,
+    batch_id   TEXT NOT NULL DEFAULT '',
+    label      TEXT NOT NULL DEFAULT '',
+    agents     TEXT NOT NULL DEFAULT '[]',   -- JSON 数组
+    task_ids   TEXT NOT NULL DEFAULT '[]',   -- JSON 数组：本次实际执行的回归任务
+    runs       INTEGER NOT NULL DEFAULT 1,
+    status     TEXT NOT NULL DEFAULT 'running',  -- running/done/failed/cancelled
+    total_runs INTEGER NOT NULL DEFAULT 0,
+    done_runs  INTEGER NOT NULL DEFAULT 0,
+    pass_rate  REAL NOT NULL DEFAULT 0,      -- 整体通过率（加权）
+    degraded   TEXT NOT NULL DEFAULT '[]',   -- JSON: [{task_id, agent_id, before, after, delta}]
+    trigger    TEXT NOT NULL DEFAULT 'manual',  -- manual / schedule / ci
+    baseline_reg_id TEXT NOT NULL DEFAULT '',   -- 退化对比的基线回归
+    created_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_regressions_status ON regressions(status);
+CREATE INDEX IF NOT EXISTS idx_regressions_created ON regressions(created_at);
+
+-- 定期回归调度配置（V5.0，单例 id=1）
+CREATE TABLE IF NOT EXISTS regression_schedule (
+    id             INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled        INTEGER NOT NULL DEFAULT 0,
+    interval_hours REAL NOT NULL DEFAULT 24,
+    agents         TEXT NOT NULL DEFAULT '[]',
+    runs           INTEGER NOT NULL DEFAULT 1,
+    last_run_at    TEXT NOT NULL DEFAULT '',
+    next_run_at    TEXT NOT NULL DEFAULT '',
+    updated_at     TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -439,6 +472,127 @@ class RunStore:
                 d["tags"] = []
             result.append(d)
         return result
+
+    # ---------- 回归看板（V5.0 团队回归看板） ----------
+    def insert_regression(self, rec: dict) -> str:
+        """插入一条回归运行记录，返回 reg_id。"""
+        import uuid as _uuid
+        reg_id = rec.get("reg_id") or _uuid.uuid4().hex[:12]
+        with self._lock:
+            self._conn.execute(
+                """INSERT OR REPLACE INTO regressions
+                   (reg_id,batch_id,label,agents,task_ids,runs,status,
+                    total_runs,done_runs,pass_rate,degraded,trigger,baseline_reg_id,
+                    created_at,finished_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    reg_id,
+                    rec.get("batch_id", ""),
+                    rec.get("label", ""),
+                    json.dumps(rec.get("agents", []), ensure_ascii=False),
+                    json.dumps(rec.get("task_ids", []), ensure_ascii=False),
+                    int(rec.get("runs", 1)),
+                    rec.get("status", "running"),
+                    int(rec.get("total_runs", 0)),
+                    int(rec.get("done_runs", 0)),
+                    float(rec.get("pass_rate", 0.0)),
+                    json.dumps(rec.get("degraded", []), ensure_ascii=False),
+                    rec.get("trigger", "manual"),
+                    rec.get("baseline_reg_id", ""),
+                    rec.get("created_at", _now()),
+                    rec.get("finished_at", ""),
+                ),
+            )
+            self._conn.commit()
+        return reg_id
+
+    def update_regression(self, reg_id: str, **fields) -> None:
+        if not fields:
+            return
+        if "agents" in fields:
+            fields["agents"] = json.dumps(fields["agents"], ensure_ascii=False)
+        if "task_ids" in fields:
+            fields["task_ids"] = json.dumps(fields["task_ids"], ensure_ascii=False)
+        if "degraded" in fields:
+            fields["degraded"] = json.dumps(fields["degraded"], ensure_ascii=False)
+        keys = ", ".join(f"{k}=?" for k in fields)
+        with self._lock:
+            self._conn.execute(
+                f"UPDATE regressions SET {keys} WHERE reg_id=?",
+                [*fields.values(), reg_id],
+            )
+            self._conn.commit()
+
+    @staticmethod
+    def _regression_row_to_dict(row: tuple, cols: list) -> dict:
+        d = dict(zip(cols, row))
+        for k in ("agents", "task_ids", "degraded"):
+            try:
+                d[k] = json.loads(d.get(k) or ("[]" if k != "degraded" else "[]"))
+            except (ValueError, TypeError):
+                d[k] = []
+        return d
+
+    def get_regression(self, reg_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM regressions WHERE reg_id=?", (reg_id,)
+            ).fetchone()
+            if not row:
+                return None
+            cols = [d[0] for d in self._conn.execute("SELECT * FROM regressions LIMIT 1").description]
+        return self._regression_row_to_dict(row, cols)
+
+    def list_regressions(self, limit: int = 50) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM regressions ORDER BY created_at DESC, reg_id DESC LIMIT ?",
+                (int(limit),),
+            ).fetchall()
+            cols = [d[0] for d in self._conn.execute("SELECT * FROM regressions LIMIT 1").description]
+        return [self._regression_row_to_dict(r, cols) for r in rows]
+
+    def get_regression_schedule(self) -> dict:
+        """读取定期回归配置（单例 id=1，不存在则返回默认并落库）。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM regression_schedule WHERE id=1"
+            ).fetchone()
+            if not row:
+                self._conn.execute(
+                    """INSERT INTO regression_schedule (id, enabled, interval_hours, agents, runs)
+                       VALUES (1, 0, 24, '[]', 1)"""
+                )
+                self._conn.commit()
+                row = self._conn.execute(
+                    "SELECT * FROM regression_schedule WHERE id=1"
+                ).fetchone()
+            cols = [d[0] for d in self._conn.execute("SELECT * FROM regression_schedule LIMIT 1").description]
+        d = dict(zip(cols, row))
+        try:
+            d["agents"] = json.loads(d.get("agents") or "[]")
+        except (ValueError, TypeError):
+            d["agents"] = []
+        d["enabled"] = bool(d.get("enabled", 0))
+        return d
+
+    def save_regression_schedule(self, **fields) -> dict:
+        """保存定期回归配置（单例 id=1）。"""
+        if "agents" in fields:
+            fields["agents"] = json.dumps(fields["agents"], ensure_ascii=False)
+        if "enabled" in fields:
+            fields["enabled"] = 1 if fields["enabled"] else 0
+        if "interval_hours" in fields:
+            fields["interval_hours"] = float(fields["interval_hours"])
+        fields["updated_at"] = _now()
+        keys = ", ".join(f"{k}=?" for k in fields)
+        with self._lock:
+            self._conn.execute(
+                f"UPDATE regression_schedule SET {keys} WHERE id=1",
+                list(fields.values()),
+            )
+            self._conn.commit()
+        return self.get_regression_schedule()
 
     # ---------- 经验记忆（V2.9 从 badcase 沉淀可复用经验） ----------
     def insert_memory(self, rec: dict) -> str:
