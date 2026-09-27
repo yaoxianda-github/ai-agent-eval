@@ -523,6 +523,32 @@ def run_one(
             shutil.rmtree(workspace, ignore_errors=True)
 
         run_dir.mkdir(parents=True, exist_ok=True)
+
+        # V5.1 P1-3：Trial 版本快照（Rubric/Grader/环境版本）——保证评测可复现、可追溯
+        try:
+            from agent_eval.spec import SPEC_VERSION
+            judge_mode = metrics.get("judge_mode", "unknown")
+            snap = {
+                "spec_version": SPEC_VERSION,
+                "grader": {
+                    "mode": judge_mode,
+                    "backend": getattr(record, "agent_id", ""),
+                },
+                "engine": {"agent_eval": "V5.1"},
+                "runtime": {
+                    "python": __import__("sys").version.split()[0],
+                },
+            }
+            # judge.py 若暴露 judge 版本则记录
+            try:
+                from agent_eval import judge as _judge
+                snap["grader"]["judge_module"] = getattr(_judge, "__version__", "V5.1")
+            except Exception:
+                pass
+            metrics["version_snapshot"] = snap
+        except Exception as e:
+            logger.warning("版本快照记录失败: %s", e)
+
         (run_dir / "run.json").write_text(
             json.dumps(record.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
         )

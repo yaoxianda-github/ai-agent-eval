@@ -1311,7 +1311,8 @@
   var BC_CATEGORY_LABELS = {
     reasoning: "推理错误", tool_use: "工具使用错误", format: "输出格式错误",
     timeout: "超时", crash: "异常崩溃", hallucination: "幻觉/编造",
-    planning: "规划错误", context: "上下文理解错误", other: "其他"
+    planning: "规划错误", context: "上下文理解错误", other: "其他",
+    grader_error: "评测标准误判", context_state: "上下文/状态"
   };
   var BC_STATUS_LABELS = {
     pending: "待分析", analyzing: "分析中", fixing: "修复中", fixed: "已修复",
@@ -1324,6 +1325,13 @@
   };
   // 状态流转顺序
   var BC_STATUS_FLOW = ["pending", "analyzing", "fixing", "fixed", "regression", "verified"];
+  // V5.1 P1-1：Case 四类资产池
+  var BC_POOL_LABELS = {
+    golden: "黄金集", regression: "回归集", challenge: "挑战集", observation: "观察池"
+  };
+  var BC_POOL_COLORS = {
+    golden: "#059669", regression: "#2563eb", challenge: "#ea580c", observation: "#7c3aed"
+  };
 
   function viewBadcases() {
     Promise.all([loadTasks(), loadBackends()]).then(function () {
@@ -1339,6 +1347,9 @@
       var sevOpts = '<option value="">全部严重度</option><option>P0</option><option>P1</option><option>P2</option><option>P3</option>';
       var stOpts = '<option value="">全部状态</option>' + Object.keys(BC_STATUS_LABELS).map(function (k) {
         return '<option value="' + k + '">' + BC_STATUS_LABELS[k] + "</option>";
+      }).join("");
+      var poolOpts = '<option value="">全部资产池</option>' + Object.keys(BC_POOL_LABELS).map(function (k) {
+        return '<option value="' + k + '">' + BC_POOL_LABELS[k] + "</option>";
       }).join("");
       var allTabClass = bcTab === "all" ? "bc-tab-active" : "";
       var regTabClass = bcTab === "regression" ? "bc-tab-active" : "";
@@ -1358,6 +1369,7 @@
           '<div class="form-row">' +
             '<div class="field"><label>严重度</label><select id="bc-severity">' + sevOpts + "</select></div>" +
             '<div class="field"><label>状态</label><select id="bc-status">' + stOpts + "</select></div>" +
+            '<div class="field"><label>资产池</label><select id="bc-pool">' + poolOpts + "</select></div>" +
             '<div class="field" style="flex:0 0 100px;"><label>&nbsp;</label><button class="btn secondary" id="bc-filter">筛选</button></div>' +
           "</div>" +
           // 批量操作工具栏
@@ -1429,12 +1441,14 @@
     var cv = el("bc-category") && el("bc-category").value;
     var sv = el("bc-severity") && el("bc-severity").value;
     var stv = el("bc-status") && el("bc-status").value;
+    var pv = el("bc-pool") && el("bc-pool").value;
     var searchVal = el("bc-search") && el("bc-search").value;
     if (tv) q.push("task_id=" + encodeURIComponent(tv));
     if (av) q.push("agent_id=" + encodeURIComponent(av));
     if (cv) q.push("category=" + encodeURIComponent(cv));
     if (sv) q.push("severity=" + encodeURIComponent(sv));
     if (stv) q.push("status=" + encodeURIComponent(stv));
+    if (pv) q.push("pool=" + encodeURIComponent(pv));
     if (searchVal) q.push("q=" + encodeURIComponent(searchVal));
     api("/api/badcases?" + q.join("&")).then(function (d) {
       var list = el("bc-list");
@@ -1463,6 +1477,7 @@
           "<td><b>" + esc(b.title) + "</b></td>" +
           "<td>" + esc(b.task_id) + "</td><td>" + esc(b.agent_id) + "</td>" +
           "<td>" + esc(catLabel) + "</td>" +
+          '<td><span class="badge" style="background:' + (BC_POOL_COLORS[b.pool] || "#6b7280") + ';color:#fff">' + esc(BC_POOL_LABELS[b.pool] || b.pool || "回归集") + "</span></td>" +
           '<td><span class="badge" style="background:' + BC_STATUS_COLORS[b.status] + ';color:#fff">' + esc(stLabel) + "</span></td>" +
           "</tr>";
       }).join("");
@@ -1474,7 +1489,7 @@
         '<span class="pager-info">第 ' + cur + " / " + pages + " 页 · 共 " + total + " 条</span>" +
         '<button class="btn secondary small" id="bc-next"' + (bcPage >= pages - 1 ? " disabled" : "") + '>下一页 ›</button>' +
         "</div>";
-      list.innerHTML = '<table><tr><th><input type="checkbox" id="bc-select-all"></th><th>创建时间</th><th>严重度</th><th>标题</th><th>任务</th><th>后端</th><th>分类</th><th>状态</th></tr>' + rows + "</table>" + pager;
+      list.innerHTML = '<table><tr><th><input type="checkbox" id="bc-select-all"></th><th>创建时间</th><th>严重度</th><th>标题</th><th>任务</th><th>后端</th><th>分类</th><th>资产池</th><th>状态</th></tr>' + rows + "</table>" + pager;
       
       // 绑定批量选择事件
       setTimeout(function() {
@@ -1628,7 +1643,7 @@
         flowBtns = '<button class="btn secondary small" id="bc-flow-reset">重置为待分析</button>' + flowBtns;
       }
       renderHTML(
-        '<h2 class="page-title">Badcase 详情 · ' + esc(b.id) + '</h2>' +
+        '<h2 class="page-title">Badcase 详情 · ' + poolBadge + esc(b.id) + '</h2>' +
         // 状态流转进度条
         '<div class="bc-flow-bar">' +
           BC_STATUS_FLOW.map(function(s, i) {
@@ -2402,6 +2417,21 @@ ${b.fix_plan || '暂无'}
           '<pre class="code" style="margin-top:8px;max-height:300px;overflow:auto;">' + esc(JSON.stringify(L, null, 2)) + '</pre></details>' +
           '</div>';
       }
+      // V5.1 P1-3：Trial 版本快照展示（Rubric/Grader 版本）
+      var versionSnap = r.metrics && r.metrics.version_snapshot;
+      var versionHtml = "";
+      if (versionSnap) {
+        var vs = versionSnap;
+        versionHtml = '<div class="card"><h3>评测版本快照（V5.1 P1-3）' +
+          '<span class="info-icon" style="margin-left:8px;" title="记录本次 Trial 使用的 Rubric/评测规范版本、Grader 模式与运行环境，用于复现与追溯">ⓘ</span></h3>' +
+          '<div class="config-grid">' +
+            '<div class="config-item"><span class="config-label">规范版本</span><span class="config-value">' + esc((vs.spec_version || "—")) + '</span></div>' +
+            '<div class="config-item"><span class="config-label">Grader 模式</span><span class="config-value">' + esc(((vs.grader && vs.grader.mode) || "—")) + '</span></div>' +
+            '<div class="config-item"><span class="config-label">Judge 模块</span><span class="config-value">' + esc(((vs.grader && vs.grader.judge_module) || "—")) + '</span></div>' +
+            '<div class="config-item"><span class="config-label">引擎</span><span class="config-value">' + esc(((vs.engine && vs.engine.agent_eval) || "—")) + '</span></div>' +
+            '<div class="config-item"><span class="config-label">运行时</span><span class="config-value">Python ' + esc(((vs.runtime && vs.runtime.python) || "—")) + '</span></div>' +
+          '</div></div>';
+      }
       renderHTML(
         '<h2 class="page-title">运行详情 ' +
           '<span style="float:right;display:flex;gap:8px;">' +
@@ -2442,7 +2472,7 @@ ${b.fix_plan || '暂无'}
           return "";
         })() +
         (r.error ? '<div class="err-banner">' + esc(r.error) + "</div>" : "") +
-        lockHtml +
+        lockHtml + versionHtml +
         '<div class="card" id="run-verdict"><h3>判定结果（' + v.length + " 个校验点）</h3>" +
           // V4.0 失败归因标准化（6类映射）
           (function () {

@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS badcases (
     fix_plan    TEXT NOT NULL DEFAULT '',
     tags        TEXT NOT NULL DEFAULT '[]',
     regression_task_id TEXT NOT NULL DEFAULT '',
+    pool        TEXT NOT NULL DEFAULT 'regression',  -- V5.1 P1-1：Case 四类资产池（regression/challenge/observation/golden）
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -152,6 +153,9 @@ class RunStore:
             self._conn.execute("ALTER TABLE batches ADD COLUMN last_heartbeat TEXT NOT NULL DEFAULT ''")
         # badcases 表加 regression_task_id 字段（V2.8.1：badcase 转化为回归评测用例）
         bccols = {r[1] for r in self._conn.execute("PRAGMA table_info(badcases)").fetchall()}
+        if "pool" not in bccols:
+            self._conn.execute("ALTER TABLE badcases ADD COLUMN pool TEXT NOT NULL DEFAULT 'regression'")
+            bccols.add("pool")
         if "regression_task_id" not in bccols:
             self._conn.execute("ALTER TABLE badcases ADD COLUMN regression_task_id TEXT NOT NULL DEFAULT ''")
 
@@ -201,6 +205,7 @@ class RunStore:
         task_id: str | None = None,
         agent_id: str | None = None,
         status: str | None = None,
+        pool: str | None = None,
     ) -> tuple[list[dict], int]:
         """分页查询运行记录，返回 (记录列表, 满足筛选条件的总数)。"""
         sql = "SELECT * FROM runs"
@@ -215,6 +220,9 @@ class RunStore:
         if status:
             conds.append("status=?")
             args.append(status)
+        if pool:
+            conds.append("pool=?")
+            args.append(pool)
         where = (" WHERE " + " AND ".join(conds)) if conds else ""
         with self._lock:
             total = self._conn.execute(f"SELECT COUNT(*) FROM runs{where}", args).fetchone()[0]
@@ -343,8 +351,8 @@ class RunStore:
             self._conn.execute(
                 """INSERT OR REPLACE INTO badcases
                    (id,run_id,task_id,agent_id,title,description,category,severity,
-                    status,root_cause,fix_plan,tags,created_at,updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    status,root_cause,fix_plan,tags,pool,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     bid,
                     b.get("run_id", ""),
@@ -358,6 +366,7 @@ class RunStore:
                     b.get("root_cause", ""),
                     b.get("fix_plan", ""),
                     json.dumps(b.get("tags", []), ensure_ascii=False),
+                    b.get("pool", "regression"),
                     b.get("created_at", now),
                     now,
                 ),
@@ -404,6 +413,7 @@ class RunStore:
         category: str | None = None,
         severity: str | None = None,
         status: str | None = None,
+        pool: str | None = None,
     ) -> tuple[list[dict], int]:
         """分页查询 badcase，返回 (记录列表, 总数)。"""
         sql = "SELECT * FROM badcases"
@@ -424,6 +434,9 @@ class RunStore:
         if status:
             conds.append("status=?")
             args.append(status)
+        if pool:
+            conds.append("pool=?")
+            args.append(pool)
         where = (" WHERE " + " AND ".join(conds)) if conds else ""
         with self._lock:
             total = self._conn.execute(f"SELECT COUNT(*) FROM badcases{where}", args).fetchone()[0]

@@ -50,13 +50,27 @@ FAILURE_CATEGORIES = {
         "evidence": "证据完整，但解释或归纳仍然错误",
         "color": "#ec4899",
     },
+    "grader_error": {
+        "label": "评测标准误判",
+        "fix_target": "Rubric、Grader、断言、reference_solution",
+        "evidence": "LLM Judge 无法判断(abstain)，或断言/期望本身有误",
+        "color": "#0891b2",
+    },
+    "context_state": {
+        "label": "上下文/状态",
+        "fix_target": "上下文管理、状态持久化、会话策略",
+        "evidence": "上下文丢失、状态污染、前序依赖被覆盖",
+        "color": "#a16207",
+    },
 }
 
 
 def classify_failure(verdicts: list[dict], steps: list[dict] | None = None) -> dict:
-    """将失败归因到6类标准化映射之一。
+    """将失败归因到8类标准化映射之一（V5.1 P1-2，扩自6类）。
 
     判定优先级（从高到低）：
+    0.  grader_error：任一 verdict abstain（LLM Judge 无法判断）→ 归因评测标准而非 Agent
+    0.5 context_state：步骤中出现上下文丢失/状态污染信号
     1. environment：steps 中有 permission denied / error / 工具不存在
     2. tool_param：tool_call_assert 类型 checkpoint 失败
     3. data_logic：content_contains 数值类断言失败（含数字的断言）
@@ -71,6 +85,30 @@ def classify_failure(verdicts: list[dict], steps: list[dict] | None = None) -> d
 
     if not failed_verdicts:
         return {"category": None, "label": "无失败", "fix_target": "", "evidence": "全部通过", "color": "#16a34a", "confidence": 1.0}
+
+    # 0. V5.1 P1-2：评测标准误判（grader_error）——LLM Judge abstain 无法判断
+    #    证据不足时归因于评测标准本身，而不是 Agent 行为（避免误伤）
+    abstain_verdicts = [v for v in failed_verdicts if v.get("abstain")]
+    if abstain_verdicts:
+        cat = FAILURE_CATEGORIES["grader_error"]
+        return {"category": "grader_error", **cat, "confidence": 0.85,
+                "detail": f"LLM Judge 无法判断(abstain): {abstain_verdicts[0].get('name') or abstain_verdicts[0].get('checkpoint_id', '?')}"}
+
+    # 0.5 V5.1 P1-2：上下文/状态（context_state）——上下文丢失、状态污染、依赖被覆盖
+    ctx_keywords = ["context window", "context length", "token limit", "too long",
+                    "状态丢失", "上下文", "session reset", "conversation reset",
+                    "overwritten", "被覆盖", "previous state", "历史状态"]
+    ctx_hits = []
+    for s in steps:
+        obs = (str(s.get("observation", "")) + " " + str(s.get("result", "")) + " " + str(s.get("error", ""))).lower()
+        for kw in ctx_keywords:
+            if kw in obs:
+                ctx_hits.append(kw)
+                break
+    if ctx_hits:
+        cat = FAILURE_CATEGORIES["context_state"]
+        return {"category": "context_state", **cat, "confidence": 0.7,
+                "detail": f"检测到上下文/状态异常: {', '.join(ctx_hits[:3])}"}
 
     # 0. V4.2：检测 Decision 层失败（required_tools/required_skills 未调用）
     decision_failures = [v for v in failed_verdicts if v.get("type") == "decision_check" or v.get("id") == "decision_layer"]

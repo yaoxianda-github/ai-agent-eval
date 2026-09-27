@@ -34,7 +34,7 @@ from agent_eval.log import get_logger, setup_logging
 from agent_eval.reporter import load_runs, render_html, summarize
 from agent_eval.runner import default_results_dir, run_one
 from agent_eval.spec import find_tasks_dir, load_manifest, load_task_pack
-from agent_eval.stats import summarize_scores
+from agent_eval.stats import run_abstained, summarize_scores
 from agent_eval.traces import tool_category
 from agent_eval.web.store import RunStore
 from agent_eval.web.taskgen import generate_task_pack
@@ -407,13 +407,15 @@ def create_app(
                     "verifier": rec.get("verifier", "deterministic"),
                     "task_level": rec.get("task_level", "L2"),
                     "task_id": rec.get("task_id", ""),
+                    "abstain": run_abstained(rec),   # V5.1 P0：unknown 独立标记
                 }
             )
 
         cells: dict[str, dict] = {}
         for (a, t), lst in grid.items():
             scores = [x["score"] for x in lst]
-            st = summarize_scores(scores)
+            abstain_flags = [bool(x.get("abstain")) for x in lst]
+            st = summarize_scores(scores, abstain_flags)
             weight = float(getattr(tasks.get(t), "weight", 1.0) or 1.0)
             cells[f"{a}|{t}"] = {
                 "n": len(lst),
@@ -1712,15 +1714,17 @@ def create_app(
         category: str = Query(None),
         severity: str = Query(None),
         status: str = Query(None),
+        pool: str = Query(None),
         page: int = Query(1, ge=1),
         page_size: int = Query(20, ge=1, le=100),
     ) -> dict:
-        """分页列出 badcase，支持按任务/Agent/分类/严重程度/状态筛选。"""
+        """分页列出 badcase，支持按任务/Agent/分类/严重程度/状态/资产池筛选（V5.1 P1-1）。"""
         offset = (page - 1) * page_size
         items, total = store.list_badcases(
             limit=page_size, offset=offset,
             task_id=task_id, agent_id=agent_id,
             category=category, severity=severity, status=status,
+            pool=pool,
         )
         return {
             "items": items,
@@ -1847,6 +1851,9 @@ def create_app(
         root_cause = payload.get("root_cause", diagnosis["root_cause"])
         fix_plan = payload.get("fix_plan", diagnosis["fix_plan"])
 
+        # V5.1 P1-1：四类资产自动分池
+        from agent_eval.data_flywheel import assign_case_pool
+        pool = assign_case_pool(run_data, {}) if not payload.get("pool") else payload.get("pool")
         bid = store.insert_badcase({
             "run_id": run_id,
             "task_id": run_data.get("task_id", ""),
@@ -1858,6 +1865,7 @@ def create_app(
             "status": "pending",
             "root_cause": root_cause,
             "fix_plan": fix_plan,
+            "pool": pool,
         })
         return {"id": bid, "message": "已从运行记录导入 badcase", "category": category, "severity": severity,
                 "root_cause": root_cause, "fix_plan": fix_plan}

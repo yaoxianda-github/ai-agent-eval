@@ -18,6 +18,9 @@ from agent_eval.log import get_logger
 
 logger = get_logger(__name__)
 
+# V5.1 P1-3：评测规范版本号（写入 Trial 版本快照，用于评测可复现追溯）
+SPEC_VERSION = "V5.1" 
+
 CheckpointType = Literal[
     "file_exists",
     "file_not_exists",

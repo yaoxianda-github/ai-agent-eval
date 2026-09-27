@@ -8,6 +8,12 @@
 2. badcase 标注（人工/LLM辅助）→ 根因分析 + 修复方案
 3. badcase 回流 → 转化为回归任务 spec，加入评测集
 4. 经验记忆沉淀 → 成功/失败模式提取为 memory，注入后续运行
+
+V5.1 P1-1（Case 四类资产分池）：参考《Agent评测：评测体系、工程实践与持续演进》
+- 黄金集（golden）：代表性通过 Case，作为基准样本（由人工挑选，不自动产生）
+- 回归集（regression）：已定位根因的失败 Case，修复后回流回归集（默认池）
+- 挑战集（challenge）：高难边界 Case（SEC/RAG/L4-L5 类任务失败），沉淀高难样本
+- 观察池（observation）：标准有争议 Case（LLM Judge abstain 无法判断），先观察不回流
 """
 
 from __future__ import annotations
@@ -50,6 +56,26 @@ class FlywheelStats:
             "memories_active": self.memories_active,
             "flywheel_efficiency": round(self.flywheel_efficiency, 3),
         }
+
+
+def assign_case_pool(run_data: dict, analysis: dict[str, Any]) -> str:
+    """V5.1 P1-1：将失败运行自动分入四类资产池。
+
+    判定优先级：
+    1. 有 abstain（LLM Judge 无法判断）→ observation（标准有争议，先观察不回流）
+    2. 挑战型任务（SEC- 安全对抗 / RAG- 检索边界 / L4-L5 高难度）失败 → challenge
+    3. 其他失败 → regression（修复后回流回归集）
+    """
+    verdicts = run_data.get("verdicts", []) or []
+    if any(bool(v.get("abstain")) for v in verdicts):
+        return "observation"
+    task_id = str(run_data.get("task_id", ""))
+    task_level = str(run_data.get("task_level", ""))
+    if task_id.startswith(("SEC-", "RAG-", "T-REG-")):
+        return "challenge"
+    if task_level in ("L4", "L5"):
+        return "challenge"
+    return "regression"
 
 
 def analyze_run_failure(run_data: dict) -> dict[str, Any]:
@@ -130,12 +156,20 @@ def analyze_run_failure(run_data: dict) -> dict[str, Any]:
             tags.append("potential_loop")
             root_cause += f"。注意: 工具'{most_common[0][0]}'被调用{most_common[0][1]}次，可能存在重复调用"
 
+    # V5.1 P1-1：四类资产自动分池
+    pool = assign_case_pool(run_data, {
+        "category": category,
+        "severity": severity,
+    })
+    tags.append(f"pool:{pool}")
+
     return {
         "category": category,
         "severity": severity,
         "root_cause": root_cause,
         "fix_plan": fix_plan,
         "tags": tags,
+        "pool": pool,  # V5.1 P1-1：四类资产池（regression/challenge/observation/golden）
         "failed_checkpoints": len([v for v in verdicts if not v.get("passed", True)]),
         "total_checkpoints": len(verdicts),
         "step_count": len(steps),
