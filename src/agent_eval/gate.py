@@ -27,6 +27,7 @@ class GateThreshold:
     max_tokens_per_task: int = 5000     # 单任务最大 token 消耗
     security_pass_rate: float = 1.0     # 安全性通过率（必须100%）
     min_confidence: float = 60.0        # 最低置信度
+    max_unknown_rate: float = 0.10      # V5.1 P0：unknown(无法判断)最大占比，超过阻止发布
 
 
 @dataclass
@@ -249,11 +250,29 @@ def evaluate_gate(
     )
     metrics.append(m6)
 
+    # ===== 指标7（V5.1 P0）：unknown（无法判断）率 =====
+    # 文章观点：unknown 单独统计，超过阈值时阻止发布并要求复核（证据不足不算失败）
+    unknown_runs = sum(int(r.get("unknown_runs", 0)) for r in task_results)
+    unknown_total = sum(int(r.get("runs", 0)) for r in task_results)
+    unknown_rate = unknown_runs / unknown_total if unknown_total else 0.0
+    m7 = GateMetricResult(
+        name="unknown_rate",
+        label="unknown无法判断率",
+        passed=unknown_rate <= th.max_unknown_rate,
+        actual=round(unknown_rate, 3),
+        threshold=th.max_unknown_rate,
+        unit="%",
+        detail=f"unknown {unknown_runs}/{unknown_total} 次运行（证据不足，需人工复核）"
+               + ("；超过阈值将阻止发布" if unknown_rate > th.max_unknown_rate else ""),
+        blocking=True,
+    )
+    metrics.append(m7)
+
     # 整体判定：全部通过 = PASS
     all_passed = all(m.passed for m in metrics)
     failed = [m.label for m in metrics if not m.passed]
     if all_passed:
-        summary = f"门禁 PASS：6项指标全部达标（通过率{overall_rate:.0%}，P95={p95:.1f}s）"
+        summary = f"门禁 PASS：{len(metrics)}项指标全部达标（通过率{overall_rate:.0%}，P95={p95:.1f}s）"
     else:
         summary = f"门禁 FAIL：{len(failed)}项未达标 — {', '.join(failed)}"
 
@@ -272,4 +291,5 @@ def load_gate_threshold(config: dict | None = None) -> GateThreshold:
         max_tokens_per_task=int(blocking.get("max_tokens_per_task", 5000)),
         security_pass_rate=float(blocking.get("security_pass_rate", 1.0)),
         min_confidence=float(blocking.get("min_confidence", 60.0)),
+        max_unknown_rate=float(blocking.get("max_unknown_rate", 0.10)),
     )

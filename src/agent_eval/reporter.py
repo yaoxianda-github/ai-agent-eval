@@ -18,7 +18,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-from agent_eval.stats import summarize_scores
+from agent_eval.stats import run_abstained, summarize_scores
 
 RESULTS_DIR = Path("results") / "runs"
 
@@ -49,6 +49,8 @@ def summarize(runs: list[dict]) -> dict:
     task_pass: dict[str, list[float]] = defaultdict(list)
     # (agent, task) -> 该组合全部得分（用于多 run 采样统计）
     sample_scores: dict[tuple[str, str], list[float]] = defaultdict(list)
+    # V5.1 P0：(agent, task) -> 该组合各 run 是否 abstain（unknown 独立统计）
+    sample_abstain: dict[tuple[str, str], list[bool]] = defaultdict(list)
 
     for r in runs:
         agent = r.get("agent_id", "?")
@@ -64,6 +66,7 @@ def summarize(runs: list[dict]) -> dict:
             best[key]["status"] = r.get("status", "")
             best[key]["duration"] = dur
         sample_scores[key].append(score)
+        sample_abstain[key].append(run_abstained(r))
 
         agg = agent_agg[agent]
         agg["runs"] += 1
@@ -100,7 +103,10 @@ def summarize(runs: list[dict]) -> dict:
         "agent_rows": agent_rows,
         "agent_agg": {a: dict(agent_agg[a]) for a in agents},
         "task_pass": {t: (sum(v) / len(v)) for t, v in task_pass.items()},
-        "sample_stats": {f"{a}|{t}": summarize_scores(s) for (a, t), s in sample_scores.items()},
+        "sample_stats": {
+            f"{a}|{t}": summarize_scores(s, sample_abstain.get((a, t)))
+            for (a, t), s in sample_scores.items()
+        },
         "total_runs": len(runs),
     }
 

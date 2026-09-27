@@ -130,6 +130,11 @@ def judge_task(records: list, task_pass_ratio: float, task_spec=None) -> dict:
     n = len(records)
     passed_runs = sum(1 for r in records if run_passed(r))
     task_passed = (passed_runs / n) >= task_pass_ratio if n else False
+    # V5.1 P0：unknown（abstain 无法判断）独立统计，证据不足不算失败
+    unknown_runs = sum(
+        1 for r in records
+        if any(v.get("abstain") for v in (r.verdicts or []))
+    )
     # checkpoint 级通过情况（用于 JUnit/Allure 细粒度展示）
     cp_stats: dict[str, dict] = {}
     for r in records:
@@ -146,6 +151,7 @@ def judge_task(records: list, task_pass_ratio: float, task_spec=None) -> dict:
         "risk_level": risk_level,  # V4.3 P0：风险等级（P0/P1/P2/None）
         "runs": n,
         "passed_runs": passed_runs,
+        "unknown_runs": unknown_runs,   # V5.1 P0：unknown 独立统计（门禁联动）
         "task_passed": task_passed,
         "checkpoints": cp_stats,
         "duration_s": round(sum(r.duration_s for r in records) / n, 2) if n else 0.0,
