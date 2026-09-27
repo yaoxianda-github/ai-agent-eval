@@ -115,7 +115,7 @@ def run(
     """
     from agent_eval.runner import run_one
     from agent_eval.spec import find_tasks_dir, load_task_pack, TaskSpec
-    from agent_eval.stats import summarize_scores
+    from agent_eval.stats import run_abstained, summarize_scores
     from agent_eval.costing import estimate_cost
     import yaml
     import tempfile
@@ -233,7 +233,10 @@ def run(
         score = rec.metrics.get("score", 0.0)
         if not json_output and not quiet:
             typer.echo(f"run {i}/{runs}: {rec.run_id}  {rec.status}  {rec.duration_s}s  score={score}")
-    stats = summarize_scores([r.metrics.get("score", 0.0) for r in records])
+    stats = summarize_scores(
+        [r.metrics.get("score", 0.0) for r in records],
+        [any(v.get("abstain") for v in (r.verdicts or [])) for r in records],
+    )
     pass_count = sum(1 for r in records if all(v.get("passed") for v in r.verdicts) if r.verdicts)
     pass_rate = pass_count / len(records) if records else 0.0
 
@@ -250,6 +253,8 @@ def run(
                 "mean": stats["mean"],
                 "std": stats["std"],
                 "pass_rate": pass_rate,
+                "unknown_count": stats.get("unknown_count", 0),
+                "unknown_rate": stats.get("unknown_rate", 0.0),
             },
             "runs": [_run_to_dict(r) for r in records],
         }, ensure_ascii=False, indent=2))
@@ -976,6 +981,58 @@ def report(
 
     path = generate_report(out)
     typer.echo(f"报告已生成: {path}")
+
+
+@app.command("reliability")
+def reliability(
+    human_ratings: str = typer.Option(None, "--human-ratings", help="多人判定 JSON 文件（{\"raters\": [[0,1,...],...]}）"),
+    llm_ratings: str = typer.Option(None, "--llm-ratings", help="LLM Judge 判定 JSON 文件（{\"ratings\": [...]}），与首位人类专家对齐比较"),
+    business: str = typer.Option(None, "--business", help="业务结果 JSON 文件（{\"eval_scores\":[...],\"business_outcomes\":[...]}）"),
+    json_output: bool = typer.Option(False, "--json", help="输出 JSON 而非表格"),
+) -> None:
+    """评测标准可靠性四验证（V5.1 P0-2）。
+
+    参考《Agent评测：评测体系、工程实践与持续演进》：
+    评测标准投入使用前需验证——人人一致(Cohen's Kappa)、人机一致(LLM vs 人类)、
+    业务有效性(Spearman)、覆盖度(tier/pack/level 盲区)。
+
+    示例：
+      agent-eval reliability --human-ratings ratings.json --llm-ratings llm.json --json
+      agent-eval reliability   # 仅输出任务集覆盖度
+    """
+    from agent_eval.reliability import run_reliability_report
+
+    report = run_reliability_report(
+        tasks_dir=Path('tasks'),
+        human_ratings_file=human_ratings,
+        llm_ratings_file=llm_ratings,
+        business_file=business,
+    )
+    if json_output:
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+        return
+    typer.echo("\n=== 评测标准可靠性四验证（V5.1 P0-2）===")
+    typer.echo(f"参考：{report['reference']}\n")
+    for dim, key in [
+        ("1. 人人一致（Cohen's Kappa）", "inter_rater"),
+        ("2. 人机一致（LLM vs 人类）", "human_llm"),
+        ("3. 业务有效性（Spearman）", "business_validity"),
+        ("4. 覆盖度（tier/level/标签）", "coverage"),
+    ]:
+        v = report.get(key, {})
+        typer.echo(f"--- {dim} ---")
+        if v.get("not_available"):
+            typer.echo("  未提供数据（跳过）")
+        elif key == "coverage":
+            typer.echo(f"  任务数: {v.get('total_tasks')}")
+            for t, info in v.get("tier_coverage", {}).items():
+                typer.echo(f"  {t}: {info['count']} 个（{info['label']}）")
+            typer.echo(f"  level 分布: {v.get('level_distribution')}")
+            typer.echo(f"  结论: {v.get('conclusion')}")
+        else:
+            for k, val in v.items():
+                typer.echo(f"  {k}: {val}")
+        typer.echo()
 
 
 @app.command("convert")
