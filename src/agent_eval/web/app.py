@@ -834,13 +834,17 @@ def create_app(
         return {"saved": list(filtered.keys()), "applied_to_process": applied, "message": f"已保存到 .env 文件并即时生效（{applied} 个变量已更新）"}
 
     @app.get("/api/tasks")
-    def api_tasks() -> dict:
+    def api_tasks(dimension: str = "") -> dict:
+        # V5.2 P0-1：支持按评测维度筛选（business_goal/task_quality/interaction/safety_compliance/robustness/cost_efficiency）
         from agent_eval.costing import estimate_cost, load_benchmark
+        from agent_eval.spec import DIMENSIONS
 
         tasks = _task_map()
         bench = load_benchmark()
         out = []
         for t in tasks.values():
+            if dimension and getattr(t, "dimension", "task_quality") != dimension:
+                continue
             d = _task_to_dict(t)
             est = estimate_cost(
                 "minimal-react", t.id, level=t.level, verifier=t.verifier, runs=1, benchmark=bench
@@ -856,6 +860,7 @@ def create_app(
             "core_pack": manifest.get("core_pack", ["golden", "regression"]),
             "dev_pack": manifest.get("dev_pack", ["boundary", "random"]),
             "eval_pack": manifest.get("eval_pack", ["golden", "regression"]),
+            "dimensions": DIMENSIONS,  # V5.2 P0-1：评测六维度定义
         }
 
     @app.get("/api/tiers")
@@ -1606,6 +1611,58 @@ def create_app(
     def api_summary() -> dict:
         return summarize(load_runs(results_dir))
 
+    @app.get("/api/dimensions/health")
+    def api_dimensions_health() -> dict:
+        """V5.2 P1-2：六维度红黄绿健康聚合。
+        对最近 max_runs 条运行记录，按任务所属评测维度聚合通过率/样本量/平均耗时，
+        并按维度阈值给出 green/yellow/red 健康状态（安全合规维度必须 100% 才绿）。
+        """
+        from agent_eval.spec import load_task_pack, DIMENSIONS
+
+        max_runs = 200
+        runs = list(load_runs(results_dir))[-max_runs:]
+        dim_task = {}
+        for spec in load_task_pack(tasks_dir):
+            dim_task[spec.id] = getattr(spec, "dimension", "task_quality")
+
+        agg = {}  # dim -> {total, passed, dur_sum}
+        for r in runs:
+            tid = r.get("task_id")
+            if not tid:
+                continue
+            dim = dim_task.get(tid) or "task_quality"
+            a = agg.setdefault(dim, {"total": 0, "passed": 0, "dur_sum": 0.0})
+            a["total"] += 1
+            # 通过口径与平台一致：metrics.pass_rate >= 0.999（全部 checkpoint 通过）
+            rate = ((r.get("metrics") or {}).get("pass_rate") or 0)
+            if rate >= 0.999:
+                a["passed"] += 1
+            a["dur_sum"] += float(r.get("duration_s") or 0)
+
+        out = {"dimensions": {}, "generated_at": datetime.now().isoformat(timespec="seconds")}
+        for dim, meta in DIMENSIONS.items():
+            a = agg.get(dim)
+            if not a or a["total"] == 0:
+                out["dimensions"][dim] = {
+                    "label": meta, "samples": 0, "pass_rate": None, "avg_duration_s": None,
+                    "health": "gray", "threshold": 1.0 if dim == "safety_compliance" else 0.9,
+                }
+                continue
+            rate = a["passed"] / a["total"]
+            thr = 1.0 if dim == "safety_compliance" else 0.9
+            if rate >= thr:
+                health = "green"
+            elif rate >= 0.7:
+                health = "yellow"
+            else:
+                health = "red"
+            out["dimensions"][dim] = {
+                "label": meta, "samples": a["total"], "pass_rate": round(rate, 3),
+                "avg_duration_s": round(a["dur_sum"] / a["total"], 1) if a["total"] else None,
+                "health": health, "threshold": thr,
+            }
+        return out
+
     @app.post("/api/report")
     def api_report(out_name: str = Body("report.html", embed=True)) -> dict:
         report_dir.mkdir(parents=True, exist_ok=True)
@@ -1757,6 +1814,23 @@ def create_app(
                         "duration_s": run_data.get("duration_s"),
                         "steps": len(run_data.get("steps", [])),
                     }
+            except Exception:  # noqa: BLE001
+                pass
+        # V5.2 P1-1：目标-指标映射——若关联任务，附带任务评测维度与业务目标（goal），
+        # 让 badcase 能关联到"这个 Agent 上线后如果____就赢了"的顶层目标
+        task_id = b.get("task_id") or (b.get("run_summary") and b.get("run_id"))
+        if task_id and not b.get("task_meta"):
+            try:
+                from agent_eval.spec import load_task_pack, DIMENSIONS
+
+                for spec in load_task_pack(tasks_dir):
+                    if spec.id == task_id:
+                        b["task_meta"] = {
+                            "dimension": getattr(spec, "dimension", "task_quality"),
+                            "dimension_label": DIMENSIONS.get(getattr(spec, "dimension", ""), ""),
+                            "goal": getattr(spec, "goal", "") or "",
+                        }
+                        break
             except Exception:  # noqa: BLE001
                 pass
         return b

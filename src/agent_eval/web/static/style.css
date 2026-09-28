@@ -571,6 +571,7 @@ tr.clickable:hover { background: var(--bg-secondary); }
 /* 任务管理表格列宽 */
 .tcol-check { width: 36px; text-align: center; }
 .tcol-check input[type="checkbox"] { cursor: pointer; accent-color: var(--text-primary); width: 16px; height: 16px; }
+  .tcol-dim { width: 190px; }  /* V5.2 P0-1 */
 .tcol-id { min-width: 70px; font-family: var(--font-mono); font-weight: 600; }
 .tcol-title { min-width: 200px; max-width: 300px; }
 .tcol-tier { min-width: 80px; text-align: center; }

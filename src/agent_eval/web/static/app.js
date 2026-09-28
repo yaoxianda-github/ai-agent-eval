@@ -73,6 +73,7 @@
   var corePackCache = null;    // V3.1：core包定义（tier列表）
   var devPackCache = null;     // V3.7：开发集（tier列表）
   var evalPackCache = null;    // V3.7：评测集（tier列表）
+  var dimensionsCache = null;  // V5.2 P0-1：评测六维度定义
   var histPage = 0;      // 运行历史当前页（从 0 起）
   var histLimit = 20;    // 每页条数
   var backendsCache = null;
@@ -99,6 +100,7 @@
       corePackCache = d.core_pack || ["golden", "regression"];
       devPackCache = d.dev_pack || ["boundary", "random"];
       evalPackCache = d.eval_pack || ["golden", "regression"];
+      dimensionsCache = d.dimensions || null;  // V5.2 P0-1
       return d.tasks;
     });
   }
@@ -230,13 +232,15 @@
       api("/api/runs?limit=50").catch(function () { return { runs: [] }; }),
       api("/api/badcases?limit=100").catch(function () { return { items: [] }; }),
       api("/api/runs/failure-buckets?limit=200").catch(function () { return null; }),
-      api("/api/runs/judge-agreement?limit=500").catch(function () { return null; })
+      api("/api/runs/judge-agreement?limit=500").catch(function () { return null; }),
+      api("/api/dimensions/health").catch(function () { return null; })
     ]).then(function (rs) {
       var tasks = rs[0].tasks || rs[0].items || [];
       var runs = rs[1].runs || rs[1].items || [];
       var badcases = rs[2].items || rs[2].badcases || [];
       var failureBuckets = rs[3];
       var judgeAgreement = rs[4];
+      var dimHealth = rs[5];
 
       // 统计计算
       var completed = runs.filter(function (r) { return r.status === "completed"; });
@@ -283,6 +287,36 @@
           '<div class="kpi"><b id="kpi-cost">¥' + totalCost.toFixed(4) + '</b><span>累计成本</span></div>' +
           '<div class="kpi"><b style="color:#dc2626;" id="kpi-badcases">' + badcases.length + '</b><span>Badcase 总数</span></div>' +
         "</div>" +
+        // V5.2 P1-2：六维度红黄绿健康看板
+        (dimHealth && dimHealth.dimensions ? (
+          '<div class="card"><h3 class="card-title-with-action">评测维度健康 <span class="muted">六维度红黄绿门禁 · 最近 200 次运行</span>' +
+            '<span class="card-action"><a class="btn secondary small" href="#/tasks">查看任务维度 →</a></span></h3>' +
+            '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;">' +
+              Object.keys(dimHealth.dimensions).map(function (dk) {
+                var d = dimHealth.dimensions[dk];
+                var colors = {
+                  green: { bg: "#16a34a", label: "健康", tip: "通过率 ≥ " + (d.threshold * 100) + "%" },
+                  yellow: { bg: "#d97706", label: "预警", tip: "通过率 70%–" + (d.threshold * 100) + "%" },
+                  red: { bg: "#dc2626", label: "告警", tip: "通过率 < 70%" },
+                  gray: { bg: "#9ca3af", label: "无样本", tip: "该维度暂无运行数据" }
+                };
+                var c = colors[d.health] || colors.gray;
+                var pct = d.pass_rate != null ? (d.pass_rate * 100).toFixed(1) + "%" : "—";
+                var samples = d.samples + " 样本" + (d.avg_duration_s != null ? " · 均 " + d.avg_duration_s + "s" : "");
+                var shortLabel = (d.label || dk).split("（")[0];
+                return '<div style="border:1px solid var(--border-color);border-radius:10px;padding:12px;border-left:4px solid ' + c.bg + ';">' +
+                  '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                    '<b style="font-size:13px;">' + esc(shortLabel) + '</b>' +
+                    '<span style="background:' + c.bg + '18;color:' + c.bg + ';border:1px solid ' + c.bg + '30;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;" title="' + esc(c.tip) + '">' + c.label + '</span>' +
+                  '</div>' +
+                  '<div style="font-size:22px;font-weight:800;color:' + c.bg + ';margin:6px 0 2px;">' + pct + '</div>' +
+                  '<div class="muted" style="font-size:11px;">' + samples + ' · 阈值 ' + (d.threshold * 100) + '%</div>' +
+                '</div>';
+              }).join("") +
+            '</div>' +
+            '<div class="muted" style="margin-top:10px;font-size:12px;">安全合规维度（红线）须 100% 通过才为健康，其余维度按 90%/70% 分级红黄绿。数据来自运行历史聚合，供发布门禁参考。</div>' +
+          '</div>'
+        ) : "") +
         // 状态分布
         '<div class="card"><h3>运行状态分布</h3>' +
           '<div style="display:flex;gap:24px;flex-wrap:wrap;">' +
@@ -661,6 +695,18 @@
         var t = tiersCache[tier];
         return '<span class="tier-badge" style="background:' + (t.color || '#6b7280') + '20;color:' + (t.color || '#6b7280') + ';">' + esc(t.label || tier) + '</span>';
       }
+      // V5.2 P0-1：评测维度标签（六维度配色 + 提示）
+      function dimensionBadge(dim) {
+        if (!dim) return '<span class="muted">—</span>';
+        var colors = {
+          business_goal: "#8b5cf6", task_quality: "#16a34a", interaction: "#0ea5e9",
+          safety_compliance: "#dc2626", robustness: "#f59e0b", cost_efficiency: "#ec4899"
+        };
+        var labels = dimensionsCache || {};
+        var c = colors[dim] || "#6b7280";
+        var label = labels[dim] ? dim + "·" + (labels[dim].split("（")[0]) : dim;
+        return '<span class="tier-badge" style="background:' + c + '18;color:' + c + ';border:1px solid ' + c + '30;" title="' + esc(labels[dim] || dim) + '">' + esc(label) + '</span>';
+      }
       // V3.9 P1：任务风险标签（P0核心卡口/P1重要/P2一般 + 风险分类）
       function riskBadge(riskLevel, riskCategory) {
         var colors = { "P0": "#dc2626", "P1": "#f59e0b", "P2": "#6b7280" };
@@ -669,6 +715,13 @@
         var cat = catLabels[riskCategory] || riskCategory || "正常";
         return '<span class="risk-badge" style="background:' + c + '18;color:' + c + ';border:1px solid ' + c + '30;">' + esc(riskLevel || "P2") + '</span>' +
                '<span class="risk-cat" style="margin-left:4px;font-size:10px;color:var(--text-muted);">' + esc(cat) + '</span>';
+      }
+      // V5.2 P0-1：维度筛选选项
+      var dimOpts = '<option value="">全部维度</option>';
+      if (dimensionsCache) {
+        Object.keys(dimensionsCache).forEach(function (k) {
+          dimOpts += '<option value="' + k + '">' + esc(dimensionsCache[k].split("（")[0]) + '</option>';
+        });
       }
       // 按 tier 统计
       var tierStats = {};
@@ -696,9 +749,10 @@
         return '<span class="muted">—</span>';
       }
 
-      function renderRows(filterTier, filterUsage) {
+      function renderRows(filterTier, filterUsage, filterDim) {
         var filtered = tasksCache;
         if (filterTier) filtered = filtered.filter(function (t) { return t.tier === filterTier; });
+        if (filterDim) filtered = filtered.filter(function (t) { return (t.dimension || "task_quality") === filterDim; });
         if (filterUsage === "dev") {
           filtered = filtered.filter(function (t) { return devPackCache && devPackCache.indexOf(t.tier) >= 0; });
         } else if (filterUsage === "eval") {
@@ -709,7 +763,7 @@
           var costTxt = ce ? (ce.source === "measured" ? "" : "~") + "¥" + ce.cost_cny.toFixed(4) : "—";
           var modTxt = t.last_modified ? fmtTime(t.last_modified) : "—";
           return "<tr data-task-id='" + esc(t.id) + "'><td class='tcol-check'><input type='checkbox' class='task-check' value='" + esc(t.id) + "'></td><td class='tcol-id'>" + esc(t.id) + "</td><td class='tcol-title'>" + esc(t.title) + "</td><td class='tcol-tier'>" + tierBadge(t.tier) +
-            "</td><td class='tcol-risk'>" + riskBadge(t.risk_level, t.risk_category) + "</td><td class='tcol-usage'>" + usageBadge(t.tier) + "</td><td class='tcol-level'>" + esc(t.level) +
+            "</td><td class='tcol-dim'>" + dimensionBadge(t.dimension) + "</td><td class='tcol-risk'>" + riskBadge(t.risk_level, t.risk_category) + "</td><td class='tcol-usage'>" + usageBadge(t.tier) + "</td><td class='tcol-level'>" + esc(t.level) +
             "</td><td class='tcol-verifier'>" + esc(t.verifier) + "</td><td class='tcol-weight'>" + esc(t.weight) + "</td><td class='tcol-cp'>" +
             (t.checkpoints ? t.checkpoints.length : 0) + " 个</td><td class='tcol-timeout'>" + esc(t.timeout_s) + "s</td><td class='tcol-mod'>" +
             modTxt + "</td><td class='tcol-cost'>" + costTxt + "</td></tr>";
@@ -730,17 +784,22 @@
           "</div>" +
           '<div class="form-row" style="margin-bottom:12px;">' +
             '<div class="field" style="flex:0 0 200px;"><label>按分层筛选</label><select id="tier-filter">' + tierOpts + "</select></div>" +
+            '<div class="field" style="flex:0 0 220px;"><label>按评测维度筛选' +
+              costTip("评测六维度（参考《6个维度+12项指标搭建项目级评测体系》）：<br>业务目标/任务完成质量/交互体验/安全合规/稳定性鲁棒性/成本效率。<br>维度由 spec.yaml 的 dimension 字段显式声明，未声明时按任务 id 前缀与 tags 自动推断。") +
+              '</label><select id="dim-filter">' + dimOpts + "</select></div>" +
             '<div class="field" style="flex:0 0 200px;"><label>按用途筛选' +
               costTip("开发集=日常调试用，允许反复跑；评测集=最终回归/上线门禁用，平时不跑，防止过拟合。<br><br>当前配置：开发集=" + (devPackCache ? devPackCache.join("+") : "boundary+random") + "，评测集=" + (evalPackCache ? evalPackCache.join("+") : "golden+regression")) +
               '</label><select id="usage-filter"><option value="">全部用途</option><option value="dev">开发集</option><option value="eval">评测集</option></select></div>' +
           "</div>" +
           '<div id="task-table" class="table-scroll">' +
-          '<table><tr><th class="tcol-check"><input type="checkbox" id="check-all"></th><th class="tcol-id">ID</th><th class="tcol-title">标题</th><th class="tcol-tier">分层</th><th class="tcol-risk">风险' +
+          '<table><tr><th class="tcol-check"><input type="checkbox" id="check-all"></th><th class="tcol-id">ID</th><th class="tcol-title">标题</th><th class="tcol-tier">分层</th><th class="tcol-dim">维度' +
+          costTip("评测六维度：任务在评测体系中的归属维度，用于按维度聚合统计与维度级门禁。") +
+          '</th><th class="tcol-risk">风险' +
           costTip("P0=核心卡口任务，必须100%通过才能上线；P1=重要任务，≥90%通过；P2=一般任务，≥80%通过。<br><br>风险分类：normal正常/boundary边界/tool工具/hallucination幻觉/security安全。<br>在 spec.yaml 中设置 risk_level 和 risk_category 字段。") +
           '</th><th class="tcol-usage">用途</th><th class="tcol-level">级别</th><th class="tcol-verifier">判定</th><th class="tcol-weight">权重</th><th class="tcol-cp">校验点</th><th class="tcol-timeout">超时</th><th class="tcol-mod">最后修改</th><th class="tcol-cost">预计成本/run' +
           costTip("预计成本 = 单次 run 的 token 消耗 × 模型单价。<br>默认模型 deepseek-chat：输入 ¥2/百万 token、输出 ¥3/百万 token（缓存未命中口径）。<br><br>有实测：取该后端（minimal-react）在此任务的历史 run 的 metrics.usage 均值；<br>无实测：按任务级别 L1-L5 估算，数值前标「~」。<br><br>单价可用环境变量 LLM_INPUT_CNY_PER_M / LLM_OUTPUT_CNY_PER_M 覆盖。") +
           "</th></tr>" +
-          renderRows("", "") + "</table></div></div>" +
+          renderRows("", "", "") + "</table></div></div>" +
         '<div class="card"><h3>新建任务</h3>' + taskFormHTML() + "</div>" +
         '<div id="task-result"></div>'
       );
@@ -808,11 +867,13 @@
       function applyFilters() {
         var tier = el("tier-filter").value;
         var usage = el("usage-filter").value;
-        el("task-table").innerHTML = '<table><tr><th class="tcol-check"><input type="checkbox" id="check-all"></th><th class="tcol-id">ID</th><th class="tcol-title">标题</th><th class="tcol-tier">分层</th><th class="tcol-usage">用途</th><th class="tcol-level">级别</th><th class="tcol-verifier">判定</th><th class="tcol-weight">权重</th><th class="tcol-cp">校验点</th><th class="tcol-timeout">超时</th><th class="tcol-mod">最后修改</th><th class="tcol-cost">预计成本/run</th></tr>' + renderRows(tier, usage) + "</table>";
+        var dim = el("dim-filter") ? el("dim-filter").value : "";
+        el("task-table").innerHTML = '<table><tr><th class="tcol-check"><input type="checkbox" id="check-all"></th><th class="tcol-id">ID</th><th class="tcol-title">标题</th><th class="tcol-tier">分层</th><th class="tcol-dim">维度</th><th class="tcol-risk">风险</th><th class="tcol-usage">用途</th><th class="tcol-level">级别</th><th class="tcol-verifier">判定</th><th class="tcol-weight">权重</th><th class="tcol-cp">校验点</th><th class="tcol-timeout">超时</th><th class="tcol-mod">最后修改</th><th class="tcol-cost">预计成本/run</th></tr>' + renderRows(tier, usage, dim) + "</table>";
         bindBatchCheckboxes();
       }
       el("tier-filter").onchange = applyFilters;
       el("usage-filter").onchange = applyFilters;
+      if (el("dim-filter")) el("dim-filter").onchange = applyFilters;
     }).catch(function (e) { renderErr(e.message); });
   }
 
@@ -1623,6 +1684,21 @@
         ', score=' + esc(b.run_summary.score) + ', pass_rate=' + esc(b.run_summary.pass_rate) +
         ', duration=' + fmtDur(b.run_summary.duration_s) + ', steps=' + esc(b.run_summary.steps) + '</div>'
       ) : "";
+      // V5.2 P1-1：目标-指标映射——展示关联任务的评测维度与业务目标
+      var taskMeta = "";
+      if (b.task_meta) {
+        var dim = b.task_meta.dimension || "";
+        var dimColors = {
+          business_goal: "#8b5cf6", task_quality: "#16a34a", interaction: "#0ea5e9",
+          safety_compliance: "#dc2626", robustness: "#f59e0b", cost_efficiency: "#ec4899"
+        };
+        var c = dimColors[dim] || "#6b7280";
+        taskMeta = '<div class="bc-run-summary" style="border-left:3px solid ' + c + ';background:var(--bg-secondary);padding:8px 12px;margin:8px 0;">' +
+          '<b>评测维度：</b><span class="tier-badge" style="background:' + c + '18;color:' + c + ';">' + esc(dim) + '</span>' +
+          (b.task_meta.dimension_label ? '<span style="font-size:12px;color:var(--text-muted);margin-left:6px;">' + esc(b.task_meta.dimension_label) + '</span>' : "") +
+          (b.task_meta.goal ? '<div style="font-size:12px;color:var(--text-secondary);margin-top:4px;"><b>业务目标：</b>' + esc(b.task_meta.goal) + '</div>' : "") +
+          '</div>';
+      }
       // 回归用例关联信息
       var regressionInfo = "";
       if (b.regression_task_id) {
@@ -1673,6 +1749,7 @@
           '<div class="field"><label>根因分析</label><textarea id="bc-root" rows="3" placeholder="分析 badcase 的根本原因...">' + esc(b.root_cause || "") + "</textarea></div>" +
           '<div class="field"><label>修复方案</label><textarea id="bc-fix" rows="3" placeholder="记录修复方案或改进措施...">' + esc(b.fix_plan || "") + "</textarea></div>" +
           runSummary +
+          taskMeta +
           regressionInfo +
           '<div class="form-row" style="margin-top:16px">' +
             '<button class="btn" id="bc-save">保存修改</button>' +
