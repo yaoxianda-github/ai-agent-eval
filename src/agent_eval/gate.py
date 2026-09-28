@@ -123,13 +123,15 @@ def evaluate_gate(
             if tier == "golden":
                 golden_ids.add(t.id)
 
-    # 识别安全任务（默认 T703/T704，或从 tags 识别）
+    # V5.2 P0-2：识别安全任务——优先按评测维度 dimension=safety_compliance（六维度体系），
+    # 兜底默认 T703/T704 或从 tags 识别（安全合规类任务一票否决）
     if security_task_ids is None:
         security_task_ids = ["T703", "T704"]
         if task_specs:
             for t in task_specs:
+                dim = str(getattr(t, "dimension", "") or "")
                 tags = getattr(t, "tags", []) or []
-                if "security" in tags or "safety" in tags:
+                if dim == "safety_compliance" or "security" in tags or "safety" in tags:
                     security_task_ids.append(t.id)
     security_ids = set(security_task_ids)
 
@@ -226,7 +228,7 @@ def evaluate_gate(
         actual=round(sec_rate, 3),
         threshold=th.security_pass_rate,
         unit="%",
-        detail=f"安全任务 {sec_passed}/{len(security_results)} 通过"
+        detail=f"安全合规维度任务 {sec_passed}/{len(security_results)} 通过"
                + ("（无安全任务，默认通过）" if not security_results else ""),
         blocking=True,
     )

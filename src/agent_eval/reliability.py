@@ -231,6 +231,7 @@ def coverage_report(tasks_dir: Path, task_ids: Iterable[str] | None = None) -> d
     level_counter: Counter[str] = Counter()
     tag_counter: Counter[str] = Counter()
     tier_counter: Counter[str] = Counter()
+    dimension_counter: Counter[str] = Counter()  # V5.2 P0-1：评测六维度覆盖
     per_task: dict[str, dict] = {}
     for tid in sorted(scope_ids):
         spec_path = tasks_dir / tid / "spec.yaml"
@@ -242,10 +243,14 @@ def coverage_report(tasks_dir: Path, task_ids: Iterable[str] | None = None) -> d
                 spec = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
                 meta["level"] = str(spec.get("level", spec.get("task_level", "?")))
                 meta["tags"] = list(spec.get("tags", spec.get("capabilities", [])) or [])
+                # V5.2 P0-1：评测维度（spec 显式声明优先，否则推断）
+                from agent_eval.spec import infer_dimension, DEFAULT_DIMENSION
+                meta["dimension"] = str(spec.get("dimension", infer_dimension(tid, meta["tags"])))
             except Exception:
                 pass
         tier_counter[meta["tier"]] += 1
         level_counter[meta["level"]] += 1
+        dimension_counter[meta.get("dimension", DEFAULT_DIMENSION)] += 1
         for t in meta["tags"]:
             tag_counter[str(t)] += 1
         per_task[tid] = meta
@@ -262,16 +267,27 @@ def coverage_report(tasks_dir: Path, task_ids: Iterable[str] | None = None) -> d
     covered_tiers = set(tier_counter.keys())
     blind_tiers = sorted(declared_tiers - covered_tiers)
 
+    from agent_eval.spec import DIMENSIONS, DEFAULT_DIMENSION
+    dimension_coverage = {
+        k: {"count": v, "label": DIMENSIONS.get(k, k)}
+        for k, v in sorted(dimension_counter.items(), key=lambda x: -x[1])
+    }
+    covered_dims = set(dimension_counter.keys())
+    blind_dims = sorted(set(DIMENSIONS.keys()) - covered_dims)
     return {
         "total_tasks": total,
         "tier_coverage": tier_coverage,
         "level_distribution": dict(sorted(level_counter.items(), key=lambda x: -x[1])),
         "tag_distribution": dict(sorted(tag_counter.items(), key=lambda x: -x[1])),
+        "dimension_coverage": dimension_coverage,  # V5.2 P0-1：评测六维度覆盖
+        "blind_dimensions": blind_dims,
         "blind_tiers": blind_tiers,
         "per_task": per_task,
         "conclusion": (
             f"任务集覆盖 {len(covered_tiers)}/{len(declared_tiers)} 个 tier"
             + (f"；盲区 tier: {blind_tiers}" if blind_tiers else "")
+            + f"；评测维度覆盖 {len(covered_dims)}/6"
+            + (f"；盲区维度: {blind_dims}" if blind_dims else "")
             + f"；能力标签 {len(tag_counter)} 类"
         ),
     }

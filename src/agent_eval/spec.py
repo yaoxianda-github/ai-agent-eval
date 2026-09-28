@@ -19,7 +19,46 @@ from agent_eval.log import get_logger
 logger = get_logger(__name__)
 
 # V5.1 P1-3：评测规范版本号（写入 Trial 版本快照，用于评测可复现追溯）
-SPEC_VERSION = "V5.1" 
+SPEC_VERSION = "V5.1"
+
+# V5.2 P0-1：评测六维度（参考《Agent上线后效果不佳？6个维度+12项指标搭建项目级评测体系》）
+# dimension 是任务在评测体系中的归属维度，用于按维度聚合统计与维度级门禁
+DIMENSIONS = {
+    "business_goal": "业务目标（留存/转化/成本下降，由需求阶段 Top3 目标驱动）",
+    "task_quality": "任务完成质量（完成率/解决率/信息准确率）",
+    "interaction": "交互体验（对话轮次/响应时间/中断率/澄清率）",
+    "safety_compliance": "安全合规（违规触发/敏感泄露/合规拒绝，一票否决）",
+    "robustness": "稳定性鲁棒性（异常输入处理/降级触发/幻觉率）",
+    "cost_efficiency": "成本效率（Token消耗/P95响应/工具调用/失败重试）",
+}
+DEFAULT_DIMENSION = "task_quality"
+
+
+def infer_dimension(task_id: str, tags: list[str] | None = None) -> str:
+    """按任务 id 前缀与 tags 推断评测维度（spec.yaml 可显式覆盖）。
+
+    推断规则（从高到低）：
+    1. id 前缀 SEC- / tags 含 security|safety → 安全合规
+    2. id 前缀 RAG- → 任务完成质量（检索问答类核心功能）
+    3. id 前缀 LLM- 且 tags 含 intent|format|dialogue → 交互体验（意图识别/对话类）
+    4. tags 含 adversarial|fuzz|robust|boundary|异常 → 稳定性鲁棒性
+    5. tags 含 cost|token|latency|效率 → 成本效率
+    6. 其余 → 任务完成质量（默认）
+    """
+    tags = tags or []
+    tid = (task_id or "").upper()
+    if tid.startswith("SEC-") or any(t in tags for t in ("security", "safety", "合规")):
+        return "safety_compliance"
+    if tid.startswith("RAG-"):
+        return "task_quality"
+    if tid.startswith("LLM-") and any(t in tags for t in ("intent", "format", "dialogue", "意图", "对话")):
+        return "interaction"
+    if any(t in tags for t in ("adversarial", "fuzz", "robust", "boundary", "异常", "对抗")):
+        return "robustness"
+    if any(t in tags for t in ("cost", "token", "latency", "效率")):
+        return "cost_efficiency"
+    return DEFAULT_DIMENSION
+
 
 CheckpointType = Literal[
     "file_exists",
@@ -132,6 +171,10 @@ class TaskSpec:
     output_contract: str = ""  # 输出契约描述（如 "json"、"markdown报告"、"csv文件"）
     scenario_type: str = "happy_path"  # V4.1 P1：测试集场景类型（happy_path正常/boundary边界/error_recovery异常恢复/adversarial对抗/off_topic离题诱导 V4.3 P2-2）
     eval_type: str = "regression"  # P1 改进：能力评测 vs 回归评测（capability能力测试要难/regression回归测试要稳）
+    # V5.2 P0-1：评测维度（六维度之一，默认按 id/tags 推断，spec.yaml 可覆盖）
+    dimension: str = DEFAULT_DIMENSION
+    # V5.2 P1-1：业务目标（"这个 Agent 上线后，如果____，我们就赢了"——Top3 目标之一）
+    goal: str = ""
     spec_path: Optional[Path] = None
 
     @classmethod
@@ -182,6 +225,9 @@ class TaskSpec:
             output_contract=str(data.get("output_contract", "")),
             scenario_type=str(data.get("scenario_type", "happy_path")),
             eval_type=str(data.get("eval_type", "regression")),  # P1 改进
+            # V5.2 P0-1：评测维度——spec 显式声明优先，否则按 id/tags 推断
+            dimension=str(data.get("dimension", infer_dimension(str(data.get("id", path.parent.name)), data.get("tags", [])))),
+            goal=str(data.get("goal", "")),  # V5.2 P1-1：业务目标
             skills=[
                 SkillSpec(
                     id=s.get("id", ""),
