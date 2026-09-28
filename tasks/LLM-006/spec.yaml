@@ -5,6 +5,8 @@ description: |
   读取 input/sales_data.csv 中的销售数据，进行分析并输出一份完整的数据分析报告到 output/analysis_report.md。
   报告需包含：数据概览、关键指标、趋势分析、维度拆解、问题发现、 actionable 建议。
 tags: [data, analysis, report]
+goal: 交互体验达标：意图识别准确、响应格式规范、对话过程顺畅
+
 fixtures:
   source: fixtures/
 ground_truth:

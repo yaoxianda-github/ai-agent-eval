@@ -19,6 +19,8 @@ description: |
 
   将完整回答（含引用）写入 output/answer.txt。
 tags: [rag, citation, attribution, knowledge-base]
+goal: 检索问答准确率达标且零幻觉：基于知识库事实作答，不得编造
+
 
 fixtures:
   source: fixtures/

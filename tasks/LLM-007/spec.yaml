@@ -5,6 +5,8 @@ description: |
   读取 input/tech_doc_zh.md 中的中文技术文档，将其翻译成英文，输出到 output/tech_doc_en.md。
   要求：专业术语准确、符合技术文档表达习惯、代码和命令保持原样、格式结构保持一致。
 tags: [translation, i18n, doc]
+goal: 交互体验达标：意图识别准确、响应格式规范、对话过程顺畅
+
 fixtures:
   source: fixtures/
 ground_truth:

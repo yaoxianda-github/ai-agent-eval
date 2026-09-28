@@ -6,6 +6,8 @@ description: |
   文案需包含：吸引人的标题、产品核心卖点、用户痛点解决、使用场景、行动号召。
   风格：专业但有感染力，适合在微信公众号/知乎发布。
 tags: [writing, marketing, creative]
+goal: 交互体验达标：意图识别准确、响应格式规范、对话过程顺畅
+
 fixtures:
   source: fixtures/
 ground_truth:

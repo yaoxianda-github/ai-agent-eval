@@ -6,6 +6,8 @@ description: |
   优化方向：命名规范、去除重复、错误处理、类型注解、代码可读性。
   保持原有功能逻辑不变。
 tags: [code, quality, refactor]
+goal: 交互体验达标：意图识别准确、响应格式规范、对话过程顺畅
+
 fixtures:
   source: fixtures/
 ground_truth:

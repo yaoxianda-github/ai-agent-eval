@@ -5,6 +5,8 @@ description: |
   读取 input/question.md 中的技术问题，给出详细、准确、有深度的解答，输出到 output/answer.md。
   解答需包含：问题分析、核心原理、解决方案（多种方案对比）、代码示例、最佳实践、常见坑点。
 tags: [qa, technical, deep]
+goal: 交互体验达标：意图识别准确、响应格式规范、对话过程顺畅
+
 fixtures:
   source: fixtures/
 ground_truth:

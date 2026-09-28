@@ -6,6 +6,8 @@ description: |
   重构方向：设计模式应用、SOLID 原则、依赖注入、单元测试友好、可扩展性。
   保持原有功能完全不变。
 tags: [code, refactor, design]
+goal: 交互体验达标：意图识别准确、响应格式规范、对话过程顺畅
+
 fixtures:
   source: fixtures/
 ground_truth:

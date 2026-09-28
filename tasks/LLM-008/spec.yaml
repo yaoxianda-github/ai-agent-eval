@@ -5,6 +5,8 @@ description: |
   读取 input/target_code.py 中的 Python 函数，为其编写全面的单元测试用例，输出到 output/test_cases.py。
   要求：使用 pytest 框架，覆盖正常流程、边界条件、异常情况、参数校验等场景，测试用例命名清晰。
 tags: [test, qa, code]
+goal: 交互体验达标：意图识别准确、响应格式规范、对话过程顺畅
+
 fixtures:
   source: fixtures/
 ground_truth:

@@ -15,6 +15,8 @@ description: |
 
   将你的回答写入 output/answer.txt（可以是完整句子，不需要只写数字）。
 tags: [rag, refusal, hallucination-prevention, knowledge-base]
+goal: 检索问答准确率达标且零幻觉：基于知识库事实作答，不得编造
+
 
 fixtures:
   source: fixtures/

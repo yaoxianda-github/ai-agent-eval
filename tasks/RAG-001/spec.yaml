@@ -16,6 +16,8 @@ description: |
 
   检索提示：不要只用「笔记本 保修」这种宽泛词，应包含具体型号和「质保」关键词。
 tags: [rag, query-understanding, retrieval, knowledge-base]
+goal: 检索问答准确率达标且零幻觉：基于知识库事实作答，不得编造
+
 
 fixtures:
   source: fixtures/

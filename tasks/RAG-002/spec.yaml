@@ -16,6 +16,8 @@ description: |
 
   检索提示：必须包含完整型号「FS-300」和「硬盘质保」，不要只用「服务器 质保」。
 tags: [rag, anti-noise, retrieval, precision, knowledge-base]
+goal: 检索问答准确率达标且零幻觉：基于知识库事实作答，不得编造
+
 
 fixtures:
   source: fixtures/

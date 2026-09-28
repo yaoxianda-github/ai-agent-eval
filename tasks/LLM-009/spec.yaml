@@ -6,6 +6,8 @@ description: |
   审查维度：代码质量、潜在 bug、安全问题、性能问题、可维护性、最佳实践、测试覆盖。
   要求：指出具体问题、给出改进建议、按严重程度分类（阻断/严重/建议/表扬）。
 tags: [codereview, qa, code]
+goal: 交互体验达标：意图识别准确、响应格式规范、对话过程顺畅
+
 fixtures:
   source: fixtures/
 ground_truth:

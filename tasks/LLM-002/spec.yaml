@@ -5,6 +5,8 @@ description: |
   读取 input/api_code.py 中的 Python 函数，为其编写完整的 API 技术文档，输出到 output/api_doc.md。
   文档需包含：功能描述、参数说明、返回值说明、异常说明、使用示例、注意事项。
 tags: [doc, api, writing]
+goal: 交互体验达标：意图识别准确、响应格式规范、对话过程顺畅
+
 fixtures:
   source: fixtures/
 ground_truth:
