@@ -4,8 +4,25 @@
 
   // ---------- 工具 ----------
   function el(id) { return document.getElementById(id); }
+  // R-2 脱敏：错误横幅/提示中出现的 API Key 一律打码，只保留前缀与尾4位
+  function redactSecrets(s) {
+    s = String(s == null ? "" : s);
+    return s
+      // Anthropic: sk-ant-api03-xxxxxxxx...
+      .replace(/sk-ant-[A-Za-z0-9_-]{8,}/g, function (m) {
+        return m.slice(0, 10) + "****" + m.slice(-4);
+      })
+      // 通用 sk- 前缀 key（OpenAI/DeepSeek 等）
+      .replace(/sk-[A-Za-z0-9]{10,}/g, function (m) {
+        return m.slice(0, 6) + "****" + m.slice(-4);
+      })
+      // HuggingFace hf_、GitHub ghp_/gho_、AWS AKIA、通义 sk- 变体等常见前缀
+      .replace(/(hf_[A-Za-z0-9]{8,}|gh[pous]_[A-Za-z0-9]{8,}|AKIA[A-Z0-9]{10,}|[a-z0-9]{8,}key[A-Za-z0-9_-]{8,})/gi, function (m) {
+        return m.slice(0, 6) + "****" + m.slice(-4);
+      });
+  }
   function esc(s) {
-    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+    return redactSecrets(s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
   }
@@ -140,7 +157,9 @@
     packages: "任务包", history: "运行历史", run: "运行详情",
     badcases: "Badcase", badcase: "Badcase详情",
     memories: "经验库", memory: "经验详情",
-    compare: "对比矩阵", monitor: "监控", report: "报告", settings: "设置"
+    compare: "对比矩阵", monitor: "监控", report: "评测报告",
+    settings: "设置", regression: "回归看板", agent: "智能评测",
+    "judge-trust": "判分置信度", analysis: "智能分析"
   };
   function renderBreadcrumb() {
     var h = location.hash || "#/dashboard";
@@ -675,8 +694,9 @@
   }
 
   function statusBadge(st) {
-    var cls = ["completed"].indexOf(st) >= 0 ? "completed" : (["max_steps", "timeout", "error"].indexOf(st) >= 0 ? st : "running");
-    return '<span class="badge ' + cls + '">' + esc(st) + "</span>";
+    var labels = { completed: "完成", running: "运行中", pending: "排队中", error: "失败", fail: "失败", timeout: "超时", max_steps: "步数超限", cancelled: "已取消", unknown: "未知" };
+    var cls = ["completed"].indexOf(st) >= 0 ? "completed" : (["max_steps", "timeout", "error", "fail", "cancelled"].indexOf(st) >= 0 ? st : "running");
+    return '<span class="badge ' + cls + '">' + esc(labels[st] || st) + "</span>";
   }
 
   // ---------- 视图：任务管理 ----------
@@ -713,8 +733,12 @@
         var c = colors[riskLevel] || "#6b7280";
         var catLabels = { normal: "正常", boundary: "边界", tool: "工具", hallucination: "幻觉", security: "安全" };
         var cat = catLabels[riskCategory] || riskCategory || "正常";
-        return '<span class="risk-badge" style="background:' + c + '18;color:' + c + ';border:1px solid ' + c + '30;">' + esc(riskLevel || "P2") + '</span>' +
-               '<span class="risk-cat" style="margin-left:4px;font-size:10px;color:var(--text-muted);">' + esc(cat) + '</span>';
+        var html = '<span class="risk-badge" title="' + esc(cat) + '" style="background:' + c + '18;color:' + c + ';border:1px solid ' + c + '30;">' + esc(riskLevel || "P2") + '</span>';
+        // T-3: normal/正常 时省略冗余分类文字（badge title 已含语义）
+        if (cat !== "正常") {
+          html += '<span class="risk-cat" style="margin-left:4px;font-size:10px;color:var(--text-muted);">' + esc(cat) + '</span>';
+        }
+        return html;
       }
       // V5.2 P0-1：维度筛选选项
       var dimOpts = '<option value="">全部维度</option>';
@@ -829,6 +853,10 @@
         var count = el("batch-count");
         if (count) count.textContent = checked.length;
         if (bar) bar.style.display = checked.length ? "flex" : "none";
+        // 0 选中时批量按钮置灰禁用
+        var runBtn = el("batch-run"), expBtn = el("batch-export");
+        if (runBtn) runBtn.disabled = checked.length === 0;
+        if (expBtn) expBtn.disabled = checked.length === 0;
         var checkAll = el("check-all");
         if (checkAll) {
           var all = document.querySelectorAll(".task-check");
@@ -886,7 +914,7 @@
         '<div class="field"><label>级别</label><select id="g-level">' + lv + "</select></div>" +
       "</div>" +
       '<div class="form-row">' +
-        '<div class="field"><label>判定器</label><select id="g-verifier"><option>deterministic</option><option>llm_judge</option></select></div>' +
+        '<div class="field"><label>判定器</label><select id="g-verifier"><option value="deterministic">确定性判定</option><option value="llm_judge">LLM 智能判分</option></select></div>' +
         '<div class="field"><label>权重</label><input id="g-weight" type="number" step="0.1" value="1.0"></div>' +
         '<div class="field"><label>超时（秒）</label><input id="g-timeout" type="number" value="300"></div>' +
         '<div class="field"><label>标签（逗号分隔）</label><input id="g-tags" placeholder="file,text"></div>' +
@@ -1263,9 +1291,10 @@
           var rl = r.human_review_passed ? "人工通过" : "人工不通过";
           reviewTxt = '<span style="color:' + rc + ';font-weight:600;">' + rl + "</span>";
         }
-        // 耗时颜色编码：<30s 绿，30-120s 橙，>120s 红
+        // 耗时颜色编码：正常完成 <30s 绿，30-120s 橙，>120s 红；异常状态一律中性灰（绿色语义=健康）
         var dur = r.duration_s || 0;
-        var durColor = dur < 30 ? "#16a34a" : (dur < 120 ? "#d97706" : "#dc2626");
+        var durIsAbnormal = r.status === "error" || r.status === "fail" || r.status === "timeout" || r.status === "cancelled";
+        var durColor = durIsAbnormal ? "#6b7280" : (dur < 30 ? "#16a34a" : (dur < 120 ? "#d97706" : "#dc2626"));
         var durTxt = '<span style="color:' + durColor + ';font-weight:600;">' + fmtDur(dur) + "</span>";
         return '<tr class="clickable" data-rid="' + esc(r.run_id) + '">' +
           '<td class="col-time" title="' + esc(fmtTime(r.created_at)) + '">' + esc(fmtTime(r.created_at)) + "</td>" +
@@ -1604,20 +1633,20 @@
   }
 
   function loadJudgeTrust() {
-    api("/api/judge/agreement?limit=100").then(function (d) {
+    api("/api/runs/judge-agreement?limit=100").then(function (d) {
       var box = el("jt-stats");
       var listBox = el("jt-list");
-      var stats = d.stats || {};
-      var total = stats.total_reviewed || 0;
-      var agreement = stats.agreement_rate || 0;
-      var fp = stats.false_positive || 0;
-      var fn = stats.false_negative || 0;
+      // 后端返回扁平结构：total_reviewed / agreement_rate(0-100) / false_positive / false_negative / details[]
+      var total = d.total_reviewed || 0;
+      var agreement = d.agreement_rate || 0;
+      var fp = d.false_positive || 0;
+      var fn = d.false_negative || 0;
 
-      var color = agreement >= 0.9 ? "#22c55e" : agreement >= 0.8 ? "#f59e0b" : "#ef4444";
+      var color = agreement >= 90 ? "#22c55e" : agreement >= 80 ? "#f59e0b" : "#ef4444";
       box.innerHTML =
         '<div style="flex:1;padding:16px;border-radius:8px;background:' + color + '15;border-left:4px solid ' + color + ';">' +
           '<div style="font-size:12px;color:#6b7280;">一致率</div>' +
-          '<div style="font-size:28px;font-weight:700;color:' + color + ';">' + (agreement * 100).toFixed(1) + '%</div>' +
+          '<div style="font-size:28px;font-weight:700;color:' + color + ';">' + (total ? agreement.toFixed(1) : "—") + '%</div>' +
           '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">共 ' + total + ' 条人工复核</div>' +
         '</div>' +
         '<div style="flex:1;padding:16px;border-radius:8px;background:#ef444415;border-left:4px solid #ef4444;">' +
@@ -1631,7 +1660,7 @@
           '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">LLM不通过但人工通过</div>' +
         '</div>';
 
-      var items = d.items || [];
+      var items = d.details || [];
       if (!items.length) {
         listBox.innerHTML = '<div class="empty">暂无人工复核记录。在运行详情页做人工复核后，这里会展示一致率统计。</div>';
         return;
@@ -1653,7 +1682,7 @@
           '<td><b>' + esc(r.run_id) + '</b></td>' +
           '<td>' + esc(r.task_id) + '</td>' +
           '<td>' + esc(r.agent_id) + '</td>' +
-          '<td>' + r.llm_score.toFixed(2) + '</td>' +
+          '<td>' + (r.llm_score != null ? r.llm_score.toFixed(2) : '—') + '</td>' +
           '<td>' + (r.human_score || "—") + '</td>' +
           '<td><span style="color:' + typeColor + ';font-weight:600;">' + typeLabel + '</span></td>' +
           '</tr>';
@@ -1718,6 +1747,10 @@
       if (b.status !== "pending") {
         flowBtns = '<button class="btn secondary small" id="bc-flow-reset">重置为待分析</button>' + flowBtns;
       }
+      // V5.1 P1-1：Case 四类资产池徽章（此前引用未定义导致 #/badcase/:id 白屏）
+      var poolBadge = b.pool && BC_POOL_LABELS[b.pool]
+        ? '<span class="tier-badge" style="background:' + (BC_POOL_COLORS[b.pool] || "#6b7280") + '18;color:' + (BC_POOL_COLORS[b.pool] || "#6b7280") + ';border:1px solid ' + (BC_POOL_COLORS[b.pool] || "#6b7280") + '30;">' + esc(BC_POOL_LABELS[b.pool]) + '</span> '
+        : "";
       renderHTML(
         '<h2 class="page-title">Badcase 详情 · ' + poolBadge + esc(b.id) + '</h2>' +
         // 状态流转进度条
@@ -2029,6 +2062,11 @@ ${b.fix_plan || '暂无'}
       count.textContent = checked.length;
       bar.style.display = checked.length > 0 ? 'flex' : 'none';
     }
+    // 0 选中时批量按钮置灰禁用，作为交互第二道防线
+    var analyze = document.getElementById('bc-bulk-analyze');
+    var del = document.getElementById('bc-bulk-delete');
+    if (analyze) analyze.disabled = checked.length === 0;
+    if (del) del.disabled = checked.length === 0;
   }
 
   function bulkAnalyzeBadcases() {
@@ -2514,7 +2552,7 @@ ${b.fix_plan || '暂无'}
           '<span style="float:right;display:flex;gap:8px;">' +
           '<a class="btn secondary" href="#/history">← 返回历史</a>' +
           '<button class="btn secondary" id="btn-rerun">重新运行</button>' +
-          '<button class="btn secondary" id="btn-mark-badcase">标记为 badcase</button>' +
+          '<button class="btn danger" id="btn-mark-badcase">标记为 badcase</button>' +
           '</span>' +
         '</h2>' +
         '<div class="anchor-nav" id="run-anchor-nav">' +
@@ -4298,11 +4336,13 @@ ${b.fix_plan || '暂无'}
         '<div class="card"><h3>API Key 快速配置 <span class="info-icon" title="' + esc(envTooltip) + '">ⓘ</span>' +
           '<input type="text" id="env-search" placeholder="搜索配置项..." style="float:right;font-size:12px;padding:5px 10px;border:1px solid var(--border);border-radius:5px;width:180px;">' +
           '</h3>' +
+          '<form id="env-config-form" onsubmit="return false;" autocomplete="off">' +
           '<div id="env-config-list"><div class="empty">加载中...</div></div>' +
           '<div style="margin-top:16px;display:flex;gap:8px;align-items:center;">' +
             '<button class="btn" id="btn-save-env">保存配置</button>' +
             '<span id="env-save-msg" style="font-size:13px;"></span>' +
           "</div>" +
+          '</form>' +
           '<div class="warn-banner" style="margin-top:12px;">保存后即时生效（.env 文件优先级高于系统环境变量，正在执行中的任务不受影响）。</div>' +
         "</div>" +
         '<div class="card"><h3>启动方式</h3><pre class="code">pip install -e ".[web]"&#10;python -m agent_eval.web --port 8000&#10;# 浏览器打开 http://127.0.0.1:8000</pre></div>'
@@ -4611,7 +4651,7 @@ ${b.fix_plan || '暂无'}
 
       <!-- 欢迎卡片 -->
       <div class="card" style="margin-bottom:20px;padding:20px;background:linear-gradient(135deg, var(--bg-soft), var(--card-bg));border:1px solid var(--border);border-radius:12px;">
-        <h3 style="margin:0 0 12px 0;font-size:16px;">✨ 我能帮你做什么？</h3>
+        <h3 style="margin:0 0 12px 0;font-size:16px;">我能帮你做什么？</h3>
         <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:12px;">
           <div style="padding:12px;background:var(--card-bg);border-radius:8px;border:1px solid var(--border);">
             <div style="font-size:20px;margin-bottom:8px;">🔍</div>
@@ -4913,6 +4953,25 @@ ${(r.trajectory || []).map(function(step, i) {
     });
   }
 
+  // 兜底渲染：任何视图异常不白屏，展示可恢复的错误页
+  function safeView(fn) {
+    try {
+      fn();
+    } catch (e) {
+      var app = document.getElementById("app");
+      if (app) {
+        app.innerHTML =
+          '<div style="padding:40px;text-align:center;">' +
+            '<div style="font-size:32px;margin-bottom:12px;">⚠</div>' +
+            '<h2 style="margin:0 0 8px 0;font-size:18px;">页面渲染出错</h2>' +
+            '<div style="color:var(--text-secondary);font-size:13px;margin-bottom:16px;">' + esc((e && e.message) || String(e)) + '</div>' +
+            '<button class="btn" onclick="location.hash = \'#/dashboard\';">返回工作台</button>' +
+          '</div>';
+      }
+      console.error("[view-error]", e);
+    }
+  }
+
   function router() {
     var h = location.hash || "#/dashboard";
     var parts = h.replace(/^#\//, "").split("/");
@@ -4923,27 +4982,27 @@ ${(r.trajectory || []).map(function(step, i) {
     nav.forEach(function (a) {
       a.classList.toggle("active", a.getAttribute("data-view") === name);
     });
-    var titleMap = {overview:"概览",dashboard:"工作台",tasks:"任务管理",packages:"任务包",history:"运行历史",badcases:"Badcase 管理",judgeTrust:"判分置信度",memories:"经验库",compare:"多 Agent 对比",monitor:"监控",report:"评测报告",agent:"智能评测",settings:"设置",run:"运行详情",badcase:"Badcase 详情",memory:"经验详情",regression:"回归看板"};
+    var titleMap = {overview:"概览",dashboard:"工作台",tasks:"任务管理",packages:"任务包",history:"运行历史",badcases:"Badcase 管理","judge-trust":"判分置信度",memories:"经验库",compare:"多 Agent 对比",monitor:"监控",report:"评测报告",agent:"智能评测",settings:"设置",run:"运行详情",badcase:"Badcase 详情",memory:"经验详情",regression:"回归看板"};
     var pt = document.getElementById("page-title");
     if (pt) pt.textContent = titleMap[name] || "工作台";
-    if (name === "run") { viewRunDetail(parts[1]); return; }
-    if (name === "badcase") { viewBadcaseDetail(parts[1]); return; }
-    if (name === "memory") { viewMemoryDetail(parts[1]); return; }
-    if (name === "overview") viewOverview();
-    else if (name === "dashboard") viewDashboard();
-    else if (name === "tasks") viewTasks();
-    else if (name === "packages") viewPackages();
-    else if (name === "history") viewHistory();
-    else if (name === "badcases") viewBadcases();
-    else if (name === "judge-trust") viewJudgeTrust();
-    else if (name === "memories") viewMemories();
-    else if (name === "compare") viewCompare();
-    else if (name === "monitor") viewMonitor();
-    else if (name === "report") viewReport();
-    else if (name === "agent") viewAgent();
-    else if (name === "regression") viewRegression();
-    else if (name === "settings") viewSettings();
-    else viewDashboard();
+    if (name === "run") { safeView(function(){ viewRunDetail(parts[1]); }); return; }
+    if (name === "badcase") { safeView(function(){ viewBadcaseDetail(parts[1]); }); return; }
+    if (name === "memory") { safeView(function(){ viewMemoryDetail(parts[1]); }); return; }
+    if (name === "overview") safeView(viewOverview);
+    else if (name === "dashboard") safeView(viewDashboard);
+    else if (name === "tasks") safeView(viewTasks);
+    else if (name === "packages") safeView(viewPackages);
+    else if (name === "history") safeView(viewHistory);
+    else if (name === "badcases") safeView(viewBadcases);
+    else if (name === "judge-trust") safeView(viewJudgeTrust);
+    else if (name === "memories") safeView(viewMemories);
+    else if (name === "compare") safeView(viewCompare);
+    else if (name === "monitor") safeView(viewMonitor);
+    else if (name === "report") safeView(viewReport);
+    else if (name === "agent") safeView(viewAgent);
+    else if (name === "regression") safeView(viewRegression);
+    else if (name === "settings") safeView(viewSettings);
+    else safeView(viewDashboard);
   }
 
   // ---------- 主题切换 ----------

@@ -1053,10 +1053,10 @@ def create_app(
             "timeout": {"label": "超时未完成", "count": 0, "run_ids": [], "color": "#f59e0b"},
             "crash": {"label": "异常崩溃", "count": 0, "run_ids": [], "color": "#ef4444"},
             "max_steps": {"label": "步数超限", "count": 0, "run_ids": [], "color": "#f97316"},
-            "file_missing": {"label": "文件生成失败", "count": 0, "run_ids": [], "color": "#8b5cf6"},
-            "content_mismatch": {"label": "内容不匹配", "count": 0, "run_ids": [], "color": "#3b82f6"},
-            "cmd_failed": {"label": "命令执行失败", "count": 0, "run_ids": [], "color": "#ec4899"},
-            "judge_failed": {"label": "Judge判定未通过", "count": 0, "run_ids": [], "color": "#6366f1"},
+            "file_missing": {"label": "文件生成失败", "count": 0, "run_ids": [], "color": "#ea580c"},
+            "content_mismatch": {"label": "内容不匹配", "count": 0, "run_ids": [], "color": "#dc2626"},
+            "cmd_failed": {"label": "命令执行失败", "count": 0, "run_ids": [], "color": "#f97316"},
+            "judge_failed": {"label": "Judge判定未通过", "count": 0, "run_ids": [], "color": "#6b7280"},
             "other": {"label": "其他未分类", "count": 0, "run_ids": [], "color": "#6b7280"},
         }
 
@@ -1277,7 +1277,6 @@ def create_app(
         runs, total = store.list_runs(
             limit=limit, offset=offset, task_id=task_id, agent_id=agent_id, status=status
         )
-        price = pricing_for()
         for r in runs:
             # 实际成本：从 run.json 的 metrics.usage 读取（无 usage 时为 None）
             r["actual_cost_cny"] = None
@@ -1294,12 +1293,16 @@ def create_app(
                     pt = usage.get("prompt_tokens") or 0
                     ct = usage.get("completion_tokens") or 0
                     if pt or ct:
+                        # 按 run 实际模型计价（run.json 的 agent.model），未知模型回退 deepseek-chat 单价
+                        run_model = (d.get("agent") or {}).get("model") or ""
+                        price = pricing_for(run_model)
                         r["actual_cost_cny"] = round(
                             pt / 1e6 * price["input_cny_per_m"]
                             + ct / 1e6 * price["output_cny_per_m"],
                             4,
                         )
                         r["tokens"] = {"prompt_tokens": pt, "completion_tokens": ct}
+                        r["pricing_model"] = run_model
                     # 置信度（V3.0）
                     conf = (d.get("metrics") or {}).get("confidence") or {}
                     if conf:

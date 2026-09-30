@@ -12,7 +12,7 @@
   --border-light: #f0f0f0;
   --text-primary: #0a0a0a;
   --text-secondary: #666666;
-  --text-muted: #999999;
+  --text-muted: #666666;
   --accent: #0a0a0a;
   --success: #16a34a;
   --success-bg: #f0fdf4;
@@ -36,11 +36,11 @@
   --border-light: #E5E0D8;
   --text-primary: #3D2914;
   --text-secondary: #6B5D4F;
-  --text-muted: #9C8E7F;
+  --text-muted: #6E6252;
   --accent: #D97706;
   --success: #16a34a;
   --success-bg: #f0fdf4;
-  --warning: #D97706;
+  --warning: #C2410C;
   --warning-bg: #FFF7ED;
   --danger: #dc2626;
   --danger-bg: #fef2f2;
@@ -58,7 +58,7 @@
   --border-light: #E5E2D8;
   --text-primary: #1A3A2A;
   --text-secondary: #4A5D52;
-  --text-muted: #7A8A80;
+  --text-muted: #5F6E5F;
   --accent: #2D6A4F;
   --success: #16a34a;
   --success-bg: #f0fdf4;
@@ -66,7 +66,7 @@
   --warning-bg: #FFFBEB;
   --danger: #dc2626;
   --danger-bg: #fef2f2;
-  --info: #2D6A4F;
+  --info: #0F766E;
   --info-bg: #ECFDF5;
 }
 
@@ -80,7 +80,7 @@
   --border-light: #E2E8F0;
   --text-primary: #1E3A5F;
   --text-secondary: #475569;
-  --text-muted: #94A3B8;
+  --text-muted: #5A6B82;
   --accent: #3B82F6;
   --success: #16a34a;
   --success-bg: #f0fdf4;
@@ -102,11 +102,11 @@
   --border-light: #E5E7EB;
   --text-primary: #1F2937;
   --text-secondary: #4B5563;
-  --text-muted: #9CA3AF;
+  --text-muted: #5B636E;
   --accent: #B45309;
   --success: #16a34a;
   --success-bg: #f0fdf4;
-  --warning: #B45309;
+  --warning: #C2410C;
   --warning-bg: #FFFBEB;
   --danger: #dc2626;
   --danger-bg: #fef2f2;
@@ -124,7 +124,7 @@
   --border-light: #D4E4E4;
   --text-primary: #0F3D3E;
   --text-secondary: #3D6B6C;
-  --text-muted: #6B9A9B;
+  --text-muted: #5F6E70;
   --accent: #0D9488;
   --success: #16a34a;
   --success-bg: #f0fdf4;
@@ -132,7 +132,7 @@
   --warning-bg: #FFFBEB;
   --danger: #dc2626;
   --danger-bg: #fef2f2;
-  --info: #0D9488;
+  --info: #0F766E;
   --info-bg: #F0FDFA;
 }
 
@@ -146,7 +146,7 @@
   --border-light: #E2EAF7;
   --text-primary: #14213D;
   --text-secondary: #3B4A6B;
-  --text-muted: #7A8AA8;
+  --text-muted: #5A6880;
   --accent: #2563EB;
   --success: #059669;
   --success-bg: #ECFDF5;
@@ -216,20 +216,20 @@ body {
 .status-dot { width: 6px; height: 6px; background: var(--success); border-radius: 50%; }
 
 .side-meta {
-  font-size: 10px; color: var(--text-muted); line-height: 1.5;
+  font-size: 11px; color: var(--text-secondary); line-height: 1.5;
   font-family: var(--font-mono); text-align: right;
   max-width: 200px; overflow: hidden;
 }
-.side-meta .sm-ver { font-weight: 700; color: var(--text-secondary); font-size: 11px; }
+.side-meta .sm-ver { font-weight: 700; color: var(--text-secondary); font-size: 12px; }
 .side-meta .sm-path {
-  font-size: 9px; color: var(--text-muted); cursor: default;
+  font-size: 10px; color: var(--text-secondary); cursor: default;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   max-width: 200px; display: block;
 }
-.side-meta .sm-path:hover { color: var(--text-secondary); white-space: normal; word-break: break-all; }
+.side-meta .sm-path:hover { color: var(--text-primary); white-space: normal; word-break: break-all; }
 .side-meta .sm-label {
   display: inline-block; min-width: 24px; color: var(--text-secondary);
-  font-weight: 600; font-family: var(--font-sans); font-size: 9px;
+  font-weight: 600; font-family: var(--font-sans); font-size: 10px;
 }
 
 /* ---------- 内容区 ---------- */
@@ -462,7 +462,21 @@ a.btn { text-decoration: none; display: inline-flex; }
 }
 .theme-option.active {
   border-color: var(--accent, var(--text-primary));
+  background: color-mix(in srgb, var(--accent, var(--text-primary)) 6%, transparent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, var(--text-primary)) 15%, transparent);
+  position: relative;
+}
+.theme-option.active::after {
+  content: "✓";
+  position: absolute;
+  top: 6px; right: 8px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--accent, var(--text-primary));
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
 }
 .theme-preview {
   height: 60px;
@@ -534,13 +548,15 @@ th {
   color: var(--text-muted); font-weight: 600; font-size: 11px;
   background: var(--bg-secondary); text-transform: uppercase; letter-spacing: 0.3px;
 }
-tr.clickable { cursor: pointer; }
-tr.clickable:hover { background: var(--bg-secondary); }
+tr.clickable { cursor: pointer; transition: background 0.15s ease; }
+tr.clickable:hover { background: var(--bg-tertiary); }
+tr.clickable:hover td.col-runid b { color: var(--info); text-decoration: underline; text-underline-offset: 2px; }
+tr.clickable:hover td.col-time { color: var(--text-primary); }
 
 /* 表格列宽优化 */
 .col-time { min-width: 80px; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); }
 .col-runid { min-width: 110px; font-family: var(--font-mono); font-size: 12px; }
-.col-task { min-width: 70px; font-weight: 600; }
+.col-task { min-width: 70px; font-weight: 600; max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .col-agent { min-width: 110px; }
 .col-score { min-width: 60px; text-align: right; font-family: var(--font-mono); }
 .col-duration { min-width: 60px; text-align: right; font-family: var(--font-mono); }
@@ -820,7 +836,7 @@ pre.code {
 
 /* ---------- 环境变量表 ---------- */
 .env-table td:first-child {
-  font-family: var(--font-mono); font-size: 12px; color: var(--info);
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary);
 }
 
 /* ---------- 矩阵单元格 ---------- */
@@ -1356,9 +1372,10 @@ table.matrix th { position: sticky; top: 0; z-index: 1; }
   color: var(--text-primary);
 }
 .sidebar .nav a.active {
-  background: var(--accent);
-  color: #fff;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
   font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 .sidebar-footer {
   padding: 12px 18px;
@@ -1405,7 +1422,7 @@ table.matrix th { position: sticky; top: 0; z-index: 1; }
 /* ===== 仪表盘 KPI 指标卡 ===== */
 .kpi-row {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 14px;
   margin-bottom: 20px;
 }
