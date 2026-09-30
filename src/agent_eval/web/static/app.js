@@ -1627,9 +1627,16 @@
         '<h3>LLM Judge vs 人工复核一致率</h3>' +
         '<div id="jt-stats" style="display:flex;gap:16px;margin:16px 0;"></div>' +
         '<div id="jt-list"><div class="empty">加载中...</div></div>' +
+      '</div>' +
+      '<div class="card">' +
+        '<h3 class="card-title-with-action">判分器可重复性 <span class="muted">Jev-as-a-Judge · 同轨迹判定 2 次</span>' +
+          '<span class="card-action"><button class="btn primary small" id="jt-re-run" onclick="loadJudgeRepeatability()">重新判定</button></span></h3>' +
+        '<div id="jt-repeat-stats" style="display:flex;gap:16px;margin:16px 0;"></div>' +
+        '<div id="jt-repeat-list"><div class="empty">加载中...</div></div>' +
       '</div>'
     );
     loadJudgeTrust();
+    loadJudgeRepeatability();
   }
 
   function loadJudgeTrust() {
@@ -1693,6 +1700,61 @@
       });
     }).catch(function (e) {
       el("jt-stats").innerHTML = "<div class='err-banner'>" + esc(e.message) + "</div>";
+    });
+  }
+
+  function loadJudgeRepeatability() {
+    var box = el("jt-repeat-stats");
+    var listBox = el("jt-repeat-list");
+    if (!box) return;
+    box.innerHTML = '<div class="empty">正在执行 Jev 重复判定（约 1-2 秒/条）...</div>';
+    listBox.innerHTML = "";
+    api("/api/judge/repeatability?limit=10").then(function (d) {
+      if (d.status === "no_key") {
+        box.innerHTML = '<div class="empty">未配置 TYPESAFE_API_KEY，无法执行 Jev 重复判定。可在设置页快速配置。</div>';
+        return;
+      }
+      if (d.status === "no_traces") {
+        box.innerHTML = '<div class="empty">未找到带产物（output/）的轨迹，暂无可重复性样本。</div>';
+        return;
+      }
+      var rate = d.repeatability_rate;
+      var rateColor = rate == null ? "#9ca3af" : rate >= 95 ? "#22c55e" : rate >= 80 ? "#f59e0b" : "#ef4444";
+      box.innerHTML =
+        '<div style="flex:1;padding:16px;border-radius:8px;background:' + rateColor + '15;border-left:4px solid ' + rateColor + ';">' +
+          '<div style="font-size:12px;color:#6b7280;">判定一致率（repeatability）</div>' +
+          '<div style="font-size:28px;font-weight:700;color:' + rateColor + ';">' + (rate == null ? "—" : rate.toFixed(1) + "%") + '</div>' +
+          '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">' + d.consistent + '/' + d.analyzed + ' 条轨迹判定一致 · 单条成本 $0.00035</div>' +
+        '</div>' +
+        '<div style="flex:1;padding:16px;border-radius:8px;background:#3b82f615;border-left:4px solid #3b82f6;">' +
+          '<div style="font-size:12px;color:#6b7280;">分数平均绝对差（越低方差越小）</div>' +
+          '<div style="font-size:28px;font-weight:700;color:#3b82f6;">' + (d.avg_score_diff == null ? "—" : d.avg_score_diff.toFixed(4)) + '</div>' +
+          '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">两次判分 score 差值的平均绝对值</div>' +
+        '</div>' +
+        '<div style="flex:1;padding:16px;border-radius:8px;background:#8b5cf615;border-left:4px solid #8b5cf6;">' +
+          '<div style="font-size:12px;color:#6b7280;">耗时 / 成本</div>' +
+          '<div style="font-size:28px;font-weight:700;color:#8b5cf6;">' + (d.avg_duration_ms || 0).toFixed(0) + 'ms</div>' +
+          '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">本次估算 $' + (d.est_cost_usd || 0).toFixed(4) + ' · 平均单次判定</div>' +
+        '</div>';
+
+      var agents = Object.keys(d.by_agent || {});
+      if (!agents.length) {
+        listBox.innerHTML = '<div class="empty">暂无按 Agent 分组数据。</div>';
+        return;
+      }
+      var rows = agents.map(function (a) {
+        var g = d.by_agent[a];
+        var c = g.repeatability >= 95 ? "#22c55e" : g.repeatability >= 80 ? "#f59e0b" : "#ef4444";
+        return '<tr>' +
+          '<td><b>' + esc(a) + '</b></td>' +
+          '<td>' + g.total + '</td>' +
+          '<td><span style="color:' + c + ';font-weight:600;">' + g.repeatability.toFixed(1) + '%</span></td>' +
+          '<td>' + g.avg_score_diff.toFixed(4) + '</td>' +
+          '</tr>';
+      }).join("");
+      listBox.innerHTML = '<table><tr><th>Agent</th><th>样本数</th><th>重复一致率</th><th>平均分数差</th></tr>' + rows + '</table>';
+    }).catch(function (e) {
+      box.innerHTML = "<div class='err-banner'>" + esc(e.message) + "</div>";
     });
   }
 

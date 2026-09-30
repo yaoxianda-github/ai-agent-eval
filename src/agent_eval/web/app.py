@@ -1223,6 +1223,116 @@ def create_app(
             "details": reviewed[:50],  # 最多返回50条详情
         }
 
+    # V6.x P0-1: 判分器可重复性（Jev-as-a-Judge 方法论）
+    # 同一条轨迹用 Jev 判 2 次，统计判定一致性（低方差验证）。
+    # 信号价值 ≈ 一致率 × 可重复性
+    _task_cache: dict = {}
+
+    def _find_task(task_id: str):
+        if not _task_cache:
+            from agent_eval.spec import load_task_pack
+            try:
+                for t in load_task_pack(tasks_dir):
+                    _task_cache[t.id] = t
+            except Exception:  # noqa: BLE001
+                pass
+        return _task_cache.get(task_id)
+
+    @app.get("/api/judge/repeatability")
+    def judge_repeatability(
+        limit: int = Query(10, ge=1, le=50),
+        agent_id: Optional[str] = None,
+    ) -> dict:
+        """判分器可重复性：同轨迹判 2 次的判定一致率。
+
+        每次判定成本约 $0.00035（Jev），limit=10 时总成本约 $0.007。
+        返回 repeatability_rate（二元判定一致率）、avg_score_diff（分数平均绝对差，越低方差越小）。
+        """
+        from agent_eval.jev_judge import JevJudge
+
+        jj = JevJudge()
+        if not jj.api_key:
+            return {"status": "no_key", "message": "缺少 TYPESAFE_API_KEY，无法执行 Jev 重复判定", "analyzed": 0, "repeatability_rate": None}
+
+        # 扩大扫描范围：DB 最近 run 可能缺产物，向后多扫直至凑够 limit 个有效样本
+        rows = []
+        for offset in range(0, 200, limit if limit else 10):
+            runs, _ = store.list_runs(limit=limit, offset=offset, agent_id=agent_id)
+            if not runs:
+                break
+            for r in runs:
+                rid = r.get("run_id", "")
+                p = results_dir / rid / "run.json"
+                if not p.exists():
+                    continue
+                try:
+                    d = json.loads(p.read_text(encoding="utf-8"))
+                except Exception:  # noqa: BLE001
+                    continue
+                task_id = d.get("task_id", r.get("task_id", ""))
+                task = _find_task(task_id)
+                if task is None:
+                    continue
+                ws = results_dir / rid / "workspace"
+                if not (ws / "output").is_dir():
+                    continue
+                rows.append({"rid": rid, "task": task, "ws": ws, "agent": d.get("agent_id", r.get("agent_id", "unknown"))})
+                if len(rows) >= limit:
+                    break
+            if len(rows) >= limit:
+                break
+
+        if not rows:
+            return {"status": "no_traces", "message": "未找到带产物（output/）的轨迹，无法执行重复判定", "analyzed": 0, "repeatability_rate": None}
+
+        details = []
+        consistent = 0
+        score_diffs = []
+        by_agent: dict = {}
+        total_duration_ms = 0
+        for row in rows[:limit]:
+            v1 = jj.judge(row["task"], row["ws"])
+            v2 = jj.judge(row["task"], row["ws"])
+            p1 = bool(v1.get("passed")); p2 = bool(v2.get("passed"))
+            s1 = float(v1.get("score") or 0); s2 = float(v2.get("score") or 0)
+            same = (p1 == p2)
+            if same:
+                consistent += 1
+            diff = abs(s1 - s2)
+            score_diffs.append(diff)
+            total_duration_ms += int(v1.get("duration_ms") or 0) + int(v2.get("duration_ms") or 0)
+            agent = row["agent"]
+            if agent not in by_agent:
+                by_agent[agent] = {"total": 0, "consistent": 0, "score_diff_sum": 0.0}
+            by_agent[agent]["total"] += 1
+            by_agent[agent]["consistent"] += 1 if same else 0
+            by_agent[agent]["score_diff_sum"] += diff
+            details.append({
+                "run_id": row["rid"], "task_id": row["task"].id, "agent_id": agent,
+                "pass1": p1, "pass2": p2, "score1": s1, "score2": s2,
+                "consistent": same, "score_diff": round(diff, 3),
+                "duration_ms": int(v1.get("duration_ms") or 0) + int(v2.get("duration_ms") or 0),
+            })
+
+        n = len(details)
+        for a in by_agent:
+            t = by_agent[a]
+            t["repeatability"] = round(t["consistent"] / t["total"] * 100, 1)
+            t["avg_score_diff"] = round(t["score_diff_sum"] / t["total"], 3)
+
+        return {
+            "status": "ok",
+            "analyzed": n,
+            "consistent": consistent,
+            "repeatability_rate": round(consistent / n * 100, 1) if n else None,
+            "avg_score_diff": round(sum(score_diffs) / len(score_diffs), 3) if score_diffs else None,
+            "avg_duration_ms": round(total_duration_ms / (n * 2), 1) if n else None,
+            "est_cost_usd": round(n * 2 * 0.00035, 5),
+            "by_agent": by_agent,
+            "method_note": "同轨迹判定 2 次；repeatability=二元判定一致率，avg_score_diff=分数平均绝对差",
+            "details": details,
+        }
+
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: str) -> dict:
         state = running.get(run_id)
