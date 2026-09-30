@@ -266,10 +266,10 @@ class JevJudge:
             if passed:
                 fail_reason = "none"
 
-            # 提取评分（0-100 → 0-1）
-            quality_raw = float(answers.get("quality_score", {}).get("score", 50))
-            completeness_score = float(answers.get("completeness", {}).get("score", 50))
-            correctness_score = float(answers.get("correctness", {}).get("score", 50))
+            # 提取评分（Jev Score 返回 0-4 档位索引，映射回 0-100）
+            quality_raw = _jev_score_to_100(answers.get("quality_score", {}).get("score", 2.5))
+            completeness_score = _jev_score_to_100(answers.get("completeness", {}).get("score", 2.5))
+            correctness_score = _jev_score_to_100(answers.get("correctness", {}).get("score", 2.5))
 
             # 计算综合得分（0-1）：质量分 60% + 完整性 20% + 正确性 20%
             score = round(
@@ -365,6 +365,20 @@ class JevJudge:
         )
 
         return result
+
+
+def _jev_score_to_100(value) -> float:
+    """Jev Score 类型返回 0-4 档位索引（legend 5 档），映射回 0-100。
+    档位中心：10, 30, 50, 70, 90；档内按小数线性插值。"""
+    v = float(value)
+    if v <= 0:
+        return 10.0
+    if v >= 4:
+        return 90.0
+    cat = int(v)
+    frac = v - cat
+    centers = [10.0, 30.0, 50.0, 70.0, 90.0]
+    return centers[cat] + frac * (centers[cat + 1] - centers[cat])
 
 
 def judge_jev(task, workspace: Path) -> dict:
@@ -574,8 +588,8 @@ def batch_analyze_badcases(badcases: list[dict], max_batch: int = 20) -> dict:
             for idx, bc in enumerate(batch):
                 bc_id = bc.get("id", f"bc_{idx}")
                 root_cause = answers.get(f"bc_{idx}_root_cause", {}).get("choice", "other")
-                severity_score = float(answers.get(f"bc_{idx}_severity", {}).get("score", 1.5))
-                fix_difficulty = float(answers.get(f"bc_{idx}_fix_difficulty", {}).get("score", 1.5))
+                severity_score = _jev_score_to_100(answers.get(f"bc_{idx}_severity", {}).get("score", 2.0)) / 100.0
+                fix_difficulty = _jev_score_to_100(answers.get(f"bc_{idx}_fix_difficulty", {}).get("score", 2.0)) / 100.0
                 has_common = float(answers.get(f"bc_{idx}_has_common_pattern", {}).get("noul", 0.5))
 
                 # 映射严重程度
