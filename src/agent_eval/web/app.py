@@ -1333,6 +1333,138 @@ def create_app(
             "details": details,
         }
 
+
+    @app.get("/api/judge/signal-value")
+    def judge_signal_value(
+        limit: int = Query(10, ge=1, le=50),
+    ) -> dict:
+        """判分器成本-信号权衡视图。
+
+        signal_value = oracle一致率 x 可重复性（文章口径：信号价值 = oracle 一致率 x 可重复性）。
+        Jev：可重复性实测（同轨迹判 2 次），oracle 一致率需人工基准样本；
+        LLM Judge：oracle 一致率实测（vs 人工复核），可重复性未测。
+        仅两项都具备时给出 signal_value，否则标 N/A 并附样本量，避免误导。
+        """
+        from agent_eval.jev_judge import JevJudge
+
+        jj = JevJudge()
+        jev = {"judge": "jev_judge", "name": "Jev-as-a-Judge", "engine": "System One 结构化类型化输出",
+               "cost_usd": 0.00035, "cost_note": "单次判定", "status": "no_key" if not jj.api_key else "ok"}
+
+        if jj.api_key:
+            # 复用可重复性扫描逻辑：同轨迹判 2 次
+            rows = []
+            for offset in range(0, 200, limit if limit else 10):
+                runs, _ = store.list_runs(limit=limit, offset=offset)
+                if not runs:
+                    break
+                for r in runs:
+                    rid = r.get("run_id", "")
+                    pj = results_dir / rid / "run.json"
+                    if not pj.exists():
+                        continue
+                    try:
+                        d = json.loads(pj.read_text(encoding="utf-8"))
+                    except Exception:  # noqa: BLE001
+                        continue
+                    task_id = d.get("task_id", r.get("task_id", ""))
+                    task = _find_task(task_id)
+                    if task is None:
+                        continue
+                    ws = results_dir / rid / "workspace"
+                    if not (ws / "output").is_dir():
+                        continue
+                    rows.append({"rid": rid, "task": task, "ws": ws})
+                    if len(rows) >= limit:
+                        break
+                if len(rows) >= limit:
+                    break
+
+            if rows:
+                consistent = 0
+                score_diffs = []
+                total_ms = 0
+                for row in rows[:limit]:
+                    v1 = jj.judge(row["task"], row["ws"])
+                    v2 = jj.judge(row["task"], row["ws"])
+                    p1 = bool(v1.get("passed")); p2 = bool(v2.get("passed"))
+                    s1 = float(v1.get("score") or 0); s2 = float(v2.get("score") or 0)
+                    if p1 == p2:
+                        consistent += 1
+                    score_diffs.append(abs(s1 - s2))
+                    total_ms += int(v1.get("duration_ms") or 0) + int(v2.get("duration_ms") or 0)
+                n = len(rows)
+                jev["samples"] = n
+                jev["repeatability"] = round(consistent / n * 100, 1)
+                jev["avg_score_diff"] = round(sum(score_diffs) / len(score_diffs), 3)
+                jev["avg_duration_ms"] = round(total_ms / (n * 2), 1)
+                jev["est_cost_usd_total"] = round(n * 2 * 0.00035, 5)
+                jev["oracle_agreement"] = None
+                jev["oracle_note"] = "需人工复核基准样本（当前人工复核样本 < 5，不计算）"
+            else:
+                jev["status"] = "no_traces"
+                jev["repeatability"] = None
+
+        # LLM Judge：oracle 一致率（vs 人工复核）
+        reviewed_runs, _ = store.list_runs(limit=500, offset=0)
+        reviewed = 0
+        agreed = 0
+        fp = 0
+        fn = 0
+        for r in reviewed_runs:
+            rid = r.get("run_id", "")
+            pj = results_dir / rid / "run.json"
+            if not pj.exists():
+                continue
+            try:
+                d = json.loads(pj.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                continue
+            hr = d.get("human_review")
+            if not hr:
+                continue
+            llm_score = (d.get("metrics") or {}).get("score") or 0
+            llm_passed = llm_score >= 0.8
+            human_passed = hr.get("passed", False)
+            reviewed += 1
+            if llm_passed == human_passed:
+                agreed += 1
+            elif llm_passed and not human_passed:
+                fp += 1
+            else:
+                fn += 1
+
+        llm = {"judge": "llm_judge", "name": "LLM Judge（生成式判分）", "engine": "LLM 生成式文本判定",
+               "cost_usd": None, "cost_note": "按模型计费未聚合", "status": "ok"}
+        llm["samples"] = reviewed
+        if reviewed >= 5:
+            llm["oracle_agreement"] = round(agreed / reviewed * 100, 1)
+            llm["false_positive"] = fp
+            llm["false_negative"] = fn
+            llm["repeatability"] = None
+            llm["repeat_note"] = "未测量（可跑 repeatability 时同轨迹双判）"
+        else:
+            llm["oracle_agreement"] = None
+            llm["oracle_note"] = f"人工复核样本仅 {reviewed} 条，<5 不计算"
+
+        # 计算信号价值（两项具备才给值）
+        for j in (jev, llm):
+            oa = j.get("oracle_agreement")
+            rep = j.get("repeatability")
+            if oa is not None and rep is not None:
+                j["signal_value"] = round(oa / 100.0 * rep / 100.0, 3)
+                j["signal_note"] = "oracle一致率 x 可重复性"
+            else:
+                j["signal_value"] = None
+                j["signal_note"] = "缺 oracle一致率或可重复性任一数据"
+
+        ranking = sorted([jev, llm], key=lambda x: (x.get("signal_value") is not None, x.get("signal_value") or 0), reverse=True)
+        return {
+            "status": "ok",
+            "method_note": "signal_value = oracle一致率 x 可重复性（均 0-1）；样本不足的维度不参与计算",
+            "ranking": ranking,
+        }
+
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: str) -> dict:
         state = running.get(run_id)

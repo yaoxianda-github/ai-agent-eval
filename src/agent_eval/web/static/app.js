@@ -1633,10 +1633,51 @@
           '<span class="card-action"><button class="btn primary small" id="jt-re-run" onclick="loadJudgeRepeatability()">重新判定</button></span></h3>' +
         '<div id="jt-repeat-stats" style="display:flex;gap:16px;margin:16px 0;"></div>' +
         '<div id="jt-repeat-list"><div class="empty">加载中...</div></div>' +
+      '</div>' +
+      '<div class="card">' +
+        '<h3>判分器成本-信号权衡 <span class="muted">signal value = oracle一致率 × 可重复性</span></h3>' +
+        '<div id="jt-signal"><div class="empty">加载中...</div></div>' +
       '</div>'
     );
     loadJudgeTrust();
     loadJudgeRepeatability();
+    loadJudgeSignalValue();
+  }
+
+  function loadJudgeSignalValue() {
+    var box = el("jt-signal");
+    if (!box) return;
+    api("/api/judge/signal-value?limit=10").then(function (d) {
+      if (d.status === "no_key") {
+        box.innerHTML = '<div class="empty">未配置 TYPESAFE_API_KEY，无法执行 Jev 重复判定。</div>';
+        return;
+      }
+      if (d.status === "no_traces") {
+        box.innerHTML = '<div class="empty">未找到带产物（output/）的轨迹，暂无可重复性样本。</div>';
+        return;
+      }
+      var rows = (d.ranking || []).map(function (j) {
+        var rep = j.repeatability == null ? "—" : j.repeatability.toFixed(1) + "%";
+        var oa = j.oracle_agreement == null ? "—" : j.oracle_agreement.toFixed(1) + "%";
+        var sv = j.signal_value == null ? "—" : j.signal_value.toFixed(3);
+        var repCol = j.repeatability == null ? "" : (j.repeatability >= 95 ? "#22c55e" : j.repeatability >= 80 ? "#f59e0b" : "#ef4444");
+        return '<tr>' +
+          '<td><b>' + esc(j.name) + '</b></td>' +
+          '<td><span class="muted">' + esc(j.engine || "") + '</span></td>' +
+          '<td>' + (j.samples || 0) + '</td>' +
+          '<td>' + (j.oracle_agreement == null ? '<span class="muted">' + esc(j.oracle_note || "—") + '</span>' : oa) + '</td>' +
+          '<td>' + (j.repeatability == null ? '<span class="muted">' + esc(j.repeat_note || "—") + '</span>' : '<span style="color:' + repCol + ';font-weight:600;">' + rep + '</span>') + '</td>' +
+          '<td>' + (j.cost_usd == null ? '<span class="muted">—</span>' : "$" + j.cost_usd.toFixed(5)) + '</td>' +
+          '<td>' + (j.avg_duration_ms == null ? "—" : j.avg_duration_ms.toFixed(0) + "ms") + '</td>' +
+          '<td style="font-weight:700;">' + sv + '</td>' +
+          '</tr>';
+      }).join("");
+      box.innerHTML =
+        '<table><tr><th>判分器</th><th>引擎</th><th>样本</th><th>oracle一致率</th><th>可重复性</th><th>单次成本</th><th>单次耗时</th><th>信号价值</th></tr>' + rows + '</table>' +
+        '<div class="muted" style="font-size:11px;margin-top:8px;">' + esc(d.method_note || "") + '；oracle一致率 = 判分 vs 人工复核一致率（样本 ≥5 才计算），可重复性 = 同轨迹双判一致率。样本不足的维度不参与计算，避免小样本误导。</div>';
+    }).catch(function (e) {
+      box.innerHTML = "<div class='err-banner'>" + esc(e.message) + "</div>";
+    });
   }
 
   function loadJudgeTrust() {
