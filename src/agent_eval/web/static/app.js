@@ -78,6 +78,8 @@
     currentUser = user || null;
     if (token) localStorage.setItem("agenteval_token", token);
     else localStorage.removeItem("agenteval_token");
+    // 立即更新侧边栏用户信息，无需刷新页面
+    if (typeof renderUserInfo === "function") renderUserInfo();
   }
   function requireAuth() {
     if (!authToken) { location.hash = "#/login"; return false; }
