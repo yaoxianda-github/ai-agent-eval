@@ -5330,6 +5330,7 @@ ${(r.trajectory || []).map(function(step, i) {
     else if (name === "agent") safeView(viewAgent);
     else if (name === "regression") safeView(viewRegression);
     else if (name === "settings") safeView(viewSettings);
+    else if (name === "users") safeView(viewUsers);
     else safeView(viewDashboard);
   }
 
