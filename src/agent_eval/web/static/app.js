@@ -5290,10 +5290,18 @@ ${(r.trajectory || []).map(function(step, i) {
     var h = location.hash || "#/dashboard";
     var parts = h.replace(/^#\//, "").split("/");
     var name = parts[0] || "dashboard";
-    // 登录页不需要认证
-    if (name === "login") { safeView(viewLogin); return; }
+    // 登录页不需要认证，且不显示左侧菜单栏和顶栏
+    if (name === "login") {
+      var sb = document.getElementById("sidebar"); if (sb) sb.style.display = "none";
+      var tb = document.querySelector(".topbar"); if (tb) tb.style.display = "none";
+      safeView(viewLogin);
+      return;
+    }
     // 路由守卫：未登录跳登录页
     if (!authToken) { location.hash = "#/login"; return; }
+    // 非登录页恢复侧边栏和顶栏
+    var sb2 = document.getElementById("sidebar"); if (sb2) sb2.style.display = "";
+    var tb2 = document.querySelector(".topbar"); if (tb2) tb2.style.display = "";
     // 离开对比矩阵视图时停止批次轮询，避免后台空转
     if (name !== "compare" && mxState.timer) { clearInterval(mxState.timer); mxState.timer = null; }
     var nav = document.querySelectorAll(".nav a");
