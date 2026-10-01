@@ -317,7 +317,7 @@ def create_app(
                 )
         return out
 
-    def _execute_run(run_ids: list[str], task_id: str, agent_id: str, config: dict) -> None:
+    def _execute_run(run_ids: list[str], task_id: str, agent_id: str, config: dict, extra_env: dict | None = None) -> None:
         try:
             task = _task_map()[task_id]
         except KeyError:
@@ -335,6 +335,7 @@ def create_app(
                     config=config,
                     results_dir=results_dir,
                     run_id=rid,
+                    extra_env=extra_env,
                 )
                 store.insert_run(rec.to_dict())
                 logger.info(
@@ -704,7 +705,7 @@ def create_app(
 
     def _execute_batch(batch_id: str, agents: list[str], task_ids: list[str],
                        runs: int, model: str, judge_mode: str = "smart",
-                       reg_id: str | None = None) -> None:
+                       reg_id: str | None = None, extra_env: dict | None = None) -> None:
         plan = [(a, t, i) for a in agents for t in task_ids for i in range(runs)]
         total = len(plan)
         done = 0
@@ -732,6 +733,7 @@ def create_app(
                 rec = run_one(
                     task, agent_id, config=config,
                     results_dir=results_dir, run_id=rid,
+                    extra_env=extra_env,
                 )
                 store.insert_run(rec.to_dict(), batch_id=batch_id)
             except Exception as e:  # noqa: BLE001 - 单次失败不中断批次
@@ -896,6 +898,29 @@ def create_app(
         if not user or user.get("role") != "admin":
             raise HTTPException(status_code=403, detail="需要管理员权限")
         return user
+
+    # P1-2：用户级 API Key 管理
+    @app.get("/api/users/me/api-keys")
+    def api_get_my_api_keys(request: Request) -> dict:
+        user = getattr(request.state, "current_user", None)
+        if not user:
+            raise HTTPException(status_code=401, detail="未登录")
+        keys = store.get_user_api_keys(user["id"])
+        # 返回实际值（用户自己的 key，认证后可见），前端用于编辑和全量保存
+        return {"items": keys, "has_keys": bool(keys)}
+
+    @app.put("/api/users/me/api-keys")
+    def api_set_my_api_keys(body: dict, request: Request) -> dict:
+        user = getattr(request.state, "current_user", None)
+        if not user:
+            raise HTTPException(status_code=401, detail="未登录")
+        keys = body.get("keys", {})
+        if not isinstance(keys, dict):
+            raise HTTPException(status_code=400, detail="keys 必须是对象")
+        from agent_eval.config_manager import ENV_WHITELIST
+        valid_keys = {k: v for k, v in keys.items() if k in ENV_WHITELIST}
+        store.set_user_api_keys(user["id"], valid_keys)
+        return {"ok": True, "updated": list(valid_keys.keys())}
 
     @app.get("/api/users")
     def auth_list_users(request: Request) -> dict:
@@ -1198,8 +1223,11 @@ def create_app(
         run_ids = [uuid.uuid4().hex[:12] for _ in range(runs)]
         for rid in run_ids:
             running[rid] = {"status": "pending", "task_id": task_id, "agent_id": agent_id}
+        # P1-2：取当前用户的 API Key 注入运行环境
+        _user = getattr(request.state, "current_user", None)
+        _extra_env = store.get_user_api_keys(_user["id"]) if _user else None
         t = threading.Thread(
-            target=_execute_run, args=(run_ids, task_id, agent_id, config), daemon=True
+            target=_execute_run, args=(run_ids, task_id, agent_id, config, _extra_env), daemon=True
         )
         t.start()
         return {"run_ids": run_ids, "last_run_id": run_ids[-1]}
@@ -1842,9 +1870,12 @@ def create_app(
                 "summary": {},
             }
         )
+        # P1-2：取当前用户的 API Key 注入运行环境
+        _user = getattr(request.state, "current_user", None)
+        _extra_env = store.get_user_api_keys(_user["id"]) if _user else None
         t = threading.Thread(
             target=_execute_batch,
-            args=(batch_id, agents, task_ids, runs, model, judge_mode),
+            args=(batch_id, agents, task_ids, runs, model, judge_mode, None, _extra_env),
             daemon=True,
         )
         t.start()
@@ -3006,9 +3037,12 @@ def create_app(
             "done_runs": 0,
             "trigger": trigger,
         })
+        # P1-2：回归运行取当前用户的 API Key（定时触发时为 None，用系统 .env 兜底）
+        _user = getattr(request.state, "current_user", None) if hasattr(request, 'state') else None
+        _extra_env = store.get_user_api_keys(_user["id"]) if _user else None
         t = threading.Thread(
             target=_execute_batch,
-            args=(batch_id, agents, task_ids, runs, model, judge_mode, reg_id),
+            args=(batch_id, agents, task_ids, runs, model, judge_mode, reg_id, _extra_env),
             daemon=True,
         )
         t.start()

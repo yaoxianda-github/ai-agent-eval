@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     role          TEXT NOT NULL DEFAULT 'user',
     disabled      INTEGER NOT NULL DEFAULT 0,
+    api_keys      TEXT,
     created_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
@@ -152,7 +153,7 @@ class RunStore:
         with self._lock:
             self._conn.executescript(_SCHEMA)
             self._migrate()
-            self._conn.commit()
+        self._conn.commit()
 
     def _migrate(self) -> None:
         """老库平滑升级：runs 缺 batch_id 列时补上（SQLite 不支持 IF NOT EXISTS 加列）。"""
@@ -177,6 +178,10 @@ class RunStore:
             tcols = {r[1] for r in self._conn.execute(f"PRAGMA table_info({tbl})").fetchall()}
             if "owner_id" not in tcols:
                 self._conn.execute(f"ALTER TABLE {tbl} ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 1")
+        # V6.0 P1-2：用户级 API Key 存储
+        ucols = {r[1] for r in self._conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "api_keys" not in ucols:
+            self._conn.execute("ALTER TABLE users ADD COLUMN api_keys TEXT")
 
     def insert_run(self, rec: dict, batch_id: str = "") -> None:
         m = rec.get("metrics", {})
@@ -1116,6 +1121,28 @@ class RunStore:
     def delete_user(self, user_id: int) -> bool:
         with self._lock:
             cur = self._conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def get_user_api_keys(self, user_id: int) -> dict:
+        import json
+        with self._lock:
+            cur = self._conn.execute("SELECT api_keys FROM users WHERE id = ?", (user_id,))
+            row = cur.fetchone()
+            if row and row[0]:
+                try:
+                    return json.loads(row[0])
+                except Exception:
+                    return {}
+            return {}
+
+    def set_user_api_keys(self, user_id: int, api_keys: dict) -> bool:
+        import json
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE users SET api_keys = ? WHERE id = ?",
+                (json.dumps(api_keys, ensure_ascii=False), user_id),
+            )
             self._conn.commit()
         return cur.rowcount > 0
 

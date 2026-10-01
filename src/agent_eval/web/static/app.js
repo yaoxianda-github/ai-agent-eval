@@ -4456,6 +4456,15 @@ ${b.fix_plan || '暂无'}
           '</div>' +
           '<div id="theme-msg" style="margin-top:10px;font-size:13px;color:var(--text-muted);"></div>' +
         '</div>' +
+        '<div class="card"><h3>我的 API Key <span class="badge" style="font-size:11px;background:var(--accent);color:#fff;padding:2px 8px;border-radius:10px;">用户级 · 优先</span> <span class="info-icon" title="用户级 API Key 仅当前账号可见，运行时优先于全局 .env 配置。未配置的项自动回退到全局配置。">ⓘ</span></h3>' +
+          '<div id="user-keys-list"><div class="empty">加载中...</div></div>' +
+          '<div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+            '<select id="user-key-select" style="padding:6px 10px;border:1px solid var(--border);border-radius:5px;font-size:13px;"></select>' +
+            '<input type="password" id="user-key-value" placeholder="输入 API Key" style="flex:1;min-width:200px;padding:6px 10px;border:1px solid var(--border);border-radius:5px;font-size:13px;">' +
+            '<button class="btn primary" id="btn-save-user-key">保存到我的账户</button>' +
+            '<span id="user-key-msg" style="font-size:13px;"></span>' +
+          '</div>' +
+        '</div>' +
         '<div class="card"><h3>API Key 快速配置 <span class="info-icon" title="' + esc(envTooltip) + '">ⓘ</span>' +
           '<input type="text" id="env-search" placeholder="搜索配置项..." style="float:right;font-size:12px;padding:5px 10px;border:1px solid var(--border);border-radius:5px;width:180px;">' +
           '</h3>' +
@@ -4471,6 +4480,7 @@ ${b.fix_plan || '暂无'}
         '<div class="card"><h3>启动方式</h3><pre class="code">pip install -e ".[web]"&#10;python -m agent_eval.web --port 8000&#10;# 浏览器打开 http://127.0.0.1:8000</pre></div>'
       );
       loadEnvConfig();
+      loadUserKeys();
       // 绑定主题选择
       var currentTheme = localStorage.getItem("agenteval-theme") || "default";
       document.querySelectorAll(".theme-option").forEach(function (opt) {
@@ -4547,6 +4557,84 @@ ${b.fix_plan || '暂无'}
       }
     }).catch(function (e) {
       document.getElementById("env-config-list").innerHTML = '<div class="err-banner">加载失败: ' + esc(e.message) + "</div>";
+    });
+  }
+
+  // P1-2：用户级 API Key 本地缓存
+  var userKeysCache = {};
+
+  // P1-2：加载用户级 API Key
+  function loadUserKeys() {
+    api("/api/users/me/api-keys").then(function (data) {
+      userKeysCache = data.items || {};
+      renderUserKeys();
+    }).catch(function (e) {
+      var el = document.getElementById("user-keys-list");
+      if (el) el.innerHTML = '<div class="err-banner">加载失败: ' + esc(e.message) + '</div>';
+    });
+  }
+
+  function renderUserKeys() {
+    var keys = Object.keys(userKeysCache);
+    var html = "";
+    if (keys.length === 0) {
+      html = '<div class="empty" style="padding:16px;text-align:center;color:var(--text-muted);">尚未配置用户级 API Key，运行时将使用全局 .env 配置</div>';
+    } else {
+      html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;">';
+      keys.forEach(function (k) {
+        var v = userKeysCache[k];
+        var masked = v ? "****" + v.slice(-4) : "";
+        html += '<div style="padding:10px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-secondary);display:flex;justify-content:space-between;align-items:center;">' +
+          '<div><code style="font-size:12px;font-weight:600;">' + esc(k) + '</code>' +
+          '<div style="font-size:12px;color:var(--success);margin-top:2px;">已配置 ' + esc(masked) + '</div></div>' +
+          '<button class="btn secondary small" data-del-key="' + k + '" style="font-size:11px;">删除</button>' +
+        '</div>';
+      });
+      html += '</div>';
+    }
+    var listEl = document.getElementById("user-keys-list");
+    if (listEl) listEl.innerHTML = html;
+    // 绑定删除按钮
+    document.querySelectorAll("[data-del-key]").forEach(function (btn) {
+      btn.onclick = function () {
+        var k = this.dataset.delKey;
+        if (!confirm("确认删除 " + k + " 的用户级配置？删除后将回退到全局配置")) return;
+        delete userKeysCache[k];
+        saveUserKeys("已删除 " + k);
+      };
+    });
+    // 填充下拉选项
+    var select = document.getElementById("user-key-select");
+    if (select) {
+      api("/api/settings/env").then(function (envData) {
+        var allKeys = (envData.items || []).filter(function (i) { return i.category === "api_key"; });
+        select.innerHTML = allKeys.map(function (i) {
+          var configured = userKeysCache[i.key] ? " (已配置)" : "";
+          return '<option value="' + esc(i.key) + '">' + esc(i.label) + configured + '</option>';
+        }).join("");
+      }).catch(function () {});
+    }
+    // 绑定保存按钮
+    var saveBtn = document.getElementById("btn-save-user-key");
+    if (saveBtn) {
+      saveBtn.onclick = function () {
+        var key = select.value;
+        var value = document.getElementById("user-key-value").value.trim();
+        if (!key || !value) { alert("请选择配置项并输入 Key"); return; }
+        userKeysCache[key] = value;
+        saveUserKeys("已保存 " + key);
+        document.getElementById("user-key-value").value = "";
+      };
+    }
+  }
+
+  function saveUserKeys(msg) {
+    api("/api/users/me/api-keys", { method: "PUT", body: { keys: userKeysCache } }).then(function () {
+      var m = document.getElementById("user-key-msg");
+      if (m) { m.style.color = "var(--success)"; m.textContent = "✓ " + msg; setTimeout(function () { m.textContent = ""; }, 2500); }
+      renderUserKeys();
+    }).catch(function (e) {
+      alert("保存失败: " + e.message);
     });
   }
 

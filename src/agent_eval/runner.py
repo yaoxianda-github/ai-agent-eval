@@ -278,6 +278,12 @@ def run_one(
                             os.environ.pop(k, None)
                         else:
                             os.environ[k] = v
+                # P1-2：恢复用户级 env
+                for k, v in _user_env_saved.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
                 mcp_env.cleanup()
 
         logger.info(
