@@ -942,7 +942,7 @@ def create_app(
             raise HTTPException(status_code=400, detail="角色必须是 admin 或 user")
         if store.get_user_by_username(username):
             raise HTTPException(status_code=409, detail="用户名已存在")
-        uid = store.create_user(username, password, role)
+        uid = store.create_user(username, hash_password(password), role)
         return {"id": uid, "username": username, "role": role}
 
     @app.delete("/api/users/{user_id}")
