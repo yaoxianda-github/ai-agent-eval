@@ -202,8 +202,8 @@ class RunStore:
             self._conn.execute(
                 """INSERT OR REPLACE INTO runs
                    (run_id, agent_id, agent_ver, task_id, task_level, status,
-                    score, weight, pass_rate, duration_s, steps, batch_id, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    score, weight, pass_rate, duration_s, steps, batch_id, created_at, owner_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     rec["run_id"],
                     rec.get("agent_id", ""),
@@ -218,6 +218,7 @@ class RunStore:
                     len(steps),
                     batch_id or "",
                     created_at,
+                    int(rec.get("owner_id", 1)),
                 ),
             )
             self._conn.commit()
@@ -230,8 +231,9 @@ class RunStore:
         agent_id: str | None = None,
         status: str | None = None,
         pool: str | None = None,
+        owner_id: int | None = None,
     ) -> tuple[list[dict], int]:
-        """分页查询运行记录，返回 (记录列表, 满足筛选条件的总数)。"""
+        """分页查询运行记录，返回 (记录列表, 满足筛选条件的总数)。owner_id=None 时不过滤（admin 看全部）。"""
         sql = "SELECT * FROM runs"
         conds: list[str] = []
         args: list = []
@@ -247,6 +249,9 @@ class RunStore:
         if pool:
             conds.append("pool=?")
             args.append(pool)
+        if owner_id is not None:
+            conds.append("owner_id=?")
+            args.append(owner_id)
         where = (" WHERE " + " AND ".join(conds)) if conds else ""
         with self._lock:
             total = self._conn.execute(f"SELECT COUNT(*) FROM runs{where}", args).fetchone()[0]
@@ -327,11 +332,17 @@ class RunStore:
             cols = [d[0] for d in self._conn.execute("SELECT * FROM batches LIMIT 1").description]
         return self._batch_row_to_dict(row, cols)
 
-    def list_batches(self, limit: int = 50) -> list[dict]:
+    def list_batches(self, limit: int = 50, owner_id: int | None = None) -> list[dict]:
+        conds = []
+        args = []
+        if owner_id is not None:
+            conds.append("owner_id=?")
+            args.append(owner_id)
+        where = (" WHERE " + " AND ".join(conds)) if conds else ""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM batches ORDER BY created_at DESC, batch_id DESC LIMIT ?",
-                (int(limit),),
+                f"SELECT * FROM batches{where} ORDER BY created_at DESC, batch_id DESC LIMIT ?",
+                args + [int(limit)],
             ).fetchall()
             cols = [d[0] for d in self._conn.execute("SELECT * FROM batches LIMIT 1").description]
         return [self._batch_row_to_dict(r, cols) for r in rows]
@@ -375,8 +386,8 @@ class RunStore:
             self._conn.execute(
                 """INSERT OR REPLACE INTO badcases
                    (id,run_id,task_id,agent_id,title,description,category,severity,
-                    status,root_cause,fix_plan,tags,pool,created_at,updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    status,root_cause,fix_plan,tags,pool,created_at,updated_at,owner_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     bid,
                     b.get("run_id", ""),
@@ -393,6 +404,7 @@ class RunStore:
                     b.get("pool", "regression"),
                     b.get("created_at", now),
                     now,
+                    int(b.get("owner_id", 1)),
                 ),
             )
             self._conn.commit()
@@ -438,8 +450,9 @@ class RunStore:
         severity: str | None = None,
         status: str | None = None,
         pool: str | None = None,
+        owner_id: int | None = None,
     ) -> tuple[list[dict], int]:
-        """分页查询 badcase，返回 (记录列表, 总数)。"""
+        """分页查询 badcase，返回 (记录列表, 总数)。owner_id=None 时不过滤。"""
         sql = "SELECT * FROM badcases"
         conds: list[str] = []
         args: list = []
@@ -461,6 +474,9 @@ class RunStore:
         if pool:
             conds.append("pool=?")
             args.append(pool)
+        if owner_id is not None:
+            conds.append("owner_id=?")
+            args.append(owner_id)
         where = (" WHERE " + " AND ".join(conds)) if conds else ""
         with self._lock:
             total = self._conn.execute(f"SELECT COUNT(*) FROM badcases{where}", args).fetchone()[0]
@@ -479,13 +495,15 @@ class RunStore:
             result.append(d)
         return result, int(total)
 
-    def badcase_stats(self) -> dict:
-        """badcase 统计：按状态/严重程度/分类分组计数。"""
+    def badcase_stats(self, owner_id: int | None = None) -> dict:
+        """badcase 统计：按状态/严重程度/分类分组计数。owner_id=None 时不过滤。"""
+        where = " WHERE owner_id=?" if owner_id is not None else ""
+        args = [owner_id] if owner_id is not None else []
         with self._lock:
-            total = self._conn.execute("SELECT COUNT(*) FROM badcases").fetchone()[0]
-            by_status = dict(self._conn.execute("SELECT status, COUNT(*) FROM badcases GROUP BY status").fetchall())
-            by_severity = dict(self._conn.execute("SELECT severity, COUNT(*) FROM badcases GROUP BY severity").fetchall())
-            by_category = dict(self._conn.execute("SELECT category, COUNT(*) FROM badcases GROUP BY category").fetchall())
+            total = self._conn.execute(f"SELECT COUNT(*) FROM badcases{where}", args).fetchone()[0]
+            by_status = dict(self._conn.execute(f"SELECT status, COUNT(*) FROM badcases{where} GROUP BY status", args).fetchall())
+            by_severity = dict(self._conn.execute(f"SELECT severity, COUNT(*) FROM badcases{where} GROUP BY severity", args).fetchall())
+            by_category = dict(self._conn.execute(f"SELECT category, COUNT(*) FROM badcases{where} GROUP BY category", args).fetchall())
         return {
             "total": total,
             "by_status": by_status,

@@ -317,7 +317,7 @@ def create_app(
                 )
         return out
 
-    def _execute_run(run_ids: list[str], task_id: str, agent_id: str, config: dict, extra_env: dict | None = None) -> None:
+    def _execute_run(run_ids: list[str], task_id: str, agent_id: str, config: dict, extra_env: dict | None = None, owner_id: int = 1) -> None:
         try:
             task = _task_map()[task_id]
         except KeyError:
@@ -337,7 +337,9 @@ def create_app(
                     run_id=rid,
                     extra_env=extra_env,
                 )
-                store.insert_run(rec.to_dict())
+                _d = rec.to_dict()
+                _d["owner_id"] = owner_id
+                store.insert_run(_d)
                 logger.info(
                     "运行完成 | run_id=%s status=%s score=%.3f duration=%.1fs",
                     rid, rec.status, rec.metrics.get("score", 0), rec.duration_s,
@@ -705,7 +707,8 @@ def create_app(
 
     def _execute_batch(batch_id: str, agents: list[str], task_ids: list[str],
                        runs: int, model: str, judge_mode: str = "smart",
-                       reg_id: str | None = None, extra_env: dict | None = None) -> None:
+                       reg_id: str | None = None, extra_env: dict | None = None,
+                       owner_id: int = 1) -> None:
         plan = [(a, t, i) for a in agents for t in task_ids for i in range(runs)]
         total = len(plan)
         done = 0
@@ -735,7 +738,9 @@ def create_app(
                     results_dir=results_dir, run_id=rid,
                     extra_env=extra_env,
                 )
-                store.insert_run(rec.to_dict(), batch_id=batch_id)
+                _d = rec.to_dict()
+                _d["owner_id"] = owner_id
+                store.insert_run(_d, batch_id=batch_id)
             except Exception as e:  # noqa: BLE001 - 单次失败不中断批次
                 logger.error("批次内运行失败 | batch=%s %s/%s: %s",
                              batch_id, agent_id, task_id, e, exc_info=True)
@@ -753,6 +758,7 @@ def create_app(
                         "duration_s": 0.0,
                         "steps": [],
                         "error": str(e)[:500],
+                        "owner_id": owner_id,
                     }, batch_id=batch_id)
                 except Exception:  # noqa: BLE001 - 记录失败不影响主流程
                     pass
@@ -898,6 +904,13 @@ def create_app(
         if not user or user.get("role") != "admin":
             raise HTTPException(status_code=403, detail="需要管理员权限")
         return user
+
+    def _owner_filter(request):
+        """返回 owner_id 过滤值：admin 返回 None（看全部），普通用户返回自己的 id。"""
+        user = getattr(request.state, "current_user", None)
+        if not user or user.get("role") == "admin":
+            return None
+        return user.get("id")
 
     # P1-2：用户级 API Key 管理
     @app.get("/api/users/me/api-keys")
@@ -1712,6 +1725,7 @@ def create_app(
 
     @app.get("/api/runs")
     def list_run_history(
+        request: Request,
         limit: int = Query(20, ge=1, le=500),
         offset: int = Query(0, ge=0),
         task_id: Optional[str] = None,
@@ -1721,7 +1735,8 @@ def create_app(
         from agent_eval.costing import pricing_for
 
         runs, total = store.list_runs(
-            limit=limit, offset=offset, task_id=task_id, agent_id=agent_id, status=status
+            limit=limit, offset=offset, task_id=task_id, agent_id=agent_id, status=status,
+            owner_id=_owner_filter(request),
         )
         for r in runs:
             # 实际成本：从 run.json 的 metrics.usage 读取（无 usage 时为 None）
@@ -1888,8 +1903,8 @@ def create_app(
         return result
 
     @app.get("/api/batches")
-    def list_batches() -> dict:
-        rows = store.list_batches(100)
+    def list_batches(request: Request) -> dict:
+        rows = store.list_batches(100, owner_id=_owner_filter(request))
         # 列表不带大 summary，只给元信息与进度
         for r in rows:
             r.pop("summary", None)
@@ -2218,6 +2233,7 @@ def create_app(
     # ---------- Badcase 管理（V2.8 评测 badcase 积累） ----------
     @app.get("/api/badcases")
     def api_list_badcases(
+        request: Request,
         task_id: str = Query(None),
         agent_id: str = Query(None),
         category: str = Query(None),
@@ -2233,7 +2249,7 @@ def create_app(
             limit=page_size, offset=offset,
             task_id=task_id, agent_id=agent_id,
             category=category, severity=severity, status=status,
-            pool=pool,
+            pool=pool, owner_id=_owner_filter(request),
         )
         return {
             "items": items,
@@ -2288,12 +2304,14 @@ def create_app(
         return b
 
     @app.post("/api/badcases")
-    def api_create_badcase(payload: dict = Body(...)) -> dict:
+    def api_create_badcase(payload: dict = Body(...), request: Request = None) -> dict:
         """手动创建 badcase。"""
         required = ["title"]
         for f in required:
             if not payload.get(f):
                 raise HTTPException(status_code=400, detail=f"缺少必填字段: {f}")
+        _uid = getattr(request.state, "current_user", None) if request else None
+        payload["owner_id"] = _uid["id"] if _uid else 1
         bid = store.insert_badcase(payload)
         return {"id": bid, "message": "badcase 已创建"}
 
