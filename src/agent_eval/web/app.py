@@ -24,7 +24,7 @@ from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, Body, FastAPI, HTTPException, Query
+from fastapi import Depends, Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -889,6 +889,53 @@ def create_app(
             raise HTTPException(status_code=400, detail="新密码至少 6 个字符")
         store.update_user(current_user["id"], password_hash=hash_password(new_pw))
         return {"status": "ok", "message": "密码已更新"}
+
+    # ===== V6.0 P1-1：用户管理（admin only）=====
+    def _require_admin(request):
+        user = getattr(request.state, "current_user", None)
+        if not user or user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+        return user
+
+    @app.get("/api/users")
+    def auth_list_users(request: Request) -> dict:
+        _require_admin(request)
+        users = store.list_users()
+        for u in users:
+            u.pop("password_hash", None)
+        return {"items": users}
+
+    @app.post("/api/users")
+    def auth_create_user(payload: dict, request: Request) -> dict:
+        _require_admin(request)
+        username = (payload.get("username") or "").strip()
+        password = payload.get("password") or ""
+        role = payload.get("role", "user")
+        if not username or not password:
+            raise HTTPException(status_code=400, detail="用户名和密码不能为空")
+        if role not in ("admin", "user"):
+            raise HTTPException(status_code=400, detail="角色必须是 admin 或 user")
+        if store.get_user_by_username(username):
+            raise HTTPException(status_code=409, detail="用户名已存在")
+        uid = store.create_user(username, password, role)
+        return {"id": uid, "username": username, "role": role}
+
+    @app.delete("/api/users/{user_id}")
+    def auth_delete_user(user_id: int, request: Request) -> dict:
+        _require_admin(request)
+        if user_id == getattr(request.state.current_user, "get", lambda k: 0)("id"):
+            raise HTTPException(status_code=400, detail="不能删除自己")
+        store.delete_user(user_id)
+        return {"deleted": user_id}
+
+    @app.put("/api/users/{user_id}/role")
+    def auth_update_role(user_id: int, payload: dict, request: Request) -> dict:
+        _require_admin(request)
+        role = payload.get("role", "user")
+        if role not in ("admin", "user"):
+            raise HTTPException(status_code=400, detail="角色必须是 admin 或 user")
+        store.update_user(user_id, role=role)
+        return {"id": user_id, "role": role}
 
     @app.get("/api/auth/requires-auth")
     def auth_requires_auth() -> dict:

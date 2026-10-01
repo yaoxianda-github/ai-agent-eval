@@ -5134,6 +5134,70 @@ ${(r.trajectory || []).map(function(step, i) {
     setTimeout(function(){ document.getElementById("login-username").focus(); }, 100);
   }
 
+  // ===== V6.0 P1-1：用户管理页 =====
+  function viewUsers() {
+    if (!currentUser || currentUser.role !== "admin") {
+      renderHTML('<div class="empty">需要管理员权限</div>');
+      return;
+    }
+    renderHTML(
+      '<div class="page-head"><h2>用户管理</h2><p style="color:var(--text-muted);font-size:13px;margin:4px 0 0">管理平台用户与角色（admin 可创建/删除/改角色）</p></div>' +
+      '<div class="card" style="margin-bottom:16px;">' +
+      '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">' +
+      '<div><label style="font-size:12px;color:var(--text-muted);">用户名</label><br><input id="nu-username" placeholder="新用户名" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;width:140px;"></div>' +
+      '<div><label style="font-size:12px;color:var(--text-muted);">密码</label><br><input id="nu-password" type="password" placeholder="初始密码" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;width:140px;"></div>' +
+      '<div><label style="font-size:12px;color:var(--text-muted);">角色</label><br><select id="nu-role" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;"><option value="user">user</option><option value="admin">admin</option></select></div>' +
+      '<button class="btn btn-primary" id="nu-add">添加用户</button>' +
+      '</div></div>' +
+      '<div class="card"><table class="table" style="width:100%;"><thead><tr>' +
+      '<th>ID</th><th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th>' +
+      '</tr></thead><tbody id="users-body"><tr><td colspan="5" style="text-align:center;color:var(--text-muted);">加载中...</td></tr></tbody></table></div>'
+    );
+    document.getElementById("nu-add").onclick = function() {
+      var u = document.getElementById("nu-username").value.trim();
+      var pw = document.getElementById("nu-password").value;
+      var r = document.getElementById("nu-role").value;
+      if (!u || !pw) { alert("用户名和密码不能为空"); return; }
+      api("/api/users", { method: "POST", body: { username: u, password: pw, role: r } })
+        .then(function() { loadUsers(); })
+        .catch(function(e) { alert("添加失败: " + e.message); });
+    };
+    loadUsers();
+  }
+  function loadUsers() {
+    api("/api/users").then(function(res) {
+      var rows = (res.items || []).map(function(u) {
+        var isSelf = currentUser && u.id === currentUser.id;
+        var roleBadge = u.role === "admin"
+          ? '<span style="background:var(--accent);color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;">admin</span>'
+          : '<span style="background:var(--bg-muted);color:var(--text-muted);padding:2px 8px;border-radius:4px;font-size:11px;">user</span>';
+        var actions = "";
+        if (!isSelf) {
+          var newRole = u.role === "admin" ? "user" : "admin";
+          actions = '<button class="btn btn-sm" onclick="toggleRole(' + u.id + ',\'' + newRole + '\')">设为' + newRole + '</button> ' +
+                    '<button class="btn btn-sm btn-danger" onclick="delUser(' + u.id + ')">删除</button>';
+        } else {
+          actions = '<span style="color:var(--text-muted);font-size:12px;">当前用户</span>';
+        }
+        return '<tr><td>' + u.id + '</td><td>' + esc(u.username) + '</td><td>' + roleBadge + '</td><td>' + (u.created_at || "-") + '</td><td>' + actions + '</td></tr>';
+      }).join("");
+      document.getElementById("users-body").innerHTML = rows || '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">暂无用户</td></tr>';
+    }).catch(function(e) {
+      document.getElementById("users-body").innerHTML = '<tr><td colspan="5" style="text-align:center;color:#ef4444;">加载失败: ' + esc(e.message) + '</td></tr>';
+    });
+  }
+  window.toggleRole = function(id, role) {
+    api("/api/users/" + id + "/role", { method: "PUT", body: { role: role } })
+      .then(function() { loadUsers(); })
+      .catch(function(e) { alert("操作失败: " + e.message); });
+  };
+  window.delUser = function(id) {
+    if (!confirm("确定删除该用户？")) return;
+    api("/api/users/" + id, { method: "DELETE" })
+      .then(function() { loadUsers(); })
+      .catch(function(e) { alert("删除失败: " + e.message); });
+  };
+
   function router() {
     var h = location.hash || "#/dashboard";
     var parts = h.replace(/^#\//, "").split("/");
@@ -5148,7 +5212,7 @@ ${(r.trajectory || []).map(function(step, i) {
     nav.forEach(function (a) {
       a.classList.toggle("active", a.getAttribute("data-view") === name);
     });
-    var titleMap = {overview:"概览",dashboard:"工作台",tasks:"任务管理",packages:"任务包",history:"运行历史",badcases:"Badcase 管理","judge-trust":"判分置信度",memories:"经验库",compare:"多 Agent 对比",monitor:"监控",report:"评测报告",agent:"智能评测",settings:"设置",run:"运行详情",badcase:"Badcase 详情",memory:"经验详情",regression:"回归看板",login:"登录"};
+    var titleMap = {overview:"概览",dashboard:"工作台",tasks:"任务管理",packages:"任务包",history:"运行历史",badcases:"Badcase 管理","judge-trust":"判分置信度",memories:"经验库",compare:"多 Agent 对比",monitor:"监控",report:"评测报告",agent:"智能评测",settings:"设置",run:"运行详情",badcase:"Badcase 详情",memory:"经验详情",regression:"回归看板",login:"登录",users:"用户管理"};
     var pt = document.getElementById("page-title");
     if (pt) pt.textContent = titleMap[name] || "工作台";
     if (name === "run") { safeView(function(){ viewRunDetail(parts[1]); }); return; }
@@ -5320,6 +5384,9 @@ ${(r.trajectory || []).map(function(step, i) {
     var box = document.getElementById("side-user");
     if (!box) return;
     if (currentUser) {
+      // admin 显示用户管理导航
+      var navUsers = document.getElementById("nav-users");
+      if (navUsers) navUsers.style.display = currentUser.role === "admin" ? "" : "none";
       var roleBadge = currentUser.role === "admin"
         ? '<span style="background:var(--accent);color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;margin-left:4px;">admin</span>'
         : "";
