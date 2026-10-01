@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS runs (
     duration_s REAL NOT NULL DEFAULT 0,
     steps      INTEGER NOT NULL DEFAULT 0,
     batch_id   TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    owner_id   INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_runs_task   ON runs(task_id);
 CREATE INDEX IF NOT EXISTS idx_runs_agent  ON runs(agent_id);
@@ -46,7 +47,8 @@ CREATE TABLE IF NOT EXISTS batches (
     done_runs  INTEGER NOT NULL DEFAULT 0,
     summary    TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL,
-    finished_at TEXT NOT NULL DEFAULT ''
+    finished_at TEXT NOT NULL DEFAULT '',
+    owner_id    INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_batches_status ON batches(status);
 
@@ -66,7 +68,8 @@ CREATE TABLE IF NOT EXISTS badcases (
     regression_task_id TEXT NOT NULL DEFAULT '',
     pool        TEXT NOT NULL DEFAULT 'regression',  -- V5.1 P1-1：Case 四类资产池（regression/challenge/observation/golden）
     created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
+    updated_at  TEXT NOT NULL,
+    owner_id    INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_badcases_task    ON badcases(task_id);
 CREATE INDEX IF NOT EXISTS idx_badcases_agent   ON badcases(agent_id);
@@ -124,6 +127,17 @@ CREATE TABLE IF NOT EXISTS regression_schedule (
     next_run_at    TEXT NOT NULL DEFAULT '',
     updated_at     TEXT NOT NULL DEFAULT ''
 );
+
+-- 用户表（V6.0 P0：多用户认证）
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL DEFAULT 'user',
+    disabled      INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 """
 
 
@@ -158,6 +172,11 @@ class RunStore:
             bccols.add("pool")
         if "regression_task_id" not in bccols:
             self._conn.execute("ALTER TABLE badcases ADD COLUMN regression_task_id TEXT NOT NULL DEFAULT ''")
+        # V6.0 P0-5：owner_id 数据隔离（runs/batches/badcases）
+        for tbl in ("runs", "batches", "badcases"):
+            tcols = {r[1] for r in self._conn.execute(f"PRAGMA table_info({tbl})").fetchall()}
+            if "owner_id" not in tcols:
+                self._conn.execute(f"ALTER TABLE {tbl} ADD COLUMN owner_id INTEGER NOT NULL DEFAULT 1")
 
     def insert_run(self, rec: dict, batch_id: str = "") -> None:
         m = rec.get("metrics", {})
@@ -1040,6 +1059,70 @@ class RunStore:
         for sev, group in groupby(candidates, key=lambda x: x["severity"]):
             result.extend(sorted(group, key=lambda x: x["created_at"], reverse=True))
         return result[:limit]
+
+    # ===== 用户管理（V6.0 P0） =====
+    def create_user(self, username: str, password_hash: str, role: str = "user") -> int:
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
+                (username, password_hash, role, _now()),
+            )
+            self._conn.commit()
+            return cur.lastrowid
+
+    def get_user_by_username(self, username: str) -> dict | None:
+        with self._lock:
+            cur = self._conn.execute("SELECT * FROM users WHERE username = ?", (username,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            cols = [d[0] for d in cur.description]
+        return dict(zip(cols, row))
+
+    def get_user_by_id(self, user_id: int) -> dict | None:
+        with self._lock:
+            cur = self._conn.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            cols = [d[0] for d in cur.description]
+        return dict(zip(cols, row))
+
+    def list_users(self) -> list[dict]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT id, username, role, disabled, created_at FROM users ORDER BY id"
+            )
+            rows = cur.fetchall()
+            cols = [d[0] for d in cur.description]
+        return [dict(zip(cols, r)) for r in rows]
+
+    def update_user(self, user_id: int, **fields) -> bool:
+        allowed = {"password_hash", "role", "disabled"}
+        sets = []
+        vals = []
+        for k, v in fields.items():
+            if k in allowed:
+                sets.append(f"{k} = ?")
+                vals.append(v)
+        if not sets:
+            return False
+        vals.append(user_id)
+        with self._lock:
+            cur = self._conn.execute(f"UPDATE users SET {', '.join(sets)} WHERE id = ?", vals)
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def delete_user(self, user_id: int) -> bool:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def user_count(self) -> int:
+        with self._lock:
+            row = self._conn.execute("SELECT COUNT(*) FROM users").fetchone()
+        return row[0] if row else 0
 
     def close(self) -> None:
         with self._lock:

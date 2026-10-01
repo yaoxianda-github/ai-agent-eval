@@ -70,12 +70,32 @@
   }
   function fmtDur(s) { var d = Number(s); return isFinite(d) ? d.toFixed(1) + "s" : "-"; }
 
+  // ===== V6.0 P0：认证状态 =====
+  var authToken = localStorage.getItem("agenteval_token") || "";
+  var currentUser = null;
+  function setAuth(token, user) {
+    authToken = token || "";
+    currentUser = user || null;
+    if (token) localStorage.setItem("agenteval_token", token);
+    else localStorage.removeItem("agenteval_token");
+  }
+  function requireAuth() {
+    if (!authToken) { location.hash = "#/login"; return false; }
+    return true;
+  }
+
   function api(path, opts) {
     opts = opts || {};
     var cfg = { method: opts.method || "GET", headers: { "Content-Type": "application/json" } };
+    if (authToken) cfg.headers["Authorization"] = "Bearer " + authToken;
     if (opts.body) cfg.body = JSON.stringify(opts.body);
     return fetch(path, cfg).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (data) {
+        if (r.status === 401 && !path.startsWith("/api/auth/")) {
+          setAuth("", null);
+          if (location.hash !== "#/login") location.hash = "#/login";
+          throw new Error("未登录或登录已过期");
+        }
         if (!r.ok) throw new Error(data.detail || ("HTTP " + r.status));
         return data;
       });
@@ -5075,17 +5095,60 @@ ${(r.trajectory || []).map(function(step, i) {
     }
   }
 
+  // ===== V6.0 P0：登录页 =====
+  function viewLogin() {
+    renderHTML(
+      '<div style="max-width:380px;margin:60px auto;padding:32px;background:var(--card-bg);border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.08);">' +
+      '<h2 style="text-align:center;margin:0 0 8px;font-size:22px;">AI Agent 评测工作台</h2>' +
+      '<p style="text-align:center;color:var(--text-muted);font-size:13px;margin:0 0 24px;">请登录以继续</p>' +
+      '<div style="margin-bottom:16px;"><label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;">用户名</label>' +
+      '<input id="login-username" type="text" placeholder="admin" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box;"></div>' +
+      '<div style="margin-bottom:20px;"><label style="display:block;font-size:13px;font-weight:600;margin-bottom:6px;">密码</label>' +
+      '<input id="login-password" type="password" placeholder="••••••••" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box;"></div>' +
+      '<div id="login-error" style="color:#ef4444;font-size:13px;margin-bottom:12px;display:none;"></div>' +
+      '<button id="login-btn" class="btn btn-primary" style="width:100%;padding:11px;font-size:15px;">登 录</button>' +
+      '<p style="text-align:center;color:var(--text-muted);font-size:12px;margin-top:16px;">默认账号 admin / admin123（首次登录后请修改密码）</p>' +
+      '</div>'
+    );
+    var btn = document.getElementById("login-btn");
+    var doLogin = function() {
+      var u = document.getElementById("login-username").value.trim();
+      var pw = document.getElementById("login-password").value;
+      var err = document.getElementById("login-error");
+      err.style.display = "none";
+      btn.disabled = true; btn.textContent = "登录中...";
+      api("/api/auth/login", { method: "POST", body: { username: u, password: pw } })
+        .then(function(res) {
+          setAuth(res.token, res.user);
+          location.hash = "#/dashboard";
+        })
+        .catch(function(e) {
+          err.textContent = e.message;
+          err.style.display = "block";
+          btn.disabled = false; btn.textContent = "登 录";
+        });
+    };
+    btn.onclick = doLogin;
+    document.getElementById("login-password").onkeydown = function(e) { if (e.key === "Enter") doLogin(); };
+    document.getElementById("login-username").onkeydown = function(e) { if (e.key === "Enter") document.getElementById("login-password").focus(); };
+    setTimeout(function(){ document.getElementById("login-username").focus(); }, 100);
+  }
+
   function router() {
     var h = location.hash || "#/dashboard";
     var parts = h.replace(/^#\//, "").split("/");
     var name = parts[0] || "dashboard";
+    // 登录页不需要认证
+    if (name === "login") { safeView(viewLogin); return; }
+    // 路由守卫：未登录跳登录页
+    if (!authToken) { location.hash = "#/login"; return; }
     // 离开对比矩阵视图时停止批次轮询，避免后台空转
     if (name !== "compare" && mxState.timer) { clearInterval(mxState.timer); mxState.timer = null; }
     var nav = document.querySelectorAll(".nav a");
     nav.forEach(function (a) {
       a.classList.toggle("active", a.getAttribute("data-view") === name);
     });
-    var titleMap = {overview:"概览",dashboard:"工作台",tasks:"任务管理",packages:"任务包",history:"运行历史",badcases:"Badcase 管理","judge-trust":"判分置信度",memories:"经验库",compare:"多 Agent 对比",monitor:"监控",report:"评测报告",agent:"智能评测",settings:"设置",run:"运行详情",badcase:"Badcase 详情",memory:"经验详情",regression:"回归看板"};
+    var titleMap = {overview:"概览",dashboard:"工作台",tasks:"任务管理",packages:"任务包",history:"运行历史",badcases:"Badcase 管理","judge-trust":"判分置信度",memories:"经验库",compare:"多 Agent 对比",monitor:"监控",report:"评测报告",agent:"智能评测",settings:"设置",run:"运行详情",badcase:"Badcase 详情",memory:"经验详情",regression:"回归看板",login:"登录"};
     var pt = document.getElementById("page-title");
     if (pt) pt.textContent = titleMap[name] || "工作台";
     if (name === "run") { safeView(function(){ viewRunDetail(parts[1]); }); return; }
@@ -5238,6 +5301,47 @@ ${(r.trajectory || []).map(function(step, i) {
     if (e.key === "Escape") hideTooltip();
   });
 
+  // V6.0 P0：启动时验证 token，有效则加载用户信息
+  function initAuth() {
+    if (authToken) {
+      api("/api/auth/me").then(function(res) {
+        currentUser = res.user;
+        renderUserInfo();
+      }).catch(function() {
+        setAuth("", null);
+        renderUserInfo();
+        if (location.hash !== "#/login") location.hash = "#/login";
+      });
+    } else {
+      renderUserInfo();
+    }
+  }
+  function renderUserInfo() {
+    var box = document.getElementById("side-user");
+    if (!box) return;
+    if (currentUser) {
+      var roleBadge = currentUser.role === "admin"
+        ? '<span style="background:var(--accent);color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;margin-left:4px;">admin</span>'
+        : "";
+      box.innerHTML =
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<div style="width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;">' +
+        esc(currentUser.username.charAt(0).toUpperCase()) + '</div>' +
+        '<div style="flex:1;min-width:0;"><div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
+        esc(currentUser.username) + roleBadge + '</div></div>' +
+        '<a href="javascript:void(0)" id="logout-btn" style="font-size:12px;color:var(--text-muted);text-decoration:none;">退出</a>' +
+        '</div>';
+      var lb = document.getElementById("logout-btn");
+      if (lb) lb.onclick = function() {
+        setAuth("", null);
+        renderUserInfo();
+        location.hash = "#/login";
+      };
+    } else {
+      box.innerHTML = "";
+    }
+  }
+  initAuth();
   router();
 
   // V4.4 P1：指标解释链——三层指标因果关系可视化

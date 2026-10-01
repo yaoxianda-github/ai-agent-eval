@@ -24,8 +24,8 @@ from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Body, FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi import Depends, Body, FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from agent_eval import license as license_mod
@@ -220,6 +220,15 @@ def create_app(
     db_path = db_path if db_path is not None else results_dir.parent / "run_history.db"
     store = RunStore(db_path)
     store.rebuild(results_dir)
+
+    # V6.0 P0：首次启动自动创建 admin 账号（默认 admin/admin123，登录后请修改）
+    try:
+        from agent_eval.web.auth import hash_password
+        if store.user_count() == 0:
+            admin_id = store.create_user("admin", hash_password("admin123"), role="admin")
+            logger.info("首次启动 | 已创建默认 admin 账号（id=%s），请登录后修改密码", admin_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("admin 账号初始化跳过: %s", e)
 
     # 启动时清理僵尸 batch：状态为 running 但最后心跳超过 10 分钟（执行线程已死）
     # 用心跳而非创建时间判断：真正执行超过 1 小时的批次每完成一个 run 都会更新心跳，
@@ -789,6 +798,126 @@ def create_app(
                     store.delete_batch(ob["batch_id"])
 
     # ---------- 元信息 / 任务 / 后端 ----------
+    # ===== V6.0 P0：用户认证 =====
+    from agent_eval.web.auth import (
+        create_token, decode_token, extract_token, hash_password, verify_password,
+    )
+    from fastapi import Header, HTTPException, Request
+
+    def get_current_user(authorization: str | None = Header(default=None)) -> dict:
+        """从 Authorization header 解析当前用户，未认证抛 401。"""
+        token = extract_token(authorization)
+        if not token:
+            raise HTTPException(status_code=401, detail="未登录")
+        payload = decode_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
+        user = store.get_user_by_id(payload["sub"])
+        if not user or user.get("disabled"):
+            raise HTTPException(status_code=401, detail="账号已禁用")
+        return user
+
+    def get_current_user_optional(authorization: str | None = Header(default=None)) -> dict | None:
+        """可选认证：有 token 则返回用户，无则返回 None（不抛 401）。"""
+        token = extract_token(authorization)
+        if not token:
+            return None
+        payload = decode_token(token)
+        if not payload:
+            return None
+        return store.get_user_by_id(payload["sub"])
+
+    @app.post("/api/auth/register")
+    def auth_register(body: dict, current_user: dict = Depends(get_current_user_optional)) -> dict:
+        """注册新用户。首个用户自动成为 admin；之后仅 admin 可注册。"""
+        username = (body.get("username") or "").strip()
+        password = body.get("password") or ""
+        if len(username) < 3:
+            raise HTTPException(status_code=400, detail="用户名至少 3 个字符")
+        if len(password) < 6:
+            raise HTTPException(status_code=400, detail="密码至少 6 个字符")
+        # 首个用户：直接注册为 admin
+        if store.user_count() == 0:
+            uid = store.create_user(username, hash_password(password), role="admin")
+            return {"status": "ok", "user_id": uid, "role": "admin", "note": "首个用户已设为 admin"}
+        # 非首个：必须 admin 才能注册
+        if not current_user or current_user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="仅 admin 可注册新用户")
+        if store.get_user_by_username(username):
+            raise HTTPException(status_code=400, detail="用户名已存在")
+        role = body.get("role", "user")
+        if role not in ("admin", "user"):
+            role = "user"
+        uid = store.create_user(username, hash_password(password), role=role)
+        return {"status": "ok", "user_id": uid, "role": role}
+
+    @app.post("/api/auth/login")
+    def auth_login(body: dict) -> dict:
+        username = (body.get("username") or "").strip()
+        password = body.get("password") or ""
+        user = store.get_user_by_username(username)
+        if not user or not verify_password(password, user["password_hash"]):
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+        if user.get("disabled"):
+            raise HTTPException(status_code=403, detail="账号已禁用")
+        token = create_token(user["id"], user["username"], user["role"])
+        return {
+            "status": "ok",
+            "token": token,
+            "user": {"id": user["id"], "username": user["username"], "role": user["role"]},
+        }
+
+    @app.get("/api/auth/me")
+    def auth_me(current_user: dict = Depends(get_current_user)) -> dict:
+        return {
+            "status": "ok",
+            "user": {
+                "id": current_user["id"],
+                "username": current_user["username"],
+                "role": current_user["role"],
+                "created_at": current_user["created_at"],
+            },
+        }
+
+    @app.post("/api/auth/change-password")
+    def auth_change_password(body: dict, current_user: dict = Depends(get_current_user)) -> dict:
+        old_pw = body.get("old_password") or ""
+        new_pw = body.get("new_password") or ""
+        if not verify_password(old_pw, current_user["password_hash"]):
+            raise HTTPException(status_code=400, detail="原密码错误")
+        if len(new_pw) < 6:
+            raise HTTPException(status_code=400, detail="新密码至少 6 个字符")
+        store.update_user(current_user["id"], password_hash=hash_password(new_pw))
+        return {"status": "ok", "message": "密码已更新"}
+
+    @app.get("/api/auth/requires-auth")
+    def auth_requires_auth() -> dict:
+        """前端判断是否需要登录：用户数 > 0 时需要认证。"""
+        return {"requires_auth": store.user_count() > 0, "user_count": store.user_count()}
+
+    # ===== V6.0 P0-4：认证中间件 =====
+    # 写操作（POST/PUT/DELETE/PATCH）必须登录；读操作可选（前端路由守卫已保护）
+    @app.middleware("http")
+    async def _auth_middleware(request, call_next):
+        path = request.url.path
+        # 跳过认证路由、静态资源、首页
+        if path.startswith("/api/auth/") or path.startswith("/static/") or path == "/":
+            return await call_next(request)
+        # 解析 token
+        auth_header = request.headers.get("authorization", "")
+        token = extract_token(auth_header)
+        if token:
+            payload = decode_token(token)
+            if payload:
+                user = store.get_user_by_id(payload["sub"])
+                if user and not user.get("disabled"):
+                    request.state.current_user = user
+        # 写操作需要认证（仅当已有用户时强制，首次部署无用户时放行）
+        if request.method in ("POST", "PUT", "DELETE", "PATCH") and store.user_count() > 0:
+            if not hasattr(request.state, "current_user"):
+                return JSONResponse(status_code=401, content={"detail": "未登录或登录已过期"})
+        return await call_next(request)
+
     @app.get("/api/meta")
     def api_meta() -> dict:
         return {
