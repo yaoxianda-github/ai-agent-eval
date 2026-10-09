@@ -44,6 +44,8 @@ ground_truth:
       pattern: "72"
       desc: 答案不包含 72（FS-400 的硬盘质保，干扰项）
 
+required_tools: [search_kb]
+expected_trajectory: [search_kb, write_file]
 verifier: deterministic
 weight: 1.0
 cost_budget_usd: 0.1

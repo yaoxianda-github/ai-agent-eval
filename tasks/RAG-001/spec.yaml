@@ -39,6 +39,8 @@ ground_truth:
       pattern: "24"
       desc: 答案不包含 24（避免混淆 X1 的旧质保期）
 
+required_tools: [search_kb]
+expected_trajectory: [search_kb, write_file]
 verifier: deterministic
 weight: 1.0
 cost_budget_usd: 0.1

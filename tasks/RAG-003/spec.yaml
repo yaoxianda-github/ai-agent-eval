@@ -38,6 +38,8 @@ ground_truth:
       pattern: "Q9的水箱容量为2.4|Q9的水箱容量是2.4|Q9水箱容量为2.4|Q9水箱是2.4|Q9的水箱为2.4"
       desc: 答案不把 2.4 当作 Q9 的答案（允许在解释中提及 Q7 的 2.4L 并说明不能用）
 
+required_tools: [search_kb]
+expected_trajectory: [search_kb, write_file]
 verifier: deterministic
 weight: 1.0
 cost_budget_usd: 0.1

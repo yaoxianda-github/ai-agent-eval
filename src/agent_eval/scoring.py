@@ -176,6 +176,76 @@ def classify_failure(verdicts: list[dict], steps: list[dict] | None = None) -> d
             "detail": f"未匹配到明确工程错误，可能为模型语义理解问题: {', '.join(v.get('checkpoint_id') or v.get('id','?') for v in failed_verdicts)}"}
 
 
+def trajectory_match_score(actual_tools: list[str], expected_tools: list[str]) -> dict | None:
+    """V5.3 P0-1：Trajectory Match Score 轨迹匹配分。
+
+    参考腾讯 ADP《Harness Engineering》：实际执行路径与最优路径的编辑距离，
+    除以最优路径长度——衡量"绕了多少冤枉路"。
+    两个 Agent 任务成功率一样，绕路多的那个成本高、时延长、失败面大。
+
+    算法：
+    - 用 Levenshtein 编辑距离（插入/删除/替换）比较实际工具序列与期望序列
+    - match_score = 1 - edit_distance / max(len(expected), len(actual))，0~1
+    - 额外输出：lcs_len（最长公共子序列长度，衡量"关键步骤覆盖"）
+    - 无期望序列时返回 None（不惩罚没有参考路径的任务）
+
+    返回: {"edit_distance", "expected_len", "actual_len", "match_score",
+           "lcs_len", "lcs_coverage", "grade", "missed_steps", "extra_steps"}
+    """
+    expected_tools = [t for t in (expected_tools or []) if t]
+    if not expected_tools:
+        return None
+    actual_tools = [t for t in (actual_tools or []) if t]
+
+    # Levenshtein 编辑距离（DP）
+    n, m = len(expected_tools), len(actual_tools)
+    prev = list(range(m + 1))
+    for i in range(1, n + 1):
+        cur = [i] + [0] * m
+        for j in range(1, m + 1):
+            cost = 0 if expected_tools[i - 1] == actual_tools[j - 1] else 1
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+        prev = cur
+    edit_distance = prev[m]
+    denom = max(n, m, 1)
+    match_score = round(1.0 - edit_distance / denom, 3)
+
+    # 最长公共子序列（衡量关键步骤覆盖）
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            if expected_tools[i - 1] == actual_tools[j - 1]:
+                dp[i][j] = dp[i - 1][j - 1] + 1
+            else:
+                dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
+    lcs_len = dp[n][m]
+    lcs_coverage = round(lcs_len / n, 3) if n else 1.0
+
+    # 遗漏的关键步骤（期望有但实际没调用的工具）
+    expected_set = set(expected_tools)
+    actual_set = set(actual_tools)
+    missed_steps = [t for t in expected_tools if t not in actual_set]
+    extra_steps = [t for t in actual_tools if t not in expected_set]
+
+    grade = (
+        "excellent" if match_score >= 0.9
+        else "good" if match_score >= 0.75
+        else "fair" if match_score >= 0.6
+        else "poor"
+    )
+    return {
+        "edit_distance": edit_distance,
+        "expected_len": n,
+        "actual_len": m,
+        "match_score": match_score,
+        "lcs_len": lcs_len,
+        "lcs_coverage": lcs_coverage,
+        "grade": grade,
+        "missed_steps": missed_steps,
+        "extra_steps": extra_steps,
+    }
+
+
 def score_trajectory(steps: list[dict] | None, max_steps: int = None, max_errors: int = None) -> dict:
     """计算轨迹指标评分。
     

@@ -168,6 +168,10 @@ class TaskSpec:
     # V4.0 P2：Case Contract（运行前冻结的契约约束，参考 ODAR 文章 4.1 节）
     required_skills: list[str] = field(default_factory=list)  # 必需触发的 Skill 名称列表
     required_tools: list[str] = field(default_factory=list)  # 必需调用的工具名称列表
+    # V5.3 P0-1：期望工具调用序列（最优路径）——用于 Trajectory Match Score 轨迹匹配分
+    # 例：["search", "read_file", "write_file"] 表示"检索→读取→写入"的理想路径
+    # 留空则不计算轨迹匹配分（不惩罚没有参考路径的任务）
+    expected_trajectory: list[str] = field(default_factory=list)
     output_contract: str = ""  # 输出契约描述（如 "json"、"markdown报告"、"csv文件"）
     scenario_type: str = "happy_path"  # V4.1 P1：测试集场景类型（happy_path正常/boundary边界/error_recovery异常恢复/adversarial对抗/off_topic离题诱导 V4.3 P2-2）
     eval_type: str = "regression"  # P1 改进：能力评测 vs 回归评测（capability能力测试要难/regression回归测试要稳）
@@ -222,6 +226,7 @@ class TaskSpec:
             forbidden_tools=list(data.get("forbidden_tools", [])),
             required_skills=list(data.get("required_skills", [])),
             required_tools=list(data.get("required_tools", [])),
+            expected_trajectory=list(data.get("expected_trajectory", [])),
             output_contract=str(data.get("output_contract", "")),
             scenario_type=str(data.get("scenario_type", "happy_path")),
             eval_type=str(data.get("eval_type", "regression")),  # P1 改进

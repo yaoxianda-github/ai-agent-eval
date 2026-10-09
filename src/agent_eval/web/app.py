@@ -420,6 +420,7 @@ def create_app(
                     "task_level": rec.get("task_level", "L2"),
                     "task_id": rec.get("task_id", ""),
                     "abstain": run_abstained(rec),   # V5.1 P0：unknown 独立标记
+                    "chain": (rec.get("metrics") or {}).get("chain"),  # V5.3 P0-2：链路六环节
                 }
             )
 
@@ -495,6 +496,9 @@ def create_app(
                 c = cells[f"{a}|{t}"]
                 if c["n"] == 0:
                     continue
+                latest_chain = None
+                if c["runs"]:
+                    latest_chain = c["runs"][-1].get("chain")
                 agent_task_results.append({
                     "task_id": t,
                     "task_passed": c["pass_rate"] >= 0.999,
@@ -503,6 +507,7 @@ def create_app(
                         "prompt_tokens": sum(x["prompt_tokens"] for x in c["runs"]),
                         "completion_tokens": sum(x["completion_tokens"] for x in c["runs"]),
                     },
+                    "chain": latest_chain,  # V5.3 P0-2：链路六环节（供 gate 聚合）
                 })
             ge = evaluate_gate(
                 agent_task_results,

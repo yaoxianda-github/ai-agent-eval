@@ -27,7 +27,8 @@ from agent_eval.judge import judge_llm
 from agent_eval.jev_judge import judge_jev, smart_judge
 from agent_eval.log import get_logger, run_logger
 from agent_eval.mcp_env import MCPEnvironment
-from agent_eval.scoring import score_task
+from agent_eval.chain_gate import evaluate_chain
+from agent_eval.scoring import score_task, trajectory_match_score
 from agent_eval.spec import TaskSpec
 from agent_eval.traces import tool_category
 from agent_eval.verifiers import run_checkpoints
@@ -214,6 +215,11 @@ def run_one(
             os.environ.update(mcp_env_vars)
         else:
             _saved_env = {}
+
+        # P1-2：用户级 env（~/.zshrc 加载的 API Key 等）恢复快照
+        # 与 _saved_env（MCP 注入）区分：MCP 变量在子进程执行期间注入，用户级
+        # 变量用于跨 run 隔离——防止某个 run 修改 env 后污染后续 run
+        _user_env_saved = {}
 
         # 后端默认超时取任务 spec 的 timeout_s，可被 config 覆盖；max_steps 同理
         agent_kwargs = dict(config.get("agent", {}))
@@ -455,6 +461,20 @@ def run_one(
         if step_efficiency:
             metrics["step_efficiency"] = step_efficiency
 
+        # V5.3 P0-1：Trajectory Match Score 轨迹匹配分（路径层第二道闸）
+        # 实际执行路径 vs spec 声明的期望路径（最优路径）的编辑距离
+        # 抓"绕冤枉路"——成功率相同的两个 Agent，绕路多的成本高、时延长、失败面大
+        if getattr(task, "expected_trajectory", None):
+            run_tool_seq = []
+            for t in traces:
+                tool_name = t.get("tool") or t.get("action") or ""
+                if tool_name and tool_name != "finish" and t.get("kind") not in ("intent", "llm"):
+                    run_tool_seq.append(tool_name)
+            tm = trajectory_match_score(run_tool_seq, task.expected_trajectory)
+            if tm:
+                metrics["trajectory_match"] = tm
+
+
         # V4.2 P0：Decision 层校验——required_tools/required_skills 运行时检查
         # 文章核心观点：本应调用权威数据源，却用模型记忆直接回答 = Decision 失败
         decision_layer = _check_decision_layer(task, traces, skill_results)
@@ -480,6 +500,11 @@ def run_one(
                 "detail": action_layer["summary"],
                 "category": "gate",
             })
+
+        # V5.3 P0-2：链路六环节独立门禁（意图/工具/参数/证据/状态/表达）
+        # 任何一环出问题单独标记，不必等到端到端失败
+        # 放在 decision/action verdict 之后，确保六环节能拿到全部链路信号
+        metrics["chain"] = evaluate_chain(task, verdicts, steps=result.steps, traces=traces)
 
         # V4.2 P0：Completed ≠ Correct ≠ Ready for Release 三态分离
         # completed: Runtime 认为执行结束（status 字段）

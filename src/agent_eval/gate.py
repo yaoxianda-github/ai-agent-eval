@@ -270,6 +270,61 @@ def evaluate_gate(
     )
     metrics.append(m7)
 
+    # ===== 指标8（V5.3 P0-2）：链路六环节独立门禁 =====
+    # 参考腾讯 ADP：意图/工具/参数/证据/状态/表达各设阈值，任何一环出问题单独报警
+    # 从 task_results 的 chain 字段聚合（runner 已按任务计算六环节 rate）
+    chain_names = ["intent", "tool", "param", "evidence", "state", "expression"]
+    chain_labels = ["意图识别", "工具选择", "参数构造", "证据使用", "状态管理", "表达输出"]
+    # 只聚合有 chain 数据的任务（旧任务无此字段，跳过避免误报）
+    chain_tasks = [r for r in task_results if isinstance(r.get("chain"), dict)]
+    for name, label in zip(chain_names, chain_labels):
+        if not chain_tasks:
+            # 无任何任务带 chain 数据 → 不阻断（兼容旧批次）
+            metrics.append(GateMetricResult(
+                name=f"chain_{name}",
+                label=f"链路·{label}",
+                passed=True,
+                actual=1.0,
+                threshold=0.0,
+                unit="%",
+                detail="旧批次无链路数据，跳过",
+                blocking=False,
+            ))
+            continue
+        rates = []
+        details = []
+        for r in chain_tasks:
+            link = r.get("chain", {}).get(name)
+            if isinstance(link, dict) and "rate" in link:
+                rates.append(float(link["rate"]))
+                if not link.get("passed") and len(details) < 2:
+                    details.append(f"{r.get('task_id','?')}:{link.get('detail','')[:60]}")
+        if not rates:
+            metrics.append(GateMetricResult(
+                name=f"chain_{name}",
+                label=f"链路·{label}",
+                passed=True,
+                actual=1.0,
+                threshold=0.0,
+                unit="%",
+                detail="任务无该环节数据，跳过",
+                blocking=False,
+            ))
+            continue
+        avg_rate = sum(rates) / len(rates)
+        thr = 0.8  # 链路环节统一阈值 80%
+        metrics.append(GateMetricResult(
+            name=f"chain_{name}",
+            label=f"链路·{label}",
+            passed=avg_rate >= thr,
+            actual=round(avg_rate, 3),
+            threshold=thr,
+            unit="%",
+            detail=f"{len(rates)}个任务平均 {avg_rate:.0%}"
+                   + (f"；未达标: {'; '.join(details)}" if details else ""),
+            blocking=True,
+        ))
+
     # 整体判定：全部通过 = PASS
     all_passed = all(m.passed for m in metrics)
     failed = [m.label for m in metrics if not m.passed]

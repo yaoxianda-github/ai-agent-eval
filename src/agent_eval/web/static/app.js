@@ -3148,6 +3148,56 @@ ${b.fix_plan || '暂无'}
                 blockersHtml +
               '</div>';
           }
+          // V5.3 P0：链路六环节 + 轨迹匹配分（参考腾讯 ADP：意图/工具/参数/证据/状态/表达独立报警）
+          var chainHtml = "";
+          var chain = m.chain;
+          if (chain && typeof chain === "object") {
+            var chainMeta = [
+              { k: "intent", cn: "意图识别", d: "是否沿期望工具路径执行" },
+              { k: "tool", cn: "工具选择", d: "必选工具是否被正确触发" },
+              { k: "param", cn: "参数构造", d: "工具调用参数是否通过断言" },
+              { k: "evidence", cn: "证据使用", d: "检索/读取证据工具是否使用" },
+              { k: "state", cn: "状态管理", d: "执行过程是否有异常/超时信号" },
+              { k: "expression", cn: "表达输出", d: "输出是否符合契约" }
+            ];
+            var chainRows = chainMeta.map(function (cm) {
+              var c = chain[cm.k];
+              if (!c || c.rate === undefined) return "";
+              var pct = Math.round((c.rate || 0) * 100);
+              var ok = !!c.passed;
+              var col = ok ? "#16a34a" : "#dc2626";
+              return '<div class="chain-row">' +
+                '<span class="chain-key" style="background:' + col + ';">' + cm.k + '</span>' +
+                '<span class="chain-name" title="' + esc(cm.d) + '"><b>' + cm.cn + '</b></span>' +
+                '<span class="chain-bar"><span class="chain-fill" style="width:' + pct + '%;background:' + col + ';"></span></span>' +
+                '<b class="chain-val" style="color:' + col + ';">' + pct + '%</b>' +
+                '<span class="chain-note">' + esc(c.detail || "") + '</span>' +
+              '</div>';
+            }).join("");
+            chainHtml = '<div class="chain-panel" style="margin-top:14px;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">' +
+              '<div class="chain-title" style="font-weight:600;margin-bottom:8px;">链路六环节 <span class="cap-hint" title="参考腾讯 Agent 评测实践：意图识别/工具选择/参数构造/证据使用/状态管理/表达输出各设阈值独立报警，任何一环不达标即阻断发布">ⓘ 判定逻辑</span></div>' +
+              chainRows +
+            '</div>';
+          }
+          // V5.3 P0：轨迹匹配分（编辑距离 vs 最优路径长度）
+          var tm = m.trajectory_match;
+          if (tm && tm.match_score !== undefined) {
+            var tmPct = Math.round(tm.match_score * 100);
+            var tmCol = tm.match_score >= 0.8 ? "#16a34a" : tm.match_score >= 0.5 ? "#f59e0b" : "#dc2626";
+            var tmGradeCn = { excellent: "优秀", good: "良好", fair: "一般", poor: "较差" }[tm.grade] || tm.grade;
+            var tmDetail = [];
+            if (tm.missed_steps && tm.missed_steps.length) tmDetail.push("漏走: " + tm.missed_steps.join(", "));
+            if (tm.extra_steps && tm.extra_steps.length) tmDetail.push("绕路: " + tm.extra_steps.join(", "));
+            chainHtml += '<div class="chain-panel" style="margin-top:10px;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">' +
+              '<div class="chain-title" style="font-weight:600;margin-bottom:6px;">轨迹匹配分 <span class="cap-hint" title="编辑距离 1 - edit_distance / max(期望路径, 实际路径) · 衡量 Agent 是否走最优路径而非绕路">ⓘ 算法</span></div>' +
+              '<div style="display:flex;align-items:center;gap:10px;">' +
+                '<b style="color:' + tmCol + ';font-size:18px;">' + tmPct + '</b>' +
+                '<span class="chain-val" style="color:' + tmCol + ';">' + tmGradeCn + '</span>' +
+                '<span class="muted" style="font-size:12px;">期望 ' + tm.expected_len + ' 步 · 实际 ' + tm.actual_len + ' 步 · LCS 覆盖 ' + Math.round((tm.lcs_coverage || 0) * 100) + '%</span>' +
+              '</div>' +
+              (tmDetail.length ? '<div class="muted" style="font-size:12px;margin-top:4px;">' + tmDetail.join(" · ") + '</div>' : '') +
+            '</div>';
+          }
           return '<div class="odar-panel">' +
             '<div class="odar-title">ODAR 四层评测框架 <span class="cap-hint" title="参考《工具型 Agent 的分层评测方法与机制验证》：Outcome结果可交付 / Decision路线选择 / Action执行正确 / Reliability稳定复现。Completed ≠ Correct ≠ Ready for Release。">ⓘ 判定逻辑</span></div>' +
             '<div class="odar-grid">' +
@@ -3164,6 +3214,7 @@ ${b.fix_plan || '暂无'}
             }).join("") +
             '</div>' +
             threeStateHtml +
+            chainHtml +
             '</div>';
         })() +
         '<div class="ea-grid">' +
@@ -5470,6 +5521,8 @@ ${(r.trajectory || []).map(function(step, i) {
       api("/api/auth/me").then(function(res) {
         currentUser = res.user;
         renderUserInfo();
+        // 异步恢复用户信息后重新渲染当前路由，避免刷新后权限判断滞后
+        if (typeof router === "function") router();
       }).catch(function() {
         setAuth("", null);
         renderUserInfo();

@@ -47,6 +47,8 @@ ground_truth:
       pattern: "来源|引用|参考|\\[|\\]"
       desc: 答案包含引用标记（来源/引用/参考/方括号等）
 
+required_tools: [search_kb]
+expected_trajectory: [search_kb, write_file]
 verifier: deterministic
 weight: 1.0
 cost_budget_usd: 0.1
